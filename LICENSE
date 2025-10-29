@@ -1,0 +1,44 @@
+MIT License + Addtional Terms
+
+Copyright (c) 2025 TheHolyOneZ
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+ADDITIONAL TERMS:
+1. The file **main.py**, and any version or derivative thereof, remains under
+   the MIT License and can be freely modified, provided that this license
+   and the original copyright notice remain intact.
+
+2. The **CreditsButton** class (as originally defined in the Software) must
+   remain present in all distributed, forked, or modified versions of the Software.
+   Its functionality and visibility must not be removed or obscured.
+
+   Specifically:
+   - The Credits Button must continue to exist and be displayed in the same
+     interface location as in the original version.
+   - The Credits Button must contain visible credit to the original author,
+     **"TheHolyOneZ"**, and a link or reference to the original repository:
+     (placeholder github link)
+   - The textual credit contents (embed fields such as “Created By”, “License”,
+     and related original attribution text) must remain clearly visible and
+     intact. Additional information may be added, but the original credits must
+     not be removed, replaced, or hidden.
+
+3. Altering, deleting, or renaming the author’s name **"TheHolyOneZ"** in this
+   license or within the Credits Button is strictly prohibited.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
