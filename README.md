@@ -4,7 +4,7 @@ A production-ready, enterprise-grade Discord bot framework featuring atomic file
 
 [![Python Version](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![discord.py](https://img.shields.io/badge/discord.py-2.0+-blue.svg)](https://github.com/Rapptz/discord.py)
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+
 
 ## ✨ Core Features
 
