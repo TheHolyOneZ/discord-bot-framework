@@ -27,6 +27,8 @@ from atomic_file_system import (
 from rich.console import Console 
 from rich.panel import Panel
 
+
+
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
 BOT_OWNER_ID = int(os.getenv("BOT_OWNER_ID", 0))
