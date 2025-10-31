@@ -26,6 +26,11 @@ A production-ready, enterprise-grade Discord bot framework featuring atomic file
 - **Cooldown Management**: Built-in rate limiting per user/guild/channel
 - **Auto-Delete Messages**: Automatic cleanup of success/error messages
 
+### 🛒 Extension Marketplace
+- **Integrated Marketplace**: Browse, search, and install official extensions directly from within the bot.
+- **Custom License Agreement**: Mandatory acceptance of licensing terms before installing extensions.
+- **ZygnalID Support**: Unique ID generation for extension tracking and dedicated support.
+
 ### 📚 User Interface
 - **Interactive Help Menu**: Dropdown-based navigation with pagination
 - **Category Organization**: Automatic command grouping by cog
@@ -138,7 +143,9 @@ discord-bot-framework/
 ├── extensions/                # Your extension modules (auto-loaded)
 │   ├── example.py
 │   ├── moderation.py
+│   ├── marketplace.py         # Extension Marketplace 
 │   └── fun.py
+│    
 ├── data/                      # Auto-generated data directory
 │   ├── bot.db                 # SQLite database
 │   └── bot.db.backup_*        # Automatic database backups
@@ -164,6 +171,7 @@ discord-bot-framework/
 | `!discordbotframework` | Framework information and features | 10s |
 | `!setprefix <prefix>` | Set custom prefix for your server | - |
 | `!config [command] [role]` | Configure command permissions | - |
+| `!marketplace` / `/marketplace` | Browse, search, and manage official extensions | 10s |
 
 ### Owner-Only Commands
 
@@ -174,6 +182,8 @@ discord-bot-framework/
 | `!load <extension>` | Load an extension | Bot Owner |
 | `!unload <extension>` | Unload an extension | Bot Owner |
 | `!atomictest` | Test atomic file operations | Bot Owner |
+| `/marketplace myid` | Retrieve the bot's unique ZygnalID for support purposes | Bot Owner |
+
 
 ## 🔧 Creating Extensions
 
