@@ -1,2 +1,5 @@
 discord.py==2.6.3
 python-dotenv==1.0.0
+aiosqlite==0.21.0
+aiofiles==24.1.0
+rich==14.0.0

@@ -26,7 +26,7 @@ ADDITIONAL TERMS:
      interface location as in the original version.
    - The Credits Button must contain visible credit to the original author,
      **"TheHolyOneZ"**, and a link or reference to the original repository:
-     (placeholder github link)
+     https://github.com/TheHolyOneZ/discord-bot-framework
    - The textual credit contents (embed fields such as “Created By”, “License”,
      and related original attribution text) must remain clearly visible and
      intact. Additional information may be added, but the original credits must
@@ -34,6 +34,13 @@ ADDITIONAL TERMS:
 
 3. Altering, deleting, or renaming the author’s name **"TheHolyOneZ"** in this
    license or within the Credits Button is strictly prohibited.
+
+4. The **discordbotframework** command (including its aliases **framework** and
+   **botinfo**) as defined in the Software must remain intact. This includes
+   its function body and the original list of "Framework Features" and "User
+   Commands" in its generated embed. Functionality or content that provides
+   credit or information about the original framework must not be removed,
+   modified, or obscured. Additional fields or information may be added.
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
