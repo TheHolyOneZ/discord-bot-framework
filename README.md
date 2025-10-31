@@ -779,7 +779,6 @@ Need help? Have questions?
 **TheHolyOneZ**
 
 - GitHub: [@TheHolyOneZ](https://github.com/TheHolyOneZ)
-- Repository: [discord-bot-framework](https://github.com/TheHolyOneZ/discord-bot-framework)
 
 ---
 
