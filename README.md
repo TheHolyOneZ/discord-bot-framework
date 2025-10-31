@@ -7,6 +7,9 @@ A production-ready, enterprise-grade Discord bot framework featuring atomic file
 
 > Showcase images are available in the Images directory within this repository.
 
+
+### Website: https://zygnalbot.com/bot-framework/
+
 ## ✨ Core Features
 
 ### 🔧 System Architecture
