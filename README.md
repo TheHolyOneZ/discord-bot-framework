@@ -5,6 +5,7 @@ A production-ready, enterprise-grade Discord bot framework featuring atomic file
 [![Python Version](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![discord.py](https://img.shields.io/badge/discord.py-2.0+-blue.svg)](https://github.com/Rapptz/discord.py)
 
+> Showcase images are available in the Images directory within this repository.
 
 ## ✨ Core Features
 
