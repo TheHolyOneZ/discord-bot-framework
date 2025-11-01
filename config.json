@@ -1,0 +1,42 @@
+{
+  "prefix": "!",
+  "owner_ids": [],
+  "auto_reload": true,
+  
+  "status": {
+    "type": "watching",
+    "text": "{guilds} servers"
+  },
+  
+  "database": {
+    "path": "./data/bot.db"
+  },
+  
+  "logging": {
+    "level": "INFO",
+    "max_bytes": 10485760,
+    "backup_count": 5
+  },
+  
+  "extensions": {
+    "auto_load": true,
+    "blacklist": []
+  },
+  
+  "cooldowns": {
+    "default_rate": 3,
+    "default_per": 5.0
+  },
+  
+  "command_permissions": {},
+  
+  "_comment_framework": "Framework cog configuration - controls internal systems",
+  "framework": {
+    "load_cogs": true,
+    "enable_event_hooks": true,
+    "enable_plugin_registry": true,
+    "enable_framework_diagnostics": true,
+    "enable_slash_command_limiter": true,
+    "_comment": "Set any to false to disable that framework feature"
+  }
+}

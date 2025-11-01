@@ -434,7 +434,7 @@ class ExtensionMarketplace(commands.Cog):
         self.bot = bot
         self.api_url = "https://zygnalbot.com/extension/api/extensions.php?action=list"
         self.extensions_folder = "./extensions"
-        self.data_folder = "./marketplace"
+        self.data_folder = "./data/marketplace"
         self.zygnal_id_file = os.path.join(self.data_folder, "ZygnalID.txt")
         self.license_accepted_file = os.path.join(self.data_folder, "license_accepted.json")
         self.cache = {}
@@ -759,7 +759,7 @@ class ExtensionMarketplace(commands.Cog):
     async def fix_dependencies(self, ctx):
         await ctx.defer()
 
-        # NOTE: Updated log file path
+
         log_file_path = "botlogs/current_run.log"
         
         if not os.path.exists(log_file_path):
@@ -771,8 +771,8 @@ class ExtensionMarketplace(commands.Cog):
             with open(log_file_path, 'r', encoding='utf-8') as f:
                 log_content = f.read()
             
-            # Regex to find ModuleNotFoundError and extract the module name
-            # Looks for 'No module named 'PACKAGE_NAME''
+
+
             pattern = re.compile(r"ModuleNotFoundError: No module named '([\w]+)'")
             
             for match in pattern.finditer(log_content):
@@ -799,7 +799,7 @@ class ExtensionMarketplace(commands.Cog):
         
         for module in missing_modules:
             try:
-                # Use subprocess to run pip install
+
                 process = await asyncio.create_subprocess_exec(
                     'pip', 'install', module,
                     stdout=asyncio.subprocess.PIPE,
@@ -810,20 +810,20 @@ class ExtensionMarketplace(commands.Cog):
                 if process.returncode == 0:
                     successfully_installed.append(module)
                 else:
-                    # Truncate stderr for cleaner output
+
                     error_output = stderr.decode(errors='ignore').strip()
                     failed_to_install.append(f"{module} (Error: {error_output[:100]}...)")
                     logger.error(f"Failed to install {module}. Error: {error_output}")
                     
             except FileNotFoundError:
-                # This handles cases where 'pip' command is not found
+
                 failed_to_install.append(f"{module} (Error: pip command not found)")
                 logger.error("PIP command not found. Ensure it is in the bot's path.")
             except Exception as e:
                 failed_to_install.append(f"{module} (Error: {e})")
                 logger.error(f"Installation of {module} failed: {e}")
 
-        # Final Report
+
         report_embed = discord.Embed(title="⚙️ Dependency Installation Report", color=discord.Color.blue())
         
         if successfully_installed:
@@ -842,7 +842,7 @@ class ExtensionMarketplace(commands.Cog):
             report_embed.color = discord.Color.orange()
 
         if successfully_installed:
-            # Get prefix for instruction
+
             prefix = await self.bot.get_prefix(ctx.message)
             if isinstance(prefix, list):
                 prefix = prefix[0]

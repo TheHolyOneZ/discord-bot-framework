@@ -178,7 +178,59 @@ class BotFrameWork(commands.Bot):
         self._slash_synced = False
         self.bot_owner_id = BOT_OWNER_ID
 
+    async def load_framework_cogs(self):
+        
+        loaded = 0
+        failed = 0
+        
+        cogs_path = Path("./cogs")
+        if not cogs_path.exists():
+            cogs_path.mkdir(parents=True)
+            logger.info("Created cogs directory for framework modules")
+            return
+        
 
+        load_order = ["event_hooks", "plugin_registry", "framework_diagnostics"]
+        
+        for cog_name in load_order:
+            cog_file = cogs_path / f"{cog_name}.py"
+            if not cog_file.exists():
+                continue
+            
+
+            if not self.config.get(f"framework.enable_{cog_name}", True):
+                logger.info(f"Framework cog disabled in config: {cog_name}")
+                continue
+            
+            try:
+                await self.load_extension(f"cogs.{cog_name}")
+                logger.info(f"Framework cog loaded: {cog_name}")
+                loaded += 1
+            except Exception as e:
+                logger.error(f"Failed loading framework cog {cog_name}: {e}")
+                logger.debug(traceback.format_exc())
+                failed += 1
+        
+
+        for filepath in cogs_path.glob("*.py"):
+            cog_name = filepath.stem
+            if cog_name in load_order:
+                continue  
+            
+            if not self.config.get(f"framework.enable_{cog_name}", True):
+                logger.info(f"Framework cog disabled in config: {cog_name}")
+                continue
+            
+            try:
+                await self.load_extension(f"cogs.{cog_name}")
+                logger.info(f"Framework cog loaded: {cog_name}")
+                loaded += 1
+            except Exception as e:
+                logger.error(f"Failed loading framework cog {cog_name}: {e}")
+                logger.debug(traceback.format_exc())
+                failed += 1
+        
+        logger.info(f"Framework cogs: {loaded} loaded, {failed} failed")
 
     async def setup_hook(self):
         self.config = SafeConfig(file_handler=global_file_handler)
@@ -188,6 +240,11 @@ class BotFrameWork(commands.Bot):
         self.db = SafeDatabaseManager(db_path, file_handler=global_file_handler)
         await self.db.connect()
         
+
+        if self.config.get("framework.load_cogs", True):
+            await self.load_framework_cogs()
+        
+
         if self.config.get("extensions.auto_load", True):
             await self.load_all_extensions()
         
@@ -209,17 +266,14 @@ class BotFrameWork(commands.Bot):
             logger.warning("Created extensions directory")
             return
         
-
         for filepath in list(extensions_path.glob("*.py")):
             ext_name = filepath.stem
-            original_filepath = filepath 
-
-
+            original_filepath = filepath
+            
             if " " in ext_name:
                 new_ext_name = ext_name.replace(" ", "_")
                 new_filepath = extensions_path / f"{new_ext_name}.py"
                 
-
                 if new_filepath.exists():
                     logger.warning(f"Conflicting extensions found: '{original_filepath.name}' and '{new_filepath.name}'. Skipping the one with space.")
                     continue
@@ -227,25 +281,28 @@ class BotFrameWork(commands.Bot):
                 try:
                     original_filepath.rename(new_filepath)
                     logger.warning(f"Renamed illegal extension '{original_filepath.name}' to '{new_filepath.name}' during startup.")
-                    filepath = new_filepath 
-                    ext_name = new_ext_name 
+                    filepath = new_filepath
+                    ext_name = new_ext_name
                 except Exception as e:
                     logger.error(f"Failed to rename {original_filepath.name} during startup: {e}")
                     failed += 1
                     continue
-
             
             if ext_name in blacklist:
                 logger.info(f"Skipped blacklisted: {filepath.name}")
                 continue
             
             try:
-
                 start_time = time.time()
                 await self.load_extension(f"extensions.{ext_name}")
                 load_time = time.time() - start_time
                 self.extension_load_times[ext_name] = load_time
                 logger.info(f"Extension loaded: {ext_name}.py ({load_time:.3f}s)")
+                
+
+                if hasattr(self, 'emit_hook'):
+                    await self.emit_hook("extension_loaded", extension_name=f"extensions.{ext_name}")
+                
                 loaded += 1
             except Exception as e:
                 logger.error(f"Failed loading {ext_name}.py: {e}")
@@ -658,6 +715,10 @@ async def stats_command(ctx):
     uptime_seconds = int(stats['uptime'])
     uptime_str = str(timedelta(seconds=uptime_seconds))
     
+
+    user_extensions = [ext for ext in bot.extensions.keys() if ext.startswith("extensions.")]
+    framework_cogs = [ext for ext in bot.extensions.keys() if ext.startswith("cogs.")]
+    
     embed = discord.Embed(
         title="📊 Bot Statistics",
         color=0x00ff00,
@@ -669,10 +730,17 @@ async def stats_command(ctx):
     embed.add_field(name="👥 Users", value=f"```{len(bot.users)}```", inline=True)
     embed.add_field(name="📝 Commands Processed", value=f"```{stats['commands_processed']}```", inline=True)
     embed.add_field(name="💬 Messages Seen", value=f"```{stats['messages_seen']}```", inline=True)
-    embed.add_field(name="🔧 Extensions Loaded", value=f"```{len(bot.extensions)}```", inline=True)
+    embed.add_field(name="🔧 Extensions Loaded", value=f"```{len(user_extensions)}```", inline=True)
     embed.add_field(name="📡 Latency", value=f"```{bot.latency*1000:.2f}ms```", inline=True)
     embed.add_field(name="❌ Errors", value=f"```{stats['error_count']}```", inline=True)
     embed.add_field(name="📋 Slash Commands", value=f"```{len(bot.tree.get_commands())}```", inline=True)
+    
+
+    embed.add_field(
+        name="⚙️ Framework",
+        value=f"```Cogs: {len(framework_cogs)}\nTotal Modules: {len(bot.extensions)}```",
+        inline=False
+    )
     
     if stats['top_commands']:
         top_cmds = '\n'.join([f"{cmd}: {count}" for cmd, count in list(stats['top_commands'].items())[:5]])
@@ -869,14 +937,18 @@ async def reload_command(ctx, *, extension: str):
         return
     
     try:
-        start_time = time.time() 
-        await bot.reload_extension(f"extensions.{final_ext_to_load}")
-        load_time = time.time() - start_time 
-        bot.extension_load_times[final_ext_to_load] = load_time 
+        start_time = time.time()
+        await bot.load_extension(f"extensions.{final_ext_to_load}")
+        load_time = time.time() - start_time
+        bot.extension_load_times[final_ext_to_load] = load_time
+        
 
+        if hasattr(bot, 'emit_hook'):
+            await bot.emit_hook("extension_loaded", extension_name=f"extensions.{final_ext_to_load}")
+        
         embed = discord.Embed(
-            title="✅ Extension Reloaded",
-            description=f"```Successfully reloaded: {final_ext_to_load} ({load_time:.3f}s)```", 
+            title="✅ Extension Loaded",
+            description=f"```Successfully loaded: {final_ext_to_load} ({load_time:.3f}s)```",
             color=0x00ff00,
             timestamp=discord.utils.utcnow()
         )
@@ -1047,6 +1119,9 @@ async def unload_command(ctx, *, extension: str):
         simple_name = final_ext_name.replace("extensions.", "")
         
 
+        if hasattr(bot, 'emit_hook'):
+            await bot.emit_hook("extension_unloaded", extension_name=final_ext_name)
+        
         if simple_name in bot.extension_load_times:
             del bot.extension_load_times[simple_name]
             
@@ -1085,7 +1160,12 @@ async def extensions_command(ctx):
     if ctx.interaction:
         if not await check_app_command_permissions(ctx.interaction, "extensions"):
             return
-    if not bot.extensions:
+    
+
+    user_extensions = {k: v for k, v in bot.extensions.items() if k.startswith("extensions.")}
+    framework_cogs = {k: v for k, v in bot.extensions.items() if k.startswith("cogs.")}
+    
+    if not user_extensions and not framework_cogs:
         embed = discord.Embed(
             title="❌ No Extensions",
             description="```No extensions loaded```",
@@ -1096,19 +1176,39 @@ async def extensions_command(ctx):
         return
     
     embed = discord.Embed(
-        title="🔌 Loaded Extensions",
+        title="🔌 Loaded Modules",
         color=0x5865f2,
         timestamp=discord.utils.utcnow()
     )
     
-    ext_list = []
-    for ext_name in sorted(bot.extensions.keys()):
-        simple_name = ext_name.replace("extensions.", "")
-        load_time = bot.extension_load_times.get(simple_name, 0)
-        ext_list.append(f"• {simple_name} ({load_time:.3f}s)")
+
+    if user_extensions:
+        ext_list = []
+        for ext_name in sorted(user_extensions.keys()):
+            simple_name = ext_name.replace("extensions.", "")
+            load_time = bot.extension_load_times.get(simple_name, 0)
+            ext_list.append(f"• {simple_name} ({load_time:.3f}s)")
+        
+        embed.add_field(
+            name=f"📦 User Extensions ({len(user_extensions)})",
+            value="```" + "\n".join(ext_list) + "```",
+            inline=False
+        )
     
-    embed.description = "```" + "\n".join(ext_list) + "```"
-    embed.set_footer(text=f"Total: {len(bot.extensions)} extensions")
+
+    if framework_cogs:
+        cog_list = []
+        for cog_name in sorted(framework_cogs.keys()):
+            simple_name = cog_name.replace("cogs.", "")
+            cog_list.append(f"• {simple_name}")
+        
+        embed.add_field(
+            name=f"⚙️ Framework Cogs ({len(framework_cogs)})",
+            value="```" + "\n".join(cog_list) + "```",
+            inline=False
+        )
+    
+    embed.set_footer(text=f"Total modules: {len(bot.extensions)}")
     await ctx.send(embed=embed)
     
     try:
@@ -1483,7 +1583,7 @@ class CategorySelect(discord.ui.Select):
             discord.SelectOption(
                 label=cog_name,
                 description=f"{len(cmds)} commands available",
-                emoji="📁"
+                emoji="📖"
             )
             for cog_name, cmds in categories.items()
         ]
@@ -1504,15 +1604,20 @@ class CategorySelect(discord.ui.Select):
         per_page = 5
         total_pages = (len(cmds) - 1) // per_page + 1
         
-        embed = self.create_page_embed(selected, cmds, page, per_page, total_pages)
+        embed = self.create_page_embed(selected, cmds, page, per_page, total_pages, interaction.client)
         
         view = CategoryView(selected, cmds, page, per_page, total_pages, interaction.user, self.prefix)
         await interaction.response.edit_message(embed=embed, view=view)
         logger.info(f"{interaction.user} selected category '{selected}'")
     
-    def create_page_embed(self, category, cmds, page, per_page, total_pages):
+    def create_page_embed(self, category, cmds, page, per_page, total_pages, bot):
         start = page * per_page
         end = start + per_page
+        
+
+        prefix_only = set()
+        if hasattr(bot, 'get_prefix_only_commands'):
+            prefix_only = bot.get_prefix_only_commands()
         
         embed = discord.Embed(
             title=f"📂 {category}",
@@ -1523,16 +1628,43 @@ class CategorySelect(discord.ui.Select):
         
         for cmd in cmds[start:end]:
             cmd_help = cmd.help or "No description available"
+            
+
+            is_hybrid = hasattr(cmd, 'app_command') and cmd.app_command is not None
+            is_prefix_only = cmd.name in prefix_only
+            
+
+            if is_prefix_only:
+                indicator = "🔹 "  
+                availability = "(Prefix only - Slash limit reached)"
+            elif is_hybrid:
+                indicator = "⚡ "  
+                availability = "(Slash & Prefix)"
+            else:
+                indicator = "🔸 "  
+                availability = "(Prefix only)"
+            
             embed.add_field(
-                name=f"▸ {self.prefix}{cmd.name}",
+                name=f"{indicator}{self.prefix}{cmd.name} {availability}",
                 value=f"```{cmd_help}```",
                 inline=False
             )
         
+
+        legend = (
+            "⚡ = Slash & Prefix | "
+            "🔸 = Prefix only | "
+            "🔹 = Prefix only (Slash limit)"
+        )
+        embed.add_field(
+            name="📚 Legend",
+            value=f"```{legend}```",
+            inline=False
+        )
+        
         embed.set_footer(text=f"Category: {category}")
         
         return embed
-
 
 class CategoryView(discord.ui.View):
     def __init__(self, category, cmds, page, per_page, total_pages, author, prefix):
@@ -1571,12 +1703,17 @@ class PrevButton(discord.ui.Button):
         if view.page > 0:
             view.page -= 1
         
-        embed = self.create_page_embed(view.category, view.cmds, view.page, view.per_page, view.total_pages)
+        embed = self.create_page_embed(view.category, view.cmds, view.page, view.per_page, view.total_pages, interaction.client)
         await interaction.response.edit_message(embed=embed, view=view)
     
-    def create_page_embed(self, category, cmds, page, per_page, total_pages):
+    def create_page_embed(self, category, cmds, page, per_page, total_pages, bot):
         start = page * per_page
         end = start + per_page
+        
+
+        prefix_only = set()
+        if hasattr(bot, 'get_prefix_only_commands'):
+            prefix_only = bot.get_prefix_only_commands()
         
         embed = discord.Embed(
             title=f"📂 {category}",
@@ -1587,11 +1724,39 @@ class PrevButton(discord.ui.Button):
         
         for cmd in cmds[start:end]:
             cmd_help = cmd.help or "No description available"
+            
+
+            is_hybrid = hasattr(cmd, 'app_command') and cmd.app_command is not None
+            is_prefix_only = cmd.name in prefix_only
+            
+
+            if is_prefix_only:
+                indicator = "🔹 "
+                availability = "(Prefix only - Slash limit reached)"
+            elif is_hybrid:
+                indicator = "⚡ "
+                availability = "(Slash & Prefix)"
+            else:
+                indicator = "🔸 "
+                availability = "(Prefix only)"
+            
             embed.add_field(
-                name=f"▸ {self.prefix}{cmd.name}",
+                name=f"{indicator}{self.prefix}{cmd.name} {availability}",
                 value=f"```{cmd_help}```",
                 inline=False
             )
+        
+
+        legend = (
+            "⚡ = Slash & Prefix | "
+            "🔸 = Prefix only | "
+            "🔹 = Prefix only (Slash limit)"
+        )
+        embed.add_field(
+            name="📚 Legend",
+            value=f"```{legend}```",
+            inline=False
+        )
         
         embed.set_footer(text=f"Category: {category}")
         
@@ -1608,12 +1773,17 @@ class NextButton(discord.ui.Button):
         if view.page < view.total_pages - 1:
             view.page += 1
         
-        embed = self.create_page_embed(view.category, view.cmds, view.page, view.per_page, view.total_pages)
+        embed = self.create_page_embed(view.category, view.cmds, view.page, view.per_page, view.total_pages, interaction.client)
         await interaction.response.edit_message(embed=embed, view=view)
     
-    def create_page_embed(self, category, cmds, page, per_page, total_pages):
+    def create_page_embed(self, category, cmds, page, per_page, total_pages, bot):
         start = page * per_page
         end = start + per_page
+        
+
+        prefix_only = set()
+        if hasattr(bot, 'get_prefix_only_commands'):
+            prefix_only = bot.get_prefix_only_commands()
         
         embed = discord.Embed(
             title=f"📂 {category}",
@@ -1624,11 +1794,39 @@ class NextButton(discord.ui.Button):
         
         for cmd in cmds[start:end]:
             cmd_help = cmd.help or "No description available"
+            
+
+            is_hybrid = hasattr(cmd, 'app_command') and cmd.app_command is not None
+            is_prefix_only = cmd.name in prefix_only
+            
+
+            if is_prefix_only:
+                indicator = "🔹 "
+                availability = "(Prefix only - Slash limit reached)"
+            elif is_hybrid:
+                indicator = "⚡ "
+                availability = "(Slash & Prefix)"
+            else:
+                indicator = "🔸 "
+                availability = "(Prefix only)"
+            
             embed.add_field(
-                name=f"▸ {self.prefix}{cmd.name}",
+                name=f"{indicator}{self.prefix}{cmd.name} {availability}",
                 value=f"```{cmd_help}```",
                 inline=False
             )
+        
+
+        legend = (
+            "⚡ = Slash & Prefix | "
+            "🔸 = Prefix only | "
+            "🔹 = Prefix only (Slash limit)"
+        )
+        embed.add_field(
+            name="📚 Legend",
+            value=f"```{legend}```",
+            inline=False
+        )
         
         embed.set_footer(text=f"Category: {category}")
         
@@ -1718,7 +1916,9 @@ class CreditsButton(discord.ui.Button):
                 "• Whitespace-Tolerant Extensions\n"
                 "• Advanced Error Handling\n"
                 "• File Caching System\n"
-                "• Bot/Guild Owner Permissions```"
+                "• Bot/Guild Owner Permissions\n"
+                "• Slash Command Limit Protection\n"
+                "• Slash/Prefix Status Display```"
             ),
             inline=False
         )
