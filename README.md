@@ -1,12 +1,12 @@
+
 # 🤖 Discord Bot Framework
 
-A production-ready, enterprise-grade Discord bot framework featuring atomic file operations, advanced permission systems, dynamic extension loading, and comprehensive monitoring. Built for developers who demand reliability, scalability, and maintainability.
+A production-ready, enterprise-grade Discord bot framework featuring atomic file operations, advanced permission systems, dynamic extension loading, comprehensive monitoring, and modular framework cogs. Built for developers who demand reliability, scalability, and maintainability.
 
 [![Python Version](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![discord.py](https://img.shields.io/badge/discord.py-2.0+-blue.svg)](https://github.com/Rapptz/discord.py)
 
 > Showcase images are available in the Images directory within this repository.
-
 
 ### Website: https://zygnalbot.com/bot-framework/
 
@@ -18,6 +18,11 @@ A production-ready, enterprise-grade Discord bot framework featuring atomic file
 - **Safe Log Rotation**: Automatic log management with configurable size limits and retention
 - **Hot-Reload System**: Auto-reload extensions when files change (optional)
 - **Metrics Collection**: Real-time command tracking, error monitoring, and performance analytics
+- **Framework Cogs System**: Modular internal framework components with event hooks and plugin registry
+- **Event Hooks System**: Internal event system for framework lifecycle events with priority-based callbacks
+- **Plugin Registry**: Automatic metadata tracking, dependency resolution, and conflict detection for extensions
+- **Framework Diagnostics**: Health monitoring, performance tracking, and system diagnostics
+- **Slash Command Limiter**: Automatic protection against Discord's 100 slash command limit with graceful degradation
 
 ### 🎯 Command System
 - **Hybrid Commands**: Seamless prefix and slash command support
@@ -25,29 +30,38 @@ A production-ready, enterprise-grade Discord bot framework featuring atomic file
 - **Command Autocomplete**: Dynamic command suggestions for slash commands
 - **Cooldown Management**: Built-in rate limiting per user/guild/channel
 - **Auto-Delete Messages**: Automatic cleanup of success/error messages
+- **Slash Limit Protection**: Automatic conversion to prefix-only when approaching Discord's 100 command limit
+- **Command Status Indicators**: Visual indicators showing which commands support slash/prefix/both
 
 ### 🛒 Extension Marketplace
-- **Integrated Marketplace**: Browse, search, and install official extensions directly from within the bot.
-- **Custom License Agreement**: Mandatory acceptance of licensing terms before installing extensions.
-- **ZygnalID Support**: Unique ID generation for extension tracking and dedicated support.
+- **Integrated Marketplace**: Browse, search, and install official extensions directly from within the bot
+- **Custom License Agreement**: Mandatory acceptance of licensing terms before installing extensions
+- **ZygnalID Support**: Unique ID generation for extension tracking and dedicated support
+- **Dependency Auto-Fix**: Automatic detection and installation of missing Python dependencies via `!marketplace fixdeps`
+- **Enhanced Error Handling**: Better ZygnalID validation and activation guidance
 
 ### 📚 User Interface
 - **Interactive Help Menu**: Dropdown-based navigation with pagination
 - **Category Organization**: Automatic command grouping by cog
 - **Rich Embeds**: Modern Discord UI with color-coded responses
 - **User-Specific Interactions**: Security-checked button/dropdown interactions
+- **Command Type Legend**: Visual indicators for hybrid, prefix-only, and slash-limited commands
 
 ### ⚙️ Configuration
 - **Per-Guild Settings**: Custom prefixes, permissions, and configurations
 - **JSON Config System**: Centralized configuration with safe atomic writes
 - **Command Permissions**: Granular role requirements per command
 - **Extension Blacklist**: Selective extension loading control
+- **Framework Cog Control**: Enable/disable individual framework components via config
 
 ### 📊 Monitoring & Analytics
 - **Command Usage Stats**: Track most-used commands and patterns
 - **Error Tracking**: Comprehensive error logging with stack traces
 - **Uptime Monitoring**: Real-time bot statistics and health metrics
 - **Performance Metrics**: Extension load times and database query tracking
+- **Framework Diagnostics**: System health monitoring with CPU, memory, and error rate tracking
+- **Hook Execution History**: Track internal event system performance and errors
+- **Plugin Dependency Tracking**: Monitor extension dependencies and conflicts
 
 ## 📋 Requirements
 
@@ -58,6 +72,7 @@ python-dotenv 1.0.0
 aiosqlite
 aiofiles
 rich
+psutil
 ```
 
 ## 🚀 Quick Start
@@ -115,14 +130,22 @@ The bot will auto-generate `config.json` on first run with default settings:
         "default_rate": 3,
         "default_per": 5.0
     },
-    "command_permissions": {}
+    "command_permissions": {},
+    "framework": {
+        "load_cogs": true,
+        "enable_event_hooks": true,
+        "enable_plugin_registry": true,
+        "enable_framework_diagnostics": true,
+        "enable_slash_command_limiter": true
+    }
 }
 ```
 
-### 4. Create Extensions Directory
+### 4. Create Required Directories
 
 ```bash
 mkdir extensions
+mkdir cogs
 ```
 
 ### 5. Run the Bot
@@ -143,16 +166,31 @@ discord-bot-framework/
 ├── extensions/                # Your extension modules (auto-loaded)
 │   ├── example.py
 │   ├── moderation.py
-│   ├── marketplace.py         # Extension Marketplace 
+│   ├── marketplace.py         # Extension Marketplace
 │   └── fun.py
+│
+├── cogs/                      # Framework internal cogs
+│   ├── event_hooks.py         # Internal event system
+│   ├── plugin_registry.py     # Plugin metadata & dependency tracking
+│   ├── framework_diagnostics.py  # Health monitoring
+│   └── slash_command_limiter.py  # Slash command protection
 │    
 ├── data/                      # Auto-generated data directory
 │   ├── bot.db                 # SQLite database
-│   └── bot.db.backup_*        # Automatic database backups
+│   ├── bot.db.backup_*        # Automatic database backups
+│   ├── plugin_registry.json   # Plugin metadata cache
+│   ├── framework_diagnostics.json  # System diagnostics
+│   └── framework_health.json  # Health monitoring data
+│
+├── marketplace/               # Marketplace data
+│   ├── ZygnalID.txt           # Unique bot identifier
+│   └── license_accepted.json  # License acceptance tracking
+│
 ├── botlogs/                   # Log files
 │   ├── permanent.log          # Persistent log (rotates at 10MB)
 │   ├── permanent.log.1        # Backup logs
 │   └── current_run.log        # Current session only
+│
 ├── config.json                # Bot configuration (auto-generated)
 ├── .env                       # Environment variables (create this)
 ├── requirements.txt           # Python dependencies
@@ -165,13 +203,16 @@ discord-bot-framework/
 
 | Command | Description | Cooldown |
 |---------|-------------|----------|
-| `!help` / `/help` | Interactive help menu with categories | 10s |
-| `!stats` / `/stats` | Display bot statistics and metrics | 10s |
-| `!extensions` / `/extensions` | List all loaded extensions | 10s |
+| `!help` / `/help` | Interactive help menu with categories and command type indicators | 10s |
+| `!stats` / `/stats` | Display bot statistics, metrics, and framework info | 10s |
+| `!extensions` / `/extensions` | List all loaded user extensions and framework cogs | 10s |
 | `!discordbotframework` | Framework information and features | 10s |
 | `!setprefix <prefix>` | Set custom prefix for your server | - |
 | `!config [command] [role]` | Configure command permissions | - |
 | `!marketplace` / `/marketplace` | Browse, search, and manage official extensions | 10s |
+| `!plugins` / `/plugins` | List all registered plugins with metadata | 10s |
+| `!plugininfo <name>` | View detailed information about a specific plugin | 10s |
+| `!slashlimit` / `/slashlimit` | Check slash command usage and limits | 10s |
 
 ### Owner-Only Commands
 
@@ -182,8 +223,11 @@ discord-bot-framework/
 | `!load <extension>` | Load an extension | Bot Owner |
 | `!unload <extension>` | Unload an extension | Bot Owner |
 | `!atomictest` | Test atomic file operations | Bot Owner |
-| `/marketplace myid` | Retrieve the bot's unique ZygnalID for support purposes | Bot Owner |
-
+| `!hooks` / `/hooks` | Display registered framework event hooks | Bot Owner |
+| `!hookhistory` / `/hookhistory` | Display hook execution history | Bot Owner |
+| `!diagnostics` / `/diagnostics` | Display framework diagnostics and health | Bot Owner |
+| `!marketplace myid` | Retrieve the bot's unique ZygnalID for support | Bot Owner |
+| `!marketplace fixdeps` | Auto-install missing Python dependencies from logs | Bot Owner |
 
 ## 🔧 Creating Extensions
 
@@ -214,6 +258,76 @@ class MyCog(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(MyCog(bot))
+```
+
+### Extension with Plugin Metadata
+
+```python
+import discord
+from discord.ext import commands
+
+# Plugin metadata (optional but recommended)
+__version__ = "1.0.0"
+__author__ = "YourName"
+__description__ = "A cool extension that does amazing things"
+__dependencies__ = []  # List required extensions
+__conflicts__ = []     # List incompatible extensions
+
+class MyCog(commands.Cog):
+    def __init__(self, bot):
+        self.bot = bot
+        
+        # Register plugin metadata if registry is available
+        if hasattr(bot, 'register_plugin'):
+            bot.register_plugin(
+                name="my_extension",
+                version=__version__,
+                author=__author__,
+                description=__description__,
+                dependencies=__dependencies__,
+                conflicts_with=__conflicts__
+            )
+    
+    @commands.hybrid_command(name="example")
+    async def example_command(self, ctx):
+        await ctx.send("Example command!")
+
+async def setup(bot):
+    await bot.add_cog(MyCog(bot))
+```
+
+### Using Framework Event Hooks
+
+```python
+from discord.ext import commands
+import discord
+
+class MyHookedCog(commands.Cog):
+    def __init__(self, bot):
+        self.bot = bot
+        
+        # Register hooks if event system is available
+        if hasattr(bot, 'register_hook'):
+            # Register with priority (higher = executes first)
+            bot.register_hook("extension_loaded", self.on_extension_loaded, priority=5)
+            bot.register_hook("command_executed", self.on_command_used)
+    
+    async def on_extension_loaded(self, bot, extension_name: str, **kwargs):
+        """Called when any extension is loaded"""
+        print(f"Extension loaded: {extension_name}")
+    
+    async def on_command_used(self, bot, command_name: str, author, **kwargs):
+        """Called when any command is executed"""
+        print(f"Command {command_name} used by {author}")
+    
+    def cog_unload(self):
+        # Unregister hooks when cog unloads
+        if hasattr(self.bot, 'unregister_hook'):
+            self.bot.unregister_hook("extension_loaded", self.on_extension_loaded)
+            self.bot.unregister_hook("command_executed", self.on_command_used)
+
+async def setup(bot):
+    await bot.add_cog(MyHookedCog(bot))
 ```
 
 ### Advanced Extension with Permissions
@@ -330,6 +444,22 @@ class FileCog(commands.Cog):
 ```
 
 ## ⚙️ Configuration Guide
+
+### Framework Cogs Configuration
+
+Enable or disable framework components:
+
+```json
+{
+    "framework": {
+        "load_cogs": true,
+        "enable_event_hooks": true,
+        "enable_plugin_registry": true,
+        "enable_framework_diagnostics": true,
+        "enable_slash_command_limiter": true
+    }
+}
+```
 
 ### Command Permissions
 
@@ -506,6 +636,7 @@ cat botlogs/current_run.log | grep -i "extension"
 - Syntax errors in extension file
 - Extension in blacklist
 - File not in `extensions/` directory
+- Missing Python dependencies (use `!marketplace fixdeps`)
 
 ### Slash commands not syncing
 
@@ -518,6 +649,11 @@ cat botlogs/current_run.log | grep -i "extension"
 - Discord limits syncs to ~2 per hour
 - Bot automatically handles rate limits
 - Check logs for retry information
+
+**Slash command limit reached:**
+- Use `!slashlimit` to check current usage
+- Framework automatically converts commands to prefix-only when limit approaches
+- Commands will show indicators in help menu
 
 ### Database errors
 
@@ -544,6 +680,15 @@ python main.py
 - Check command permissions: `!config`
 - Verify your roles match requirements
 - Contact bot owner for access
+
+### Missing Dependencies
+
+**Use automatic dependency fixer:**
+```bash
+!marketplace fixdeps
+```
+
+This will scan logs for `ModuleNotFoundError` and automatically install missing packages.
 
 ## 🔄 Migration Guide
 
@@ -673,6 +818,106 @@ See `main.py` for full license text.
 
 ## 💡 Advanced Features
 
+### Framework Cogs System
+
+The framework now includes modular internal cogs located in the `./cogs` directory:
+
+- **Event Hooks**: Internal event system for lifecycle events
+- **Plugin Registry**: Automatic metadata tracking and dependency resolution
+- **Framework Diagnostics**: Real-time health monitoring and system diagnostics
+- **Slash Command Limiter**: Automatic protection against Discord's command limit
+
+### Event Hooks System
+
+Register callbacks for framework lifecycle events:
+
+```python
+# Available hooks:
+# - bot_ready: When bot becomes ready
+# - guild_joined: When bot joins a guild
+# - guild_left: When bot leaves a guild
+# - command_executed: When a command is executed
+# - command_error: When a command error occurs
+# - extension_loaded: When an extension is loaded
+# - extension_unloaded: When an extension is unloaded
+
+# Register a hook
+bot.register_hook("extension_loaded", my_callback, priority=10)
+
+# Unregister a hook
+bot.unregister_hook("extension_loaded", my_callback)
+
+# List all hooks
+hooks = bot.list_hooks()
+
+# Get hook execution history
+history = bot.get_hook_history(limit=20)
+```
+
+### Plugin Registry System
+
+Automatic tracking of extension metadata:
+
+```python
+# Register plugin metadata
+bot.register_plugin(
+    name="my_extension",
+    version="1.0.0",
+    author="YourName",
+    description="Extension description",
+    dependencies=["other_extension"],
+    conflicts_with=["incompatible_extension"]
+)
+
+# Get plugin info
+info = bot.get_plugin_info("my_extension")
+
+# Check dependencies
+satisfied, missing = bot.check_dependencies("my_extension")
+
+# Detect conflicts
+has_conflicts, conflicts = bot.detect_conflicts("my_extension")
+
+# Get all plugins
+plugins = bot.get_all_plugins()
+```
+
+### Framework Diagnostics
+
+Access comprehensive system diagnostics:
+
+```python
+# Get current diagnostics
+diagnostics = await bot.generate_diagnostics()
+
+# Available metrics:
+# - Bot information (username, latency, owner)
+# - Environment (Python version, platform, architecture)
+# - Extensions (loaded count, load times)
+# - Commands (total, slash commands)
+# - Server statistics (guilds, users, channels)
+# - Performance (memory, CPU, threads)
+# - Health metrics (error rate, uptime)
+```
+
+### Slash Command Limiter
+
+Automatic protection against Discord's 100 command limit:
+
+```python
+# Check if extension has slash disabled
+is_disabled = bot.is_slash_disabled("my_extension")
+
+# Get prefix-only commands
+prefix_only = bot.get_prefix_only_commands()
+
+# The limiter automatically:
+# - Monitors slash command count
+# - Warns at 90 commands (90% threshold)
+# - Converts new extensions to prefix-only at 95 commands
+# - Updates help menu with command type indicators
+```
+
 ### Hot-Reload System
 
 Enable automatic extension reloading:
@@ -801,5 +1046,7 @@ Need help? Have questions?
 ⭐ **If you find this framework helpful, please consider giving it a star!** ⭐
 
 Made with 💜 by TheHolyOneZ
+
+</div>
 
 </div>
