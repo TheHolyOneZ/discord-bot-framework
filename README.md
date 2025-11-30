@@ -345,13 +345,14 @@ Built with **discord.py 2.0+** and modern Python async patterns, this framework 
 **Python**: 3.8+ (Built and tested with 3.12.7)  
 **discord.py**: 2.0+ (Built with 2.6.3)
 ```
+aiofiles==24.1.0
+aiohttp==3.12.14
+aiosqlite==0.21.0
 discord.py==2.6.3
 python-dotenv==1.0.0
-aiosqlite
-aiofiles
-rich
-psutil
-aiohttp
+psutil==5.9.6
+rich==14.0.0
+
 ```
 
 ---
