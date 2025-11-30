@@ -16,6 +16,7 @@
 - [🌟 What Makes This Framework Special](#-what-makes-this-framework-special)
 - [🎯 Core Features](#-core-features)
 - [📋 Requirements](#-requirements)
+- [🐳 Docker Setup](#-docker-setup)
 - [🚀 Quick Start](#-quick-start)
 - [📁 Project Structure](#-project-structure)
 - [🎮 Built-in Commands](#-built-in-commands)
@@ -354,6 +355,24 @@ psutil==5.9.6
 rich==14.0.0
 
 ```
+
+
+# 🐳 Docker Setup
+
+
+# 1. Clone the repository
+git clone https://github.com/TheHolyOneZ/discord-bot-framework.git
+cd discord-bot-framework
+
+# 2. Build the Docker image
+#    'discord-bot-framework' here is just the name you give the image. You can call it anything.
+docker build -t discord-bot-framework .
+
+# 3. Run the container
+#    '--name mybot' gives a name to the running container. This is not your Python script name.
+#    You can use this name to stop or remove the container later.
+docker run -d --name mybot discord-bot-framework
+
 
 ---
 
