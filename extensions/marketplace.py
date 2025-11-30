@@ -15,6 +15,7 @@ Violation of these terms will result in permanent ZygnalID deactivation and ban.
 import discord
 from discord.ext import commands
 from discord import app_commands
+from typing import Optional
 import aiohttp
 import os
 import asyncio
@@ -24,7 +25,7 @@ import re
 import io
 from pathlib import Path
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger('discord')
 
 class MarketplaceLicenseView(discord.ui.View):
     def __init__(self, user_id):
@@ -560,45 +561,34 @@ class ExtensionMarketplace(commands.Cog):
                 extension_id = extension_data['id']
                 download_url = f"https://zygnalbot.com/extension/download.php?id={extension_id}{query_suffix}"
             
-            async with aiohttp.ClientSession() as session:
-                async with session.get(download_url, timeout=60) as response:
-                    response_text = await response.text()
-                    
-                   
-                    if response.status == 403 or ("invalid" in response_text.lower() and "zygnalid" in response_text.lower()) or "not activated" in response_text.lower():
-                        error_message = (
-                            "Your ZygnalID is **invalid or not activated**.\n\n"
-                            "**To activate your ID, follow these steps:**\n"
-                            "1. Go to the official ZygnalBot Discord server: `gg/sgZnXca5ts`\n"
-                            "2. Verify yourself on the server.\n"
-                            "3. Open a ticket for **Zygnal ID Activation**.\n"
-                            "4. Read the embed sent in the ticket and provide the necessary information to start the activation process.\n\n"
-                            "Use `/marketplace myid` to view your ID."
-                        )
-                        logger.error(f"Download failed due to ZygnalID issue (Status: {response.status if response.status != 200 else '200 w/ text match'}): {error_message}")
-                        return None, error_message
-                    
-                    if response.status == 200:
-                        filename = f"{extension_data['title'].replace(' ', '_').lower()}.{extension_data['fileType']}"
-                        filename = re.sub(r'[^\w\-_\.]', '', filename)
-                        filepath = os.path.join(self.extensions_folder, filename)
-                        
-                        success = await self.bot.config.file_handler.atomic_write(filepath, response_text)
-                        if success:
-                            logger.info(f"Successfully downloaded extension to {filepath}")
-                            return filepath, "Success"
-                        else:
-                            return None, "Failed to write file using atomic handler"
-                    elif response.status == 429:
-                        error_message = "Download failed: Rate limited (max 5 files per 2 minutes)"
-                        logger.error(error_message)
-                        return None, error_message
-                    else:
-                        error_message = f"Download failed with status {response.status}"
-                        logger.error(error_message)
-                        return None, error_message
-
-
+            response_text, error = await self._download_with_retry(download_url, max_retries=3)
+            
+            if error:
+                return None, error
+            
+            if response_text and ("invalid" in response_text.lower() and "zygnalid" in response_text.lower()) or "not activated" in response_text.lower():
+                error_message = (
+                    "Your ZygnalID is **invalid or not activated**.\n\n"
+                    "**To activate your ID, follow these steps:**\n"
+                    "1. Go to the official ZygnalBot Discord server: `gg/sgZnXca5ts`\n"
+                    "2. Verify yourself on the server.\n"
+                    "3. Open a ticket for **Zygnal ID Activation**.\n"
+                    "4. Read the embed sent in the ticket and provide the necessary information to start the activation process.\n\n"
+                    "Use `/marketplace myid` to view your ID."
+                )
+                logger.error(f"Download failed due to ZygnalID issue")
+                return None, error_message
+            
+            filename = f"{extension_data['title'].replace(' ', '_').lower()}.{extension_data['fileType']}"
+            filename = re.sub(r'[^\w\-_\.]', '', filename)
+            filepath = os.path.join(self.extensions_folder, filename)
+            
+            success = await self.bot.config.file_handler.atomic_write(filepath, response_text)
+            if success:
+                logger.info(f"Successfully downloaded extension to {filepath}")
+                return filepath, "Success"
+            else:
+                return None, "Failed to write file using atomic handler"
 
         except Exception as e:
             error_msg = f"Download error: {e}"
@@ -623,7 +613,38 @@ class ExtensionMarketplace(commands.Cog):
         except Exception as e:
             logger.error(f"Failed to generate/read ZygnalID: {e}")
             return ""
-    
+
+
+    async def _download_with_retry(self, url: str, max_retries: int = 3) -> tuple[Optional[str], Optional[str]]:
+        for attempt in range(max_retries):
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(url, timeout=60) as response:
+                        if response.status == 200:
+                            return await response.text(), None
+                        elif response.status == 429:
+                            retry_after = int(response.headers.get('Retry-After', 60))
+                            if attempt < max_retries - 1:
+                                logger.warning(f"Rate limited, retrying after {retry_after}s (attempt {attempt + 1}/{max_retries})")
+                                await asyncio.sleep(retry_after)
+                                continue
+                            return None, "Rate limited (max retries reached)"
+                        else:
+                            return None, f"HTTP {response.status}"
+            except asyncio.TimeoutError:
+                if attempt < max_retries - 1:
+                    logger.warning(f"Timeout, retrying (attempt {attempt + 1}/{max_retries})")
+                    await asyncio.sleep(2 ** attempt)
+                    continue
+                return None, "Timeout (max retries reached)"
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    logger.warning(f"Error: {e}, retrying (attempt {attempt + 1}/{max_retries})")
+                    await asyncio.sleep(2 ** attempt)
+                    continue
+                return None, f"Error: {e}"
+        
+        return None, "Max retries exceeded"
     @commands.hybrid_group(name='marketplace', aliases=['mp', 'mkt'], invoke_without_command=True)
     @commands.cooldown(1, 5, commands.BucketType.user)
     async def marketplace_group(self, ctx):

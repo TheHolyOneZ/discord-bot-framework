@@ -26,25 +26,27 @@ from atomic_file_system import (
 )
 from rich.console import Console 
 from rich.panel import Panel
-
-
-
+import shutil
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
 BOT_OWNER_ID = int(os.getenv("BOT_OWNER_ID", 0))
 
-
 class MetricsCollector:
-    def __init__(self):
+    def __init__(self, max_commands: int = 100):
         self.command_count = defaultdict(int)
         self.error_count = 0
         self.start_time = time.time()
         self.messages_seen = 0
         self.commands_processed = 0
+        self._max_commands = max_commands
     
     def record_command(self, command_name: str):
         self.command_count[command_name] += 1
         self.commands_processed += 1
+        
+        if len(self.command_count) > self._max_commands:
+            sorted_commands = sorted(self.command_count.items(), key=lambda x: x[1], reverse=True)
+            self.command_count = defaultdict(int, dict(sorted_commands[:self._max_commands]))
     
     def record_error(self):
         self.error_count += 1
@@ -61,11 +63,43 @@ class MetricsCollector:
             "commands_processed": self.commands_processed,
             "messages_seen": self.messages_seen,
             "error_count": self.error_count,
-            "top_commands": dict(sorted(self.command_count.items(), key=lambda x: x[1], reverse=True)[:10])
+            "top_commands": dict(sorted(self.command_count.items(), key=lambda x: x[1], reverse=True)[:10]),
+            "tracked_commands": len(self.command_count)
         }
 
+class PrefixCache:
+    def __init__(self, ttl: int = 600):
+        self._cache: Dict[int, tuple[str, float]] = {}
+        self._ttl = ttl
+        self._lock = asyncio.Lock()
+    
+    async def get(self, guild_id: int) -> Optional[str]:
+        async with self._lock:
+            if guild_id in self._cache:
+                prefix, timestamp = self._cache[guild_id]
+                if (time.time() - timestamp) < self._ttl:
+                    return prefix
+                else:
+                    del self._cache[guild_id]
+            return None
+    
+    async def set(self, guild_id: int, prefix: str):
+        async with self._lock:
+            self._cache[guild_id] = (prefix, time.time())
+    
+    async def invalidate(self, guild_id: int):
+        async with self._lock:
+            if guild_id in self._cache:
+                del self._cache[guild_id]
+    
+    async def cleanup_expired(self):
+        async with self._lock:
+            now = time.time()
+            expired = [gid for gid, (_, ts) in self._cache.items() if (now - ts) >= self._ttl]
+            for gid in expired:
+                del self._cache[gid]
 
-BOT_OWNER_ONLY_COMMANDS = ["reload", "load", "unload", "sync", "atomictest"]
+BOT_OWNER_ONLY_COMMANDS = ["reload", "load", "unload", "sync", "atomictest", "cachestats", "shardinfo", "dbstats", "integritycheck", "cleanup"]
 
 
 def is_bot_owner():
@@ -75,7 +109,6 @@ def is_bot_owner():
         return True
     return commands.check(predicate)
 
-
 def is_bot_owner_or_guild_owner():
     async def predicate(ctx):
         if ctx.author.id == BOT_OWNER_ID:
@@ -84,7 +117,6 @@ def is_bot_owner_or_guild_owner():
             return True
         raise commands.CheckFailure("This command requires bot owner or guild owner permissions.")
     return commands.check(predicate)
-
 
 def has_command_permission():
     async def predicate(ctx):
@@ -111,7 +143,6 @@ def has_command_permission():
         return True
     
     return commands.check(predicate)
-
 
 async def check_app_command_permissions(interaction: discord.Interaction, command_name: str) -> bool:
     if interaction.user.id == BOT_OWNER_ID:
@@ -156,7 +187,6 @@ async def check_app_command_permissions(interaction: discord.Interaction, comman
     
     return True
 
-
 async def command_autocomplete(interaction: discord.Interaction, current: str) -> List[app_commands.Choice[str]]:
     commands_list = [cmd.name for cmd in interaction.client.commands]
     return [
@@ -165,13 +195,13 @@ async def command_autocomplete(interaction: discord.Interaction, current: str) -
         if current.lower() in cmd.lower()
     ][:25]
 
-
-class BotFrameWork(commands.Bot):
+class BotFrameWork(commands.AutoShardedBot):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.config: Optional[SafeConfig] = None
         self.db: Optional[SafeDatabaseManager] = None
         self.metrics = MetricsCollector()
+        self.prefix_cache = PrefixCache(ttl=600)
         self.extension_load_times: Dict[str, float] = {}
         self.last_extension_check = time.time()
         self._shutdown_event = asyncio.Event()
@@ -179,7 +209,6 @@ class BotFrameWork(commands.Bot):
         self.bot_owner_id = BOT_OWNER_ID
 
     async def load_framework_cogs(self):
-        
         loaded = 0
         failed = 0
         
@@ -189,7 +218,6 @@ class BotFrameWork(commands.Bot):
             logger.info("Created cogs directory for framework modules")
             return
         
-
         load_order = ["event_hooks", "plugin_registry", "framework_diagnostics"]
         
         for cog_name in load_order:
@@ -197,7 +225,6 @@ class BotFrameWork(commands.Bot):
             if not cog_file.exists():
                 continue
             
-
             if not self.config.get(f"framework.enable_{cog_name}", True):
                 logger.info(f"Framework cog disabled in config: {cog_name}")
                 continue
@@ -211,11 +238,10 @@ class BotFrameWork(commands.Bot):
                 logger.debug(traceback.format_exc())
                 failed += 1
         
-
         for filepath in cogs_path.glob("*.py"):
             cog_name = filepath.stem
             if cog_name in load_order:
-                continue  
+                continue
             
             if not self.config.get(f"framework.enable_{cog_name}", True):
                 logger.info(f"Framework cog disabled in config: {cog_name}")
@@ -232,19 +258,65 @@ class BotFrameWork(commands.Bot):
         
         logger.info(f"Framework cogs: {loaded} loaded, {failed} failed")
 
+
+
+    async def cleanup_pycache(self):
+        cleaned = 0
+        try:
+            base_dirs = [Path("./"), Path("./extensions"), Path("./cogs")]
+            
+            for base_dir in base_dirs:
+                if not base_dir.exists():
+                    continue
+                
+                for pycache_dir in base_dir.rglob("__pycache__"):
+                    try:
+                        shutil.rmtree(pycache_dir)
+                        cleaned += 1
+                        logger.debug(f"Cleaned pycache: {pycache_dir}")
+                    except Exception as e:
+                        logger.error(f"Failed to clean {pycache_dir}: {e}")
+            
+            if cleaned > 0:
+                logger.info(f"Cleaned up {cleaned} __pycache__ directories")
+            
+            return cleaned
+        except Exception as e:
+            logger.error(f"PyCache cleanup error: {e}")
+            return 0
+
+
+    @tasks.loop(hours=1)
+    async def db_maintenance_task(self):
+        if self.db:
+            active_guild_ids = {guild.id for guild in self.guilds}
+            
+            for guild_id in list(self.db._guild_connections.keys()):
+                if guild_id not in active_guild_ids:
+                    await self.db.cleanup_guild(guild_id)
+                    logger.info(f"Cleaned up database for guild {guild_id} (no longer in bot)")
+            
+            await self.prefix_cache.cleanup_expired()
+            
+            cleaned = await self.cleanup_pycache()
+            
+            logger.debug(f"Database maintenance completed (cleaned {cleaned} pycache dirs)")
+
+    @db_maintenance_task.before_loop
+    async def before_db_maintenance(self):
+        await self.wait_until_ready()
+
     async def setup_hook(self):
         self.config = SafeConfig(file_handler=global_file_handler)
         await self.config.initialize()
         
-        db_path = self.config.get("database.path", "./data/bot.db")
-        self.db = SafeDatabaseManager(db_path, file_handler=global_file_handler)
+        base_db_path = self.config.get("database.base_path", "./data")
+        self.db = SafeDatabaseManager(base_db_path, file_handler=global_file_handler)
         await self.db.connect()
         
-
         if self.config.get("framework.load_cogs", True):
             await self.load_framework_cogs()
         
-
         if self.config.get("extensions.auto_load", True):
             await self.load_all_extensions()
         
@@ -254,6 +326,7 @@ class BotFrameWork(commands.Bot):
             self.extension_reloader.start()
         
         self.log_rotation_task.start()
+        self.db_maintenance_task.start()
     
     async def load_all_extensions(self):
         loaded = 0
@@ -299,7 +372,6 @@ class BotFrameWork(commands.Bot):
                 self.extension_load_times[ext_name] = load_time
                 logger.info(f"Extension loaded: {ext_name}.py ({load_time:.3f}s)")
                 
-
                 if hasattr(self, 'emit_hook'):
                     await self.emit_hook("extension_loaded", extension_name=f"extensions.{ext_name}")
                 
@@ -325,7 +397,6 @@ class BotFrameWork(commands.Bot):
                 try:
                     await self.reload_extension(ext_name)
                     logger.info(f"Hot-reloaded: {filepath.name}")
-
                     self.extension_load_times[filepath.stem] = time.time() - self.last_extension_check
                 except Exception as e:
                     logger.error(f"Failed to reload {filepath.name}: {e}")
@@ -349,7 +420,6 @@ class BotFrameWork(commands.Bot):
     async def before_log_rotation(self):
         await self.wait_until_ready()
     
-
     @tasks.loop(minutes=5)
     async def status_update_task(self):
         status_config = self.config.get("status", {})
@@ -373,8 +443,6 @@ class BotFrameWork(commands.Bot):
         activity = discord.Activity(type=activity_type, name=text)
         await self.change_presence(activity=activity)
     
-
-
     @status_update_task.before_loop
     async def before_status_update(self):
         await self.wait_until_ready()
@@ -383,8 +451,15 @@ class BotFrameWork(commands.Bot):
         if not message.guild:
             return self.config.get("prefix", "!")
         
+        cached_prefix = await self.prefix_cache.get(message.guild.id)
+        if cached_prefix:
+            return cached_prefix
+        
         custom_prefix = await self.db.get_guild_prefix(message.guild.id)
-        return custom_prefix if custom_prefix else self.config.get("prefix", "!")
+        result = custom_prefix if custom_prefix else self.config.get("prefix", "!")
+        
+        await self.prefix_cache.set(message.guild.id, result)
+        return result
     
     async def sync_commands(self, force: bool = False):
         if self._slash_synced and not force:
@@ -424,6 +499,8 @@ class BotFrameWork(commands.Bot):
             self.extension_reloader.cancel()
         if hasattr(self, 'log_rotation_task'):
             self.log_rotation_task.cancel()
+        if hasattr(self, 'db_maintenance_task'):
+            self.db_maintenance_task.cancel()
         
         if self.db:
             await self.db.backup()
@@ -431,7 +508,6 @@ class BotFrameWork(commands.Bot):
         
         await super().close()
         logger.info("Bot shutdown complete")
-
 
 def setup_logging():
     os.makedirs("./botlogs", exist_ok=True)
@@ -469,24 +545,29 @@ def setup_logging():
     
     return logger
 
-
 logger = setup_logging()
 
 intents = discord.Intents.all()
+
+shard_count = int(os.getenv("SHARD_COUNT", 1))
+shard_ids = None
+if os.getenv("SHARD_IDS"):
+    shard_ids = [int(x) for x in os.getenv("SHARD_IDS").split(",")]
+
 bot = BotFrameWork(
     command_prefix=lambda b, m: b.get_prefix(m),
     intents=intents,
     help_command=None,
     case_insensitive=True,
-    strip_after_prefix=True
+    strip_after_prefix=True,
+    shard_count=shard_count,
+    shard_ids=shard_ids
 )
-
 
 @bot.event
 async def on_ready():
     console = Console()
     
-
     uptime_str = str(timedelta(seconds=int(bot.metrics.get_uptime()))).split('.')[0]
     
     stats_info = (
@@ -496,7 +577,8 @@ async def on_ready():
         f"**Latency:** [bold magenta]{bot.latency*1000:.2f}ms[/bold magenta]\n"
         f"**Uptime:** {uptime_str}\n"
         f"**Servers:** [bold]{len(bot.guilds)}[/bold] | **Users:** [bold]{len(bot.users)}[/bold]\n"
-        f"**Commands:** [bold]{len(bot.tree.get_commands())}[/bold] (Slash)"
+        f"**Commands:** [bold]{len(bot.tree.get_commands())}[/bold] (Slash)\n"
+        f"**Shards:** [bold]{bot.shard_count}[/bold]"
     )
     
     panel = Panel(
@@ -511,7 +593,7 @@ async def on_ready():
     
     logger.info(f"Bot is online as {bot.user} (ID: {bot.user.id})")
     logger.info(f"Bot Owner ID: {BOT_OWNER_ID}")
-    logger.info(f"Connected to {len(bot.guilds)} servers")
+    logger.info(f"Connected to {len(bot.guilds)} servers across {bot.shard_count} shard(s)")
     logger.info(f"Serving {len(bot.users)} users")
     logger.info(f"Registered commands: {len(bot.tree.get_commands())}")
     logger.info(f"Latency: {bot.latency*1000:.2f}ms")
@@ -528,9 +610,7 @@ async def on_message(message: discord.Message):
     if message.author.bot:
         return
     
-    
     if message.guild and bot.user.mentioned_in(message) and len(message.mentions) == 1:
-        
         mention_no_nick = f"<@{bot.user.id}>"
         mention_with_nick = f"<@!{bot.user.id}>"
         
@@ -543,11 +623,9 @@ async def on_message(message: discord.Message):
             content_after_mention = content_after_mention.replace(mention_no_nick, "", 1).strip()
         
         if not content_after_mention:
-            
             prefix = await bot.get_prefix(message)
             if isinstance(prefix, list):
                 prefix = prefix[0]
-            
             
             embed = discord.Embed(
                 title="🤖 Discord Bot Framework",
@@ -558,7 +636,7 @@ async def on_message(message: discord.Message):
             
             embed.add_field(
                 name="🔗 Quick Info",
-                value=f"```Prefix: {prefix}\nSlash: / (Always available)```",
+                value=f"```Prefix: {prefix}\nSlash: / (Always available)\nShards: {bot.shard_count}```",
                 inline=False
             )
             
@@ -582,19 +660,16 @@ async def on_message(message: discord.Message):
 
             await message.channel.send(embed=embed)
             
-            return 
-    
+            return
     
     bot.metrics.record_message()
     await bot.process_commands(message)
-
 
 @bot.event
 async def on_command(ctx: commands.Context):
     bot.metrics.record_command(ctx.command.name)
     await bot.db.increment_command_usage(ctx.command.name)
     logger.info(f"Command: {ctx.command.name} | User: {ctx.author} | Guild: {ctx.guild}")
-
 
 @bot.event
 async def on_command_error(ctx: commands.Context, error: Exception):
@@ -645,15 +720,78 @@ async def on_command_error(ctx: commands.Context, error: Exception):
     except:
         pass
 
-
 @bot.event
 async def on_guild_join(guild: discord.Guild):
-    logger.info(f"Joined guild: {guild.name} (ID: {guild.id}) | Members: {guild.member_count}")
-
+    logger.info(f"Joined guild: {guild.name} (ID: {guild.id}) | Members: {guild.member_count} | Shard: {guild.shard_id}")
 
 @bot.event
 async def on_guild_remove(guild: discord.Guild):
-    logger.info(f"Left guild: {guild.name} (ID: {guild.id})")
+    logger.info(f"Left guild: {guild.name} (ID: {guild.id}) | Shard: {guild.shard_id}")
+    await bot.prefix_cache.invalidate(guild.id)
+    await bot.db.cleanup_guild(guild.id)
+
+
+@bot.hybrid_command(name="cleanup", help="Clean up system cache and temporary files (Bot Owner Only)")
+@is_bot_owner()
+async def cleanup_command(ctx):
+    if ctx.interaction:
+        if not await check_app_command_permissions(ctx.interaction, "cleanup"):
+            return
+    
+    embed = discord.Embed(
+        title="🧹 System Cleanup",
+        description="Cleaning up system files...",
+        color=0xffff00,
+        timestamp=discord.utils.utcnow()
+    )
+    msg = await ctx.send(embed=embed)
+    
+    results = []
+    
+    try:
+        pycache_cleaned = await bot.cleanup_pycache()
+
+        results.append(f"✅ Cleaned {pycache_cleaned} __pycache__ directories")
+        
+        expired_prefix = await bot.prefix_cache.cleanup_expired()
+        results.append(f"✅ Cleaned expired prefix cache entries")
+        
+        global_file_handler._cleanup_locks()
+        results.append(f"✅ Cleaned up file locks")
+        
+        active_guild_ids = {guild.id for guild in bot.guilds}
+        orphaned_count = 0
+        for guild_id in list(bot.db._guild_connections.keys()):
+            if guild_id not in active_guild_ids:
+                await bot.db.cleanup_guild(guild_id)
+                orphaned_count += 1
+        
+        results.append(f"✅ Cleaned {orphaned_count} orphaned DB connections")
+        
+        embed.title = "✅ Cleanup Complete"
+        embed.description = "```\n" + "\n".join(results) + "```"
+        embed.color = 0x00ff00
+        
+        cache_stats = global_file_handler.get_cache_stats()
+        embed.add_field(
+            name="📊 Current Stats",
+            value=f"```File cache: {cache_stats['size']} entries\nFile locks: {cache_stats['locks']}\nDB connections: {len(bot.db._guild_connections)}\nPrefix cache: {len(bot.prefix_cache._cache)}```",
+            inline=False
+        )
+        
+    except Exception as e:
+        embed.title = "❌ Cleanup Failed"
+        embed.description = f"```py\n{str(e)[:200]}```"
+        embed.color = 0xff0000
+        logger.error(f"Cleanup error: {e}")
+        logger.debug(traceback.format_exc())
+    
+    await msg.edit(embed=embed)
+    
+    try:
+        await ctx.message.delete()
+    except:
+        pass
 
 
 @bot.hybrid_command(name="help", help="Display the help menu")
@@ -702,7 +840,6 @@ async def help_command(ctx):
     except:
         pass
 
-
 @bot.hybrid_command(name="stats", help="Display bot statistics and metrics")
 @commands.cooldown(1, 10, commands.BucketType.user)
 @has_command_permission()
@@ -715,7 +852,6 @@ async def stats_command(ctx):
     uptime_seconds = int(stats['uptime'])
     uptime_str = str(timedelta(seconds=uptime_seconds))
     
-
     user_extensions = [ext for ext in bot.extensions.keys() if ext.startswith("extensions.")]
     framework_cogs = [ext for ext in bot.extensions.keys() if ext.startswith("cogs.")]
     
@@ -735,10 +871,9 @@ async def stats_command(ctx):
     embed.add_field(name="❌ Errors", value=f"```{stats['error_count']}```", inline=True)
     embed.add_field(name="📋 Slash Commands", value=f"```{len(bot.tree.get_commands())}```", inline=True)
     
-
     embed.add_field(
         name="⚙️ Framework",
-        value=f"```Cogs: {len(framework_cogs)}\nTotal Modules: {len(bot.extensions)}```",
+        value=f"```Cogs: {len(framework_cogs)}\nTotal Modules: {len(bot.extensions)}\nShards: {bot.shard_count}```",
         inline=False
     )
     
@@ -754,6 +889,78 @@ async def stats_command(ctx):
     except:
         pass
 
+@bot.hybrid_command(name="shardinfo", help="Display shard information")
+@commands.cooldown(1, 10, commands.BucketType.user)
+@has_command_permission()
+async def shardinfo_command(ctx):
+    if ctx.interaction:
+        if not await check_app_command_permissions(ctx.interaction, "shardinfo"):
+            return
+    
+    embed = discord.Embed(
+        title="🔀 Shard Information",
+        description="**Multi-shard deployment status**",
+        color=0x5865f2,
+        timestamp=discord.utils.utcnow()
+    )
+    
+    if ctx.guild:
+        shard_id = ctx.guild.shard_id
+        shard = bot.get_shard(shard_id)
+        
+        guilds_on_this_shard = len([g for g in bot.guilds if g.shard_id == shard_id])
+        
+        embed.add_field(
+            name="📍 Current Shard",
+            value=f"```Shard ID: {shard_id}\nLatency: {shard.latency*1000:.2f}ms\nGuilds: {guilds_on_this_shard}```",
+            inline=False
+        )
+    
+    embed.add_field(
+        name="🌐 Total Shards",
+        value=f"```{bot.shard_count} shard(s)```",
+        inline=True
+    )
+    
+    total_guilds = len(bot.guilds)
+    embed.add_field(
+        name="🏠 Total Guilds",
+        value=f"```{total_guilds} guilds```",
+        inline=True
+    )
+    
+    avg_guilds = total_guilds // bot.shard_count if bot.shard_count > 0 else 0
+    embed.add_field(
+        name="📊 Average per Shard",
+        value=f"```{avg_guilds} guilds```",
+        inline=True
+    )
+    
+    if bot.shard_count <= 10:
+        shard_list = []
+        for shard_id, shard in bot.shards.items():
+            guilds_on_shard = len([g for g in bot.guilds if g.shard_id == shard_id])
+            shard_list.append(f"Shard {shard_id}: {guilds_on_shard} guilds | {shard.latency*1000:.2f}ms")
+        
+        embed.add_field(
+            name="📊 Shard Details",
+            value="```" + "\n".join(shard_list) + "```",
+            inline=False
+        )
+    else:
+        embed.add_field(
+            name="ℹ️ Note",
+            value="```Too many shards to display individually (>10)```",
+            inline=False
+        )
+    
+    embed.set_footer(text=f"Requested by {ctx.author}")
+    await ctx.send(embed=embed)
+    
+    try:
+        await ctx.message.delete()
+    except:
+        pass
 
 @bot.hybrid_command(name="atomictest", help="Test atomic file operations")
 @is_bot_owner()
@@ -834,6 +1041,56 @@ async def atomictest_command(ctx):
     except:
         pass
 
+@bot.hybrid_command(name="cachestats", help="Display cache statistics (Bot Owner Only)")
+@is_bot_owner()
+async def cachestats_command(ctx):
+    if ctx.interaction:
+        if not await check_app_command_permissions(ctx.interaction, "cachestats"):
+            return
+    
+    file_stats = global_file_handler.get_cache_stats()
+    
+    prefix_cache_size = len(bot.prefix_cache._cache)
+    
+    embed = discord.Embed(
+        title="📊 Cache Statistics",
+        description="**Current cache performance metrics**",
+        color=0x5865f2,
+        timestamp=discord.utils.utcnow()
+    )
+    
+    embed.add_field(
+        name="💾 File Cache",
+        value=f"```Size: {file_stats['size']}/{file_stats['max_size']}\nLocks: {file_stats['locks']}```",
+        inline=True
+    )
+    
+    embed.add_field(
+        name="🔧 Prefix Cache",
+        value=f"```Guilds: {prefix_cache_size}\nTTL: 600s```",
+        inline=True
+    )
+    
+    metrics = bot.metrics.get_stats()
+    embed.add_field(
+        name="📈 Metrics",
+        value=f"```Tracked: {metrics.get('tracked_commands', 0)}/100\nMessages: {metrics['messages_seen']}```",
+        inline=True
+    )
+    
+    db_connections = len(bot.db._guild_connections)
+    embed.add_field(
+        name="🗄️ Database",
+        value=f"```Active Connections: {db_connections}\nPer-Guild DBs: Enabled```",
+        inline=False
+    )
+    
+    await ctx.send(embed=embed)
+    
+    try:
+        await ctx.message.delete()
+    except:
+        pass
 
 @bot.hybrid_command(name="sync", help="Force sync slash commands (Bot Owner Only)")
 @is_bot_owner()
@@ -938,17 +1195,16 @@ async def reload_command(ctx, *, extension: str):
     
     try:
         start_time = time.time()
-        await bot.load_extension(f"extensions.{final_ext_to_load}")
+        await bot.reload_extension(f"extensions.{final_ext_to_load}")
         load_time = time.time() - start_time
         bot.extension_load_times[final_ext_to_load] = load_time
         
-
         if hasattr(bot, 'emit_hook'):
             await bot.emit_hook("extension_loaded", extension_name=f"extensions.{final_ext_to_load}")
         
         embed = discord.Embed(
-            title="✅ Extension Loaded",
-            description=f"```Successfully loaded: {final_ext_to_load} ({load_time:.3f}s)```",
+            title="✅ Extension Reloaded",
+            description=f"```Successfully reloaded: {final_ext_to_load} ({load_time:.3f}s)```",
             color=0x00ff00,
             timestamp=discord.utils.utcnow()
         )
@@ -976,6 +1232,7 @@ async def reload_command(ctx, *, extension: str):
             await msg.delete()
         except:
             pass
+
 @bot.hybrid_command(name="load", help="Load a specific extension (Bot Owner Only)")
 @is_bot_owner()
 async def load_command(ctx, *, extension: str):
@@ -1057,7 +1314,6 @@ async def load_command(ctx, *, extension: str):
     except Exception as e:
         error_str = str(e)
         
-
         if "already loaded" in error_str or isinstance(e, commands.ExtensionAlreadyLoaded):
             embed = discord.Embed(
                 title="❌ Extension Already Loaded",
@@ -1080,7 +1336,6 @@ async def load_command(ctx, *, extension: str):
             await msg.delete()
         except:
             pass
-
 
 @bot.hybrid_command(name="unload", help="Unload a specific extension (Bot Owner Only)")
 @is_bot_owner()
@@ -1118,7 +1373,6 @@ async def unload_command(ctx, *, extension: str):
         await bot.unload_extension(final_ext_name)
         simple_name = final_ext_name.replace("extensions.", "")
         
-
         if hasattr(bot, 'emit_hook'):
             await bot.emit_hook("extension_unloaded", extension_name=final_ext_name)
         
@@ -1161,7 +1415,6 @@ async def extensions_command(ctx):
         if not await check_app_command_permissions(ctx.interaction, "extensions"):
             return
     
-
     user_extensions = {k: v for k, v in bot.extensions.items() if k.startswith("extensions.")}
     framework_cogs = {k: v for k, v in bot.extensions.items() if k.startswith("cogs.")}
     
@@ -1176,12 +1429,11 @@ async def extensions_command(ctx):
         return
     
     embed = discord.Embed(
-        title="🔌 Loaded Modules",
+        title="📌 Loaded Modules",
         color=0x5865f2,
         timestamp=discord.utils.utcnow()
     )
     
-
     if user_extensions:
         ext_list = []
         for ext_name in sorted(user_extensions.keys()):
@@ -1195,7 +1447,6 @@ async def extensions_command(ctx):
             inline=False
         )
     
-
     if framework_cogs:
         cog_list = []
         for cog_name in sorted(framework_cogs.keys()):
@@ -1215,7 +1466,6 @@ async def extensions_command(ctx):
         await ctx.message.delete()
     except:
         pass
-
 
 @bot.hybrid_command(name="setprefix", help="Set a custom prefix for this server")
 @commands.has_permissions(administrator=True)
@@ -1241,6 +1491,8 @@ async def setprefix_command(ctx, prefix: str):
         return
     
     await bot.db.set_guild_prefix(ctx.guild.id, prefix)
+    await bot.prefix_cache.invalidate(ctx.guild.id)
+    
     embed = discord.Embed(
         title="✅ Prefix Changed",
         description=f"```Prefix changed to: {prefix}```",
@@ -1254,7 +1506,6 @@ async def setprefix_command(ctx, prefix: str):
         await ctx.message.delete()
     except:
         pass
-
 
 @bot.hybrid_command(name="config", help="Configure command role permissions (Guild Owner or Bot Owner)")
 @is_bot_owner_or_guild_owner()
@@ -1464,6 +1715,258 @@ async def config_command(ctx, command_name: str = None, role: discord.Role = Non
         pass
 
 
+
+
+
+
+
+
+
+
+
+
+
+@bot.hybrid_command(name="dbstats", help="Display database connection statistics (Bot Owner Only)")
+@is_bot_owner()
+async def dbstats_command(ctx):
+    if ctx.interaction:
+        if not await check_app_command_permissions(ctx.interaction, "dbstats"):
+            return
+    
+    embed = discord.Embed(
+        title="🗄️ Database Statistics",
+        description="**Connection pool and database health metrics**",
+        color=0x5865f2,
+        timestamp=discord.utils.utcnow()
+    )
+    
+    active_connections = len(bot.db._guild_connections)
+    total_locks = len(bot.db._connection_locks)
+    
+    embed.add_field(
+        name="📊 Connection Pool",
+        value=f"```Active Connections: {active_connections}\nConnection Locks: {total_locks}\nMain DB: {'Connected' if bot.db.conn else 'Disconnected'}```",
+        inline=False
+    )
+    
+    if bot.db._guild_connections:
+        guild_list = []
+        for guild_id in sorted(list(bot.db._guild_connections.keys())[:10]):
+            guild = bot.get_guild(guild_id)
+            guild_name = guild.name if guild else f"Unknown ({guild_id})"
+            guild_list.append(f"• {guild_name}")
+        
+        if len(bot.db._guild_connections) > 10:
+            guild_list.append(f"... and {len(bot.db._guild_connections) - 10} more")
+        
+        embed.add_field(
+            name="🔌 Active Guild Connections",
+            value="```" + "\n".join(guild_list) + "```",
+            inline=False
+        )
+    
+    current_guilds = {guild.id for guild in bot.guilds}
+    orphaned = [gid for gid in bot.db._guild_connections.keys() if gid not in current_guilds]
+    
+    if orphaned:
+        embed.add_field(
+            name="⚠️ Orphaned Connections",
+            value=f"```{len(orphaned)} connection(s) for guilds bot is no longer in```",
+            inline=False
+        )
+    
+    try:
+        cmd_stats = await bot.db.get_command_stats()
+        if cmd_stats:
+            top_5 = sorted(cmd_stats, key=lambda x: x[1], reverse=True)[:5]
+            stats_text = "\n".join([f"{cmd}: {count}" for cmd, count in top_5])
+            embed.add_field(
+                name="📈 Top Commands (from DB)",
+                value=f"```{stats_text}```",
+                inline=False
+            )
+    except Exception as e:
+        logger.error(f"Failed to get command stats: {e}")
+    
+    embed.set_footer(text="Database Health Monitor")
+    await ctx.send(embed=embed)
+    
+    try:
+        await ctx.message.delete()
+    except:
+        pass
+
+
+@bot.hybrid_command(name="integritycheck", help="Run full system integrity check (Bot Owner Only)")
+@is_bot_owner()
+async def integrity_check_command(ctx):
+    if ctx.interaction:
+        if not await check_app_command_permissions(ctx.interaction, "integritycheck"):
+            return
+    
+    embed = discord.Embed(
+        title="🔍 System Integrity Check",
+        description="Running comprehensive integrity tests...",
+        color=0xffff00,
+        timestamp=discord.utils.utcnow()
+    )
+    msg = await ctx.send(embed=embed)
+    
+    results = []
+    errors = []
+    
+    try:
+        results.append("=== File System ===")
+        
+        config_exists = Path("./config.json").exists()
+        results.append(f"{'✅' if config_exists else '❌'} Config file: {config_exists}")
+        
+        data_dir = Path("./data")
+        data_exists = data_dir.exists()
+        results.append(f"{'✅' if data_exists else '❌'} Data directory: {data_exists}")
+        
+        logs_dir = Path("./botlogs")
+        logs_exist = logs_dir.exists()
+        results.append(f"{'✅' if logs_exist else '❌'} Logs directory: {logs_exist}")
+        
+        results.append("\n=== Database ===")
+        
+        main_db_connected = bot.db.conn is not None
+        results.append(f"{'✅' if main_db_connected else '❌'} Main DB connection: {main_db_connected}")
+        
+        if main_db_connected:
+            try:
+                async with bot.db.conn.execute("SELECT 1") as cursor:
+                    await cursor.fetchone()
+                results.append("✅ Main DB query test: PASS")
+            except Exception as e:
+                results.append(f"❌ Main DB query test: FAIL ({e})")
+                errors.append(f"Main DB query: {e}")
+        
+        guild_db_count = len(bot.db._guild_connections)
+        results.append(f"ℹ️ Guild DB connections: {guild_db_count}")
+        
+        for guild_id, conn in list(bot.db._guild_connections.items())[:5]:
+            try:
+                async with conn.execute("SELECT 1") as cursor:
+                    await cursor.fetchone()
+                results.append(f"✅ Guild {guild_id} DB: PASS")
+            except Exception as e:
+                results.append(f"❌ Guild {guild_id} DB: FAIL")
+                errors.append(f"Guild {guild_id}: {e}")
+        
+        if guild_db_count > 5:
+            results.append(f"ℹ️ ... and {guild_db_count - 5} more guild DBs")
+        
+        results.append("\n=== Cache Systems ===")
+        
+        file_cache_stats = global_file_handler.get_cache_stats()
+        results.append(f"✅ File cache: {file_cache_stats['size']}/{file_cache_stats['max_size']} entries")
+        results.append(f"✅ File locks: {file_cache_stats['locks']} active")
+        
+        prefix_cache_size = len(bot.prefix_cache._cache)
+        results.append(f"✅ Prefix cache: {prefix_cache_size} guilds")
+        
+        results.append("\n=== Extensions ===")
+        
+        user_ext_count = len([e for e in bot.extensions.keys() if e.startswith("extensions.")])
+        framework_cog_count = len([e for e in bot.extensions.keys() if e.startswith("cogs.")])
+        results.append(f"✅ User extensions: {user_ext_count}")
+        results.append(f"✅ Framework cogs: {framework_cog_count}")
+        
+        results.append("\n=== Bot Status ===")
+        
+        results.append(f"✅ Guilds: {len(bot.guilds)}")
+        results.append(f"✅ Users: {len(bot.users)}")
+        results.append(f"✅ Latency: {bot.latency*1000:.2f}ms")
+        results.append(f"✅ Shards: {bot.shard_count}")
+        
+        for shard_id, shard in bot.shards.items():
+            status = "READY" if not shard.is_closed() else "CLOSED"
+            results.append(f"{'✅' if not shard.is_closed() else '❌'} Shard {shard_id}: {status}")
+        
+        results.append("\n=== Memory ===")
+        
+        import psutil
+        process = psutil.Process()
+        memory_mb = process.memory_info().rss / 1024 / 1024
+        results.append(f"ℹ️ Memory usage: {memory_mb:.2f} MB")
+        results.append(f"ℹ️ Threads: {process.num_threads()}")
+        
+        embed.title = "✅ Integrity Check Complete" if not errors else "⚠️ Integrity Check Complete (With Errors)"
+        embed.description = "```\n" + "\n".join(results) + "```"
+        embed.color = 0x00ff00 if not errors else 0xff9900
+        
+        if errors:
+            embed.add_field(
+                name="❌ Errors Found",
+                value="```" + "\n".join(errors[:10]) + "```",
+                inline=False
+            )
+        
+        embed.set_footer(text=f"Total checks: {len(results)} | Errors: {len(errors)}")
+        
+    except Exception as e:
+        embed.title = "❌ Integrity Check Failed"
+        embed.description = f"```py\n{str(e)[:500]}```"
+        embed.color = 0xff0000
+        logger.error(f"Integrity check error: {e}")
+        logger.debug(traceback.format_exc())
+    
+    await msg.edit(embed=embed)
+    
+    try:
+        await ctx.message.delete()
+    except:
+        pass
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 @bot.hybrid_command(name="discordbotframework", aliases=["framework", "botinfo"], help="Display bot framework information")
 @commands.cooldown(1, 10, commands.BucketType.user)
 @has_command_permission()
@@ -1482,6 +1985,8 @@ async def framework_command(ctx):
         "• Dynamic Extension Loading System",
         "• Hot-Reload Capability",
         "• Atomic File Operations & Caching",
+        "• Per-Guild Database System",
+        "• Automatic Sharding Support",
         "• Role-Based Command Permissions",
         "• Advanced Help Menu with Categories",
         "• Interactive Dropdown Menus & Pagination",
@@ -1496,7 +2001,9 @@ async def framework_command(ctx):
         "• Whitespace-Tolerant Extension Names",
         "• Configuration System (JSON)",
         "• Improved Slash Command Sync",
-        "• Bot Owner & Guild Owner Permissions"
+        "• Bot Owner & Guild Owner Permissions",
+        "• LRU Cache with Memory Limits",
+        "• Connection Pooling"
     ]
     
     embed.add_field(
@@ -1508,6 +2015,7 @@ async def framework_command(ctx):
     commands_list = [
         "!help - Interactive help menu",
         "!stats - Bot statistics",
+        "!shardinfo - Shard information",
         "!extensions - List loaded extensions",
         "!config - Configure permissions",
         "!setprefix - Set custom prefix"
@@ -1518,7 +2026,8 @@ async def framework_command(ctx):
         "!load <ext> - Load extension (Owner)",
         "!unload <ext> - Unload extension (Owner)",
         "!sync - Force sync slash commands (Owner)",
-        "!atomictest - Test file operations (Owner)"
+        "!atomictest - Test file operations (Owner)",
+        "!cachestats - View cache statistics (Owner)"
     ]
     
     embed.add_field(
@@ -1538,7 +2047,7 @@ async def framework_command(ctx):
     
     embed.add_field(
         name="📊 Current Stats",
-        value=f"```Uptime: {uptime_str}\nGuilds: {len(bot.guilds)}\nExtensions: {len(bot.extensions)}\nLatency: {bot.latency*1000:.2f}ms```",
+        value=f"```Uptime: {uptime_str}\nGuilds: {len(bot.guilds)}\nExtensions: {len(bot.extensions)}\nLatency: {bot.latency*1000:.2f}ms\nShards: {bot.shard_count}```",
         inline=False
     )
     
@@ -1557,7 +2066,6 @@ async def framework_command(ctx):
     except:
         pass
 
-
 class HelpView(discord.ui.View):
     def __init__(self, categories, author, prefix):
         super().__init__(timeout=180)
@@ -1575,7 +2083,6 @@ class HelpView(discord.ui.View):
             )
             return False
         return True
-
 
 class CategorySelect(discord.ui.Select):
     def __init__(self, categories, prefix):
@@ -1614,7 +2121,6 @@ class CategorySelect(discord.ui.Select):
         start = page * per_page
         end = start + per_page
         
-
         prefix_only = set()
         if hasattr(bot, 'get_prefix_only_commands'):
             prefix_only = bot.get_prefix_only_commands()
@@ -1629,19 +2135,17 @@ class CategorySelect(discord.ui.Select):
         for cmd in cmds[start:end]:
             cmd_help = cmd.help or "No description available"
             
-
             is_hybrid = hasattr(cmd, 'app_command') and cmd.app_command is not None
             is_prefix_only = cmd.name in prefix_only
             
-
             if is_prefix_only:
-                indicator = "🔹 "  
+                indicator = "🔹 "
                 availability = "(Prefix only - Slash limit reached)"
             elif is_hybrid:
-                indicator = "⚡ "  
+                indicator = "⚡ "
                 availability = "(Slash & Prefix)"
             else:
-                indicator = "🔸 "  
+                indicator = "🔸 "
                 availability = "(Prefix only)"
             
             embed.add_field(
@@ -1650,7 +2154,6 @@ class CategorySelect(discord.ui.Select):
                 inline=False
             )
         
-
         legend = (
             "⚡ = Slash & Prefix | "
             "🔸 = Prefix only | "
@@ -1692,7 +2195,6 @@ class CategoryView(discord.ui.View):
             return False
         return True
 
-
 class PrevButton(discord.ui.Button):
     def __init__(self, prefix):
         super().__init__(style=discord.ButtonStyle.gray, label="◀ Previous", row=1)
@@ -1710,7 +2212,6 @@ class PrevButton(discord.ui.Button):
         start = page * per_page
         end = start + per_page
         
-
         prefix_only = set()
         if hasattr(bot, 'get_prefix_only_commands'):
             prefix_only = bot.get_prefix_only_commands()
@@ -1725,11 +2226,9 @@ class PrevButton(discord.ui.Button):
         for cmd in cmds[start:end]:
             cmd_help = cmd.help or "No description available"
             
-
             is_hybrid = hasattr(cmd, 'app_command') and cmd.app_command is not None
             is_prefix_only = cmd.name in prefix_only
             
-
             if is_prefix_only:
                 indicator = "🔹 "
                 availability = "(Prefix only - Slash limit reached)"
@@ -1746,7 +2245,6 @@ class PrevButton(discord.ui.Button):
                 inline=False
             )
         
-
         legend = (
             "⚡ = Slash & Prefix | "
             "🔸 = Prefix only | "
@@ -1761,7 +2259,6 @@ class PrevButton(discord.ui.Button):
         embed.set_footer(text=f"Category: {category}")
         
         return embed
-
 
 class NextButton(discord.ui.Button):
     def __init__(self, prefix):
@@ -1780,7 +2277,6 @@ class NextButton(discord.ui.Button):
         start = page * per_page
         end = start + per_page
         
-
         prefix_only = set()
         if hasattr(bot, 'get_prefix_only_commands'):
             prefix_only = bot.get_prefix_only_commands()
@@ -1795,11 +2291,9 @@ class NextButton(discord.ui.Button):
         for cmd in cmds[start:end]:
             cmd_help = cmd.help or "No description available"
             
-
             is_hybrid = hasattr(cmd, 'app_command') and cmd.app_command is not None
             is_prefix_only = cmd.name in prefix_only
             
-
             if is_prefix_only:
                 indicator = "🔹 "
                 availability = "(Prefix only - Slash limit reached)"
@@ -1816,7 +2310,6 @@ class NextButton(discord.ui.Button):
                 inline=False
             )
         
-
         legend = (
             "⚡ = Slash & Prefix | "
             "🔸 = Prefix only | "
@@ -1831,7 +2324,6 @@ class NextButton(discord.ui.Button):
         embed.set_footer(text=f"Category: {category}")
         
         return embed
-
 
 class BackButton(discord.ui.Button):
     def __init__(self, prefix):
@@ -1874,7 +2366,6 @@ class BackButton(discord.ui.Button):
         view = HelpView(categories, interaction.user, self.prefix)
         await interaction.response.edit_message(embed=embed, view=view)
 
-
 class CreditsButton(discord.ui.Button):
     def __init__(self):
         super().__init__(style=discord.ButtonStyle.gray, label="ℹ️ Credits", row=1)
@@ -1899,10 +2390,11 @@ class CreditsButton(discord.ui.Button):
                 "```• Dynamic Extension Loading System\n"
                 "• Hot-Reload Capability\n"
                 "• Atomic File Operations\n"
+                "• Per-Guild Database System\n"
+                "• Automatic Sharding Support\n"
                 "• Role-Based Command Permissions\n"
                 "• Advanced Help Menu Structure\n"
                 "• Interactive Dropdown Menus\n"
-                "• Automatic Category Organization\n"
                 "• Extension Info & Dynamic Loading\n"
                 "• Pagination Support\n"
                 "• Hybrid Commands (Prefix & Slash)\n"
@@ -1918,7 +2410,9 @@ class CreditsButton(discord.ui.Button):
                 "• File Caching System\n"
                 "• Bot/Guild Owner Permissions\n"
                 "• Slash Command Limit Protection\n"
-                "• Slash/Prefix Status Display```"
+                "• Slash/Prefix Status Display\n"
+                "• LRU Cache with Memory Limits\n"
+                "• Connection Pooling```"
             ),
             inline=False
         )
@@ -1934,16 +2428,13 @@ class CreditsButton(discord.ui.Button):
         
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
-
 def signal_handler(signum, frame):
     logger.info(f"Received signal {signum}, initiating shutdown...")
     asyncio.create_task(bot.close())
     sys.exit(0)
 
-
 signal.signal(signal.SIGINT, signal_handler)
 signal.signal(signal.SIGTERM, signal_handler)
-
 
 if __name__ == "__main__":
     if not TOKEN:

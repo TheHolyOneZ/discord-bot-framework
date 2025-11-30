@@ -29,11 +29,15 @@ class SlashCommandLimiter(commands.Cog):
         self.prefix_only_commands: Set[str] = set()
         self.warning_sent = False
         
-
+        config = bot.config.get("slash_limiter", {})
+        self.DISCORD_SLASH_LIMIT = config.get("max_limit", 100)
+        self.WARNING_THRESHOLD = config.get("warning_threshold", 90)
+        self.SAFE_LIMIT = config.get("safe_limit", 95)
+        
         bot.is_slash_disabled = self.is_slash_disabled
         bot.get_prefix_only_commands = self.get_prefix_only_commands
         
-        logger.info("Slash Command Limiter: System initialized")
+        logger.info(f"Slash Command Limiter: Initialized (warn={self.WARNING_THRESHOLD}, limit={self.SAFE_LIMIT})")
     
     @commands.Cog.listener()
     async def on_ready(self):

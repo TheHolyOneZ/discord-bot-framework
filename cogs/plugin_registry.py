@@ -12,6 +12,8 @@ from datetime import datetime
 import logging
 import inspect
 import traceback
+import asyncio
+
 
 logger = logging.getLogger('discord')
 
@@ -86,20 +88,21 @@ class PluginRegistry(commands.Cog):
             logger.info("Plugin Registry: Registered with event hooks system")
     
     async def scan_loaded_extensions(self):
+        logger.info("Plugin Registry: Lazy-scanning loaded extensions")
         
-        logger.info("Plugin Registry: Scanning loaded extensions")
-        
+        scan_tasks = []
         for ext_name in list(self.bot.extensions.keys()):
-
             if ext_name.startswith("cogs."):
                 continue
             
             simple_name = ext_name.replace("extensions.", "")
-            await self.register_plugin(simple_name, auto_scan=True)
+            scan_tasks.append(self.register_plugin(simple_name, auto_scan=True))
         
-
+        if scan_tasks:
+            await asyncio.gather(*scan_tasks, return_exceptions=True)
+        
         await self.save_registry()
-        logger.info(f"Plugin Registry: Registered {len(self.registry)} plugins")
+        logger.info(f"Plugin Registry: Registered {len(self.registry)} plugins (async)")
     
     async def register_plugin(
         self,
@@ -275,7 +278,6 @@ class PluginRegistry(commands.Cog):
         return self.registry.copy()
     
     async def save_registry(self):
-        
         try:
             registry_data = {
                 "last_updated": datetime.now().isoformat(),
@@ -286,13 +288,15 @@ class PluginRegistry(commands.Cog):
                 }
             }
             
-            await self.bot.config.file_handler.atomic_write_json(
-                str(self.registry_file),
-                registry_data
+            asyncio.create_task(
+                self.bot.config.file_handler.atomic_write_json(
+                    str(self.registry_file),
+                    registry_data
+                )
             )
-            logger.debug(f"Plugin registry saved to {self.registry_file}")
+            logger.debug(f"Plugin registry save queued: {self.registry_file}")
         except Exception as e:
-            logger.error(f"Failed to save plugin registry: {e}")
+            logger.error(f"Failed to queue registry save: {e}")
     
 
     

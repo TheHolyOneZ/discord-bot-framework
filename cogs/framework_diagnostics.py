@@ -12,7 +12,7 @@ import platform
 import sys
 from typing import Dict, Any
 import logging
-
+import asyncio
 logger = logging.getLogger('discord')
 
 
@@ -48,17 +48,23 @@ class FrameworkDiagnostics(commands.Cog):
             self.health_monitor.start()
     
     async def generate_diagnostics(self) -> Dict[str, Any]:
+        loop = asyncio.get_event_loop()
         
+        def _get_system_info():
+            process = psutil.Process()
+            memory_info = process.memory_info()
+            return {
+                "memory_usage_mb": round(memory_info.rss / 1024 / 1024, 2),
+                "cpu_percent": process.cpu_percent(interval=0.1),
+                "threads": process.num_threads()
+            }
         
-        process = psutil.Process()
-        memory_info = process.memory_info()
+        system_info = await loop.run_in_executor(None, _get_system_info)
         
         diagnostics = {
-
             "generated_at": datetime.now().isoformat(),
             "uptime_seconds": (datetime.now() - self.start_time).total_seconds(),
             
-
             "bot": {
                 "username": str(self.bot.user),
                 "user_id": self.bot.user.id,
@@ -67,7 +73,6 @@ class FrameworkDiagnostics(commands.Cog):
                 "latency_ms": round(self.bot.latency * 1000, 2)
             },
             
-
             "environment": {
                 "python_version": platform.python_version(),
                 "discord_py_version": discord.__version__,
@@ -75,7 +80,6 @@ class FrameworkDiagnostics(commands.Cog):
                 "architecture": platform.machine()
             },
             
-
             "extensions": {
                 "total_loaded": len([e for e in self.bot.extensions.keys() if e.startswith("extensions.")]),
                 "user_extensions": [e for e in self.bot.extensions.keys() if e.startswith("extensions.")],
@@ -88,64 +92,47 @@ class FrameworkDiagnostics(commands.Cog):
                 "list": list(self.bot.cogs.keys())
             },
             
-
             "commands": {
                 "total_registered": len(self.bot.commands),
                 "slash_commands": len(self.bot.tree.get_commands()),
                 "command_list": [cmd.name for cmd in self.bot.commands]
             },
             
-
             "servers": {
                 "total_guilds": len(self.bot.guilds),
                 "total_users": len(self.bot.users),
-                "total_channels": sum(len(guild.channels) for guild in self.bot.guilds),
-                "guild_list": [
-                    {
-                        "id": guild.id,
-                        "name": guild.name,
-                        "member_count": guild.member_count
-                    }
-                    for guild in self.bot.guilds
-                ]
+                "total_channels": sum(len(guild.channels) for guild in self.bot.guilds)
             },
             
-
             "performance": {
-                "memory_usage_mb": round(memory_info.rss / 1024 / 1024, 2),
-                "cpu_percent": process.cpu_percent(),
-                "threads": process.num_threads(),
+                **system_info,
                 "commands_processed": self.bot.metrics.commands_processed,
                 "messages_seen": self.bot.metrics.messages_seen,
                 "error_count": self.bot.metrics.error_count
             },
             
-
             "config": {
                 "prefix": self.bot.config.get("prefix", "!"),
                 "auto_reload": self.bot.config.get("auto_reload", False),
                 "extensions_auto_load": self.bot.config.get("extensions.auto_load", True)
             },
             
-
             "database": {
                 "connected": self.bot.db.conn is not None,
-                "path": str(self.bot.db.db_path)
-            },
+                "path": str(self.bot.db.base_path)           
+                 },
             
-
             "health": self.health_metrics
         }
         
-
         try:
             await self.bot.config.file_handler.atomic_write_json(
                 str(self.diagnostics_file),
                 diagnostics
             )
-            logger.info(f"Diagnostics written to {self.diagnostics_file}")
+            logger.info(f"Diagnostics write queued: {self.diagnostics_file}")
         except Exception as e:
-            logger.error(f"Failed to write diagnostics: {e}")
+            logger.error(f"Failed to queue diagnostics write: {e}")
         
         return diagnostics
     
