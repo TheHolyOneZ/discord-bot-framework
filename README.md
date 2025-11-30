@@ -2604,8 +2604,8 @@ Want to see the framework in action? Check the `/images` directory for screensho
 **TheHolyOneZ**
 
 - **GitHub**: [@TheHolyOneZ](https://github.com/TheHolyOneZ)
-- **Website**: [zygnalbot.com](https://zygnalbot.com/)
-- **Discord**: TheHolyOneZ
+- **Website**: [zygnalbot.com](https://zygnalbot.com/bot-framework/)
+- **Discord**: theholyonez
 
 ---
 
