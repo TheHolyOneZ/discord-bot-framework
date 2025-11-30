@@ -393,8 +393,15 @@ pip install -r requirements.txt
 
 Create `.env` in the root directory:
 ```env
-DISCORD_TOKEN=your_bot_token_here
-BOT_OWNER_ID=your_discord_user_id
+DISCORD_TOKEN=Bot_Token
+BOT_OWNER_ID=Your_DiscordID
+
+
+# Sharding Configuration
+SHARD_COUNT=1
+
+# Can be commented out depending on your needs. If you want to use auto-sharding, leave (SHARD_IDS) commented out. 
+# SHARD_IDS=0,1
 ```
 
 **Getting Your User ID:**
