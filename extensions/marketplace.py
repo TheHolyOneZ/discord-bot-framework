@@ -403,20 +403,43 @@ class InstallConfirmView(discord.ui.View):
                 inline=False
             )
         else:
-            embed = discord.Embed(
-                title="❌ Installation Failed",
-                description=f"Failed to download **{self.extension['title']}**.",
-                color=discord.Color.red()
-            )
-            embed.add_field(name="Error Details", value=message, inline=False)
-            embed.add_field(
-                name="🔍 Troubleshooting",
-                value="• Check the error details above\n"
-                      "• Ensure bot has write permissions\n"
-                      "• Verify your ZygnalID is activated\n"
-                      f"• Use `{prefix if 'prefix' in locals() else '!'}marketplace myid` to view your ID",
-                inline=False
-            )
+            prefix = await self.cog.bot.get_prefix(interaction.message) if hasattr(interaction, 'message') and interaction.message else "!"
+            if isinstance(prefix, list):
+                prefix = prefix[0]
+            
+            if "403" in message or "Forbidden" in message:
+                embed = discord.Embed(
+                    title="❌ Installation Failed - Access Denied",
+                    description=f"Failed to download **{self.extension['title']}**.",
+                    color=discord.Color.red()
+                )
+                embed.add_field(
+                    name="🔒 ZygnalID Not Activated",
+                    value="Your ZygnalID is probably NOT activated or got deactivated.\n\n"
+                          "**How to activate:**\n"
+                          "1. Join the ZygnalBot Discord server: `gg/sgZnXca5ts`\n"
+                          "2. Create a ticket with the category **Zygnal Activation**\n"
+                          "3. Read the embed that got sent into the ticket\n"
+                          "4. Provide the information requested\n"
+                          "5. Wait for a supporter or TheHolyOneZ to activate it\n\n"
+                          f"Use `{prefix}marketplace myid` to view your ZygnalID",
+                    inline=False
+                )
+            else:
+                embed = discord.Embed(
+                    title="❌ Installation Failed",
+                    description=f"Failed to download **{self.extension['title']}**.",
+                    color=discord.Color.red()
+                )
+                embed.add_field(name="Error Details", value=message, inline=False)
+                embed.add_field(
+                    name="🔍 Troubleshooting",
+                    value="• Check the error details above\n"
+                          "• Ensure bot has write permissions\n"
+                          "• Verify your ZygnalID is activated\n"
+                          f"• Use `{prefix}marketplace myid` to view your ID",
+                    inline=False
+                )
         
         embed.set_footer(text="Made By TheHolyOneZ")
         await interaction.edit_original_response(embed=embed, view=None)
