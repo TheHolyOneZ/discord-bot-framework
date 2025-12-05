@@ -55,14 +55,38 @@ import traceback
 from pathlib import Path
 from datetime import datetime
 
-logger = logging.getLogger("discord")
+
+DEBUG_MODE = True
+
+
+def apply_logging_rules():
+    global DEBUG_MODE
+
+    if DEBUG_MODE:
+        return
+
+    logging.getLogger().handlers.clear()
+    logging.disable(logging.CRITICAL)
+
+    logger = logging.getLogger("discord")
+
+    for handler in logger.handlers[:]:
+        if isinstance(handler, logging.StreamHandler):
+            logger.removeHandler(handler)
+
+    class NullHandler(logging.Handler):
+        def emit(self, record):
+            pass
+
+    logger.addHandler(NullHandler())
+
+apply_logging_rules()
 
 class SlashLimiter(commands.Cog):
     DISCORD_SLASH_LIMIT = 100
     WARNING_THRESHOLD = 90
     SAFE_LIMIT = 95
-    DEBUG_MODE = False
-
+    
     def __init__(self, bot):
         self.bot = bot
         cfg = getattr(bot, "config", {}) or {}
@@ -564,6 +588,11 @@ class SlashLimiter(commands.Cog):
             self._log_debug(f"ERROR during cog_unload: {e}\n{traceback.format_exc()}")
             logger.exception("[LIMITER] Error during cog_unload")
         logger.info("[LIMITER] Cog unloaded")
+
+
+print("[LIMITER] Active — logs written to botlogs/debug_slashlimiter.log")
+
+
 
 async def setup(bot):
     await bot.add_cog(SlashLimiter(bot))
