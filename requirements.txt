@@ -22,3 +22,7 @@ google-generativeai==0.8.5
 rarfile==4.2
 rich==14.0.0
 
+# Many of these are NOT used by the default framework. These are for the extensions/cogs from https://zygnalbot.com/extension/. 
+# So if you install all that directly, you can, 99% of the time, just install, load them, and it works.
+# If you install all of them now, you won't have problems unless you break something or I forgot a requirement. 
+# If this happens, go on, join the Discord, and I'll help you properly.
