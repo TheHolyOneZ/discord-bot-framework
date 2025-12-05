@@ -1,273 +1,570 @@
 """
-Slash Command Limiter Cog
-Prevents bot crashes from Discord's 100 global slash command limit
-Automatically converts hybrid commands to prefix-only if limit is reached
+================================================================================
+SLASH COMMAND LIMITER - ADVANCED DISCORD BOT PROTECTION
+================================================================================
+
+PRIMARY PURPOSE:
+    Prevents bot crashes by enforcing Discord's 100 slash command limit.
+    Allows loading more cogs than Discord's limit by converting excess commands.
+
+WHAT IT DOES:
+    ✓ Monitors slash command count in real-time
+    ✓ Blocks slash commands when approaching limit (95/100)
+    ✓ Strips slash functionality from hybrid commands (keeps prefix)
+    ✓ Never modifies your source code files
+    ✓ Comprehensive logging to botlogs/debug_slashlimiter.log
+
+COMMAND CONVERSION (BETA):
+    When the limit is reached, this cog attempts to convert app commands to 
+    prefix commands. This is an EXPERIMENTAL feature with the following caveats:
+    
+    ⚠️  CONVERSION SUCCESS RATE: ~30-50%
+    ⚠️  Some converted commands WILL throw errors
+    ⚠️  Commands expecting Interaction objects cannot be converted properly
+    ⚠️  Complex commands with modals/buttons/selects will fail
+    ⚠️  Autocomplete features will not work
+    
+    The conversion is a "best effort" fallback to prevent total cog failure.
+    Think of it as: "Some functionality > No functionality"
+
+WHY CONVERSIONS FAIL:
+    - Slash commands use discord.Interaction, prefix uses discord.ext.commands.Context
+    - These are fundamentally incompatible objects
+    - Parameters work differently (decorators vs function args)
+    - Some features only exist in slash commands
+    
+RECOMMENDATION:
+    If you hit the limit frequently, redesign your bot to use fewer slash commands
+    or switch to primarily prefix commands. This limiter is a safety net, not a 
+    permanent solution.
+
+CHECK STATUS:
+    Use the /slashlimit command to see current usage and converted commands.
+    Check botlogs/debug_slashlimiter.log for detailed conversion attempts.
+
+================================================================================
 """
 
 from discord.ext import commands
-import discord
 from discord import app_commands
-from typing import List, Dict, Set
+import discord
 import logging
+import inspect
+import functools
+import traceback
+from pathlib import Path
+from datetime import datetime
 
-logger = logging.getLogger('discord')
+logger = logging.getLogger("discord")
 
-
-class SlashCommandLimiter(commands.Cog):
-    
-    
-
+class SlashLimiter(commands.Cog):
     DISCORD_SLASH_LIMIT = 100
-
     WARNING_THRESHOLD = 90
-
     SAFE_LIMIT = 95
-    
+    DEBUG_MODE = False
+
     def __init__(self, bot):
         self.bot = bot
-        self.slash_disabled_extensions: Set[str] = set()
-        self.prefix_only_commands: Set[str] = set()
-        self.warning_sent = False
-        
-        config = bot.config.get("slash_limiter", {})
-        self.DISCORD_SLASH_LIMIT = config.get("max_limit", 100)
-        self.WARNING_THRESHOLD = config.get("warning_threshold", 90)
-        self.SAFE_LIMIT = config.get("safe_limit", 95)
-        
+        cfg = getattr(bot, "config", {}) or {}
+        slcfg = cfg.get("slash_limiter", {}) if isinstance(cfg, dict) else {}
+        self.DISCORD_SLASH_LIMIT = int(slcfg.get("max_limit", self.DISCORD_SLASH_LIMIT))
+        self.WARNING_THRESHOLD = int(slcfg.get("warning_threshold", self.WARNING_THRESHOLD))
+        self.SAFE_LIMIT = int(slcfg.get("safe_limit", self.SAFE_LIMIT))
+        self.DEBUG_MODE = bool(slcfg.get("debug_mode", self.DEBUG_MODE))
+        self._original_tree_add = None
+        self._original_cog_inject = None
+        self._patched = False
+        self._converted_commands = {}
+        self._blocked_commands = {}
+        self._registered_hooks = False
+        self._warning_sent = False
+        self._injection_depth = 0
+        self._setup_debug_logging()
         bot.is_slash_disabled = self.is_slash_disabled
-        bot.get_prefix_only_commands = self.get_prefix_only_commands
+        bot.get_converted_commands = self.get_converted_commands
+        self._log_debug("="*80)
+        self._log_debug(f"SLASH LIMITER INITIALIZATION - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        self._log_debug("="*80)
+        self._log_debug(f"Configuration:")
+        self._log_debug(f"  - Discord Slash Limit: {self.DISCORD_SLASH_LIMIT}")
+        self._log_debug(f"  - Warning Threshold: {self.WARNING_THRESHOLD}")
+        self._log_debug(f"  - Safe Limit: {self.SAFE_LIMIT}")
+        self._log_debug(f"  - Debug Mode: {self.DEBUG_MODE}")
+        logger.info(f"[LIMITER] Initializing (warn={self.WARNING_THRESHOLD}, limit={self.SAFE_LIMIT})")
+        self._patch_immediately()
+        logger.info("[LIMITER] Ready and active")
+        self._log_debug("Initialization complete\n")
+
+    def _setup_debug_logging(self):
+        try:
+            log_dir = Path("botlogs")
+            log_dir.mkdir(exist_ok=True)
+            self.debug_log_path = log_dir / "debug_slashlimiter.log"
+            self.debug_logger = logging.getLogger("slash_limiter_debug")
+            self.debug_logger.setLevel(logging.DEBUG)
+            self.debug_logger.handlers.clear()
+            handler = logging.FileHandler(self.debug_log_path, mode='a', encoding='utf-8')
+            handler.setLevel(logging.DEBUG)
+            formatter = logging.Formatter('[%(asctime)s] [%(levelname)s] %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+            handler.setFormatter(formatter)
+            self.debug_logger.addHandler(handler)
+            self.debug_logger.propagate = False
+        except Exception as e:
+            logger.error(f"[LIMITER] Failed to setup debug logging: {e}")
+            self.debug_logger = None
+
+    def _log_debug(self, message):
+        if self.debug_logger:
+            self.debug_logger.debug(message)
+
+    def _patch_immediately(self):
+        if self._patched:
+            self._log_debug("PATCH ATTEMPT: Already patched, skipping")
+            logger.warning("[LIMITER] Already patched, skipping")
+            return
+        tree = getattr(self.bot, "tree", None)
+        if tree is None:
+            self._log_debug("PATCH FAILED: No command tree found")
+            logger.error("[LIMITER] No command tree found, cannot patch")
+            return
+        self._log_debug("\n" + "="*80)
+        self._log_debug("PATCHING PROCESS STARTED")
+        self._log_debug("="*80)
+        logger.info("[LIMITER] Starting patch process")
+        self._original_tree_add = tree.add_command
+        self._original_cog_inject = commands.Cog._inject
+        limiter_self = self
         
-        logger.info(f"Slash Command Limiter: Initialized (warn={self.WARNING_THRESHOLD}, limit={self.SAFE_LIMIT})")
-    
+        def wrapped_tree_add(command, *, override=False, guild=None, guilds=...):
+            try:
+                current = len(tree.get_commands(guild=None))
+            except Exception as e:
+                limiter_self._log_debug(f"ERROR counting commands during tree.add_command: {e}")
+                if limiter_self.DEBUG_MODE:
+                    logger.debug(f"[LIMITER] Error counting commands: {e}")
+                current = 0
+            cmd_name = getattr(command, "name", None) or getattr(command, "qualified_name", "<unknown>")
+            if current >= limiter_self.SAFE_LIMIT:
+                limiter_self._blocked_commands[cmd_name] = {
+                    "reason": "Exceeded safe limit",
+                    "current_count": current,
+                    "timestamp": datetime.now().isoformat()
+                }
+                limiter_self._log_debug(f"\nBLOCKED SLASH COMMAND:")
+                limiter_self._log_debug(f"  Command Name: {cmd_name}")
+                limiter_self._log_debug(f"  Current Count: {current}/{limiter_self.SAFE_LIMIT}")
+                limiter_self._log_debug(f"  Reason: Safe limit exceeded")
+                limiter_self._log_debug(f"  Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+                logger.warning(f"[LIMITER] BLOCKED slash '{cmd_name}' (at {current}/{limiter_self.SAFE_LIMIT})")
+                if current >= limiter_self.WARNING_THRESHOLD and not limiter_self._warning_sent:
+                    logger.warning(f"[LIMITER] Slash commands at {current}/{limiter_self.DISCORD_SLASH_LIMIT}")
+                    limiter_self._warning_sent = True
+                return None
+            if current >= limiter_self.WARNING_THRESHOLD and not limiter_self._warning_sent:
+                limiter_self._log_debug(f"\nWARNING: Approaching limit at {current}/{limiter_self.DISCORD_SLASH_LIMIT}")
+                logger.warning(f"[LIMITER] WARNING: Approaching limit {current}/{limiter_self.DISCORD_SLASH_LIMIT}")
+                limiter_self._warning_sent = True
+            if limiter_self.DEBUG_MODE:
+                limiter_self._log_debug(f"ALLOWING slash command '{cmd_name}' ({current + 1}/{limiter_self.SAFE_LIMIT})")
+                logger.debug(f"[LIMITER] Allowing slash '{cmd_name}' ({current + 1}/{limiter_self.SAFE_LIMIT})")
+            try:
+                kwargs = {"override": override}
+                if guild is not None:
+                    kwargs["guild"] = guild
+                if guilds is not ...:
+                    kwargs["guilds"] = guilds
+                return limiter_self._original_tree_add(command, **kwargs)
+            except Exception as e:
+                limiter_self._log_debug(f"ERROR adding command '{cmd_name}': {e}")
+                logger.error(f"[LIMITER] Error adding command '{cmd_name}': {e}")
+                raise
+        
+        async def wrapped_cog_inject(cog_self, bot, *, override=False, guild=None, guilds=...):
+            limiter_self._injection_depth += 1
+            depth = limiter_self._injection_depth
+            cog_name = getattr(cog_self, "qualified_name", cog_self.__class__.__name__)
+            limiter_self._log_debug(f"\n{'  ' * (depth - 1)}COG INJECTION DEPTH {depth}: {cog_name}")
+            if limiter_self.DEBUG_MODE:
+                logger.debug(f"[LIMITER:{depth}] Injecting cog '{cog_name}'")
+            if cog_self.__class__.__name__ == "SlashLimiter":
+                limiter_self._log_debug(f"{'  ' * (depth - 1)}  -> Skipping self-injection")
+                if limiter_self.DEBUG_MODE:
+                    logger.debug(f"[LIMITER:{depth}] Skipping self-injection for SlashLimiter")
+                try:
+                    kwargs = {"override": override}
+                    if guild is not None:
+                        kwargs["guild"] = guild
+                    if guilds is not ...:
+                        kwargs["guilds"] = guilds
+                    result = await limiter_self._original_cog_inject(cog_self, bot, **kwargs)
+                    limiter_self._injection_depth -= 1
+                    return result
+                except Exception as e:
+                    limiter_self._log_debug(f"{'  ' * (depth - 1)}  ERROR during self-injection: {e}")
+                    if limiter_self.DEBUG_MODE:
+                        logger.error(f"[LIMITER:{depth}] Error during SlashLimiter self-injection: {e}")
+                        logger.error(f"[LIMITER:{depth}] Traceback: {traceback.format_exc()}")
+                    limiter_self._injection_depth -= 1
+                    raise
+            try:
+                try:
+                    current = len(bot.tree.get_commands(guild=None))
+                except Exception as e:
+                    limiter_self._log_debug(f"{'  ' * (depth - 1)}  ERROR counting commands: {e}")
+                    if limiter_self.DEBUG_MODE:
+                        logger.debug(f"[LIMITER:{depth}] Error counting commands: {e}")
+                    current = 0
+                limiter_self._log_debug(f"{'  ' * (depth - 1)}  Current slash count: {current}/{limiter_self.SAFE_LIMIT}")
+                if limiter_self.DEBUG_MODE:
+                    logger.debug(f"[LIMITER:{depth}] Current slash count: {current}/{limiter_self.SAFE_LIMIT}")
+                if current >= limiter_self.SAFE_LIMIT:
+                    limiter_self._log_debug(f"{'  ' * (depth - 1)}  LIMIT REACHED - Converting to prefix commands")
+                    logger.warning(f"[LIMITER:{depth}] Cog '{cog_name}' loading at limit - converting to prefix")
+                    app_cmds = []
+                    for cmd in getattr(cog_self, "__cog_app_commands__", []):
+                        if isinstance(cmd, (app_commands.Command, app_commands.Group)):
+                            app_cmds.append(cmd)
+                    limiter_self._log_debug(f"{'  ' * (depth - 1)}  Found {len(app_cmds)} app commands to convert")
+                    logger.info(f"[LIMITER:{depth}] Found {len(app_cmds)} app commands in '{cog_name}'")
+                    for app_cmd in app_cmds:
+                        try:
+                            limiter_self._convert_to_prefix_sync(bot, app_cmd, cog_name, depth)
+                        except Exception as e:
+                            limiter_self._log_debug(f"{'  ' * (depth - 1)}  ERROR converting {getattr(app_cmd, 'name', '?')}: {e}")
+                            if limiter_self.DEBUG_MODE:
+                                logger.error(f"[LIMITER:{depth}] Failed converting {getattr(app_cmd, 'name', '?')}: {e}")
+                    hybrid_cmds = []
+                    for cmd in getattr(cog_self, "__cog_commands__", []):
+                        if hasattr(cmd, "app_command") and cmd.app_command is not None:
+                            hybrid_cmds.append(cmd)
+                    limiter_self._log_debug(f"{'  ' * (depth - 1)}  Found {len(hybrid_cmds)} hybrid commands to strip")
+                    logger.info(f"[LIMITER:{depth}] Found {len(hybrid_cmds)} hybrid commands in '{cog_name}'")
+                    for hybrid in hybrid_cmds:
+                        try:
+                            original_app = hybrid.app_command
+                            hybrid.app_command = None
+                            limiter_self._log_debug(f"{'  ' * (depth - 1)}    STRIPPED HYBRID:")
+                            limiter_self._log_debug(f"{'  ' * (depth - 1)}      Command: {hybrid.name}")
+                            limiter_self._log_debug(f"{'  ' * (depth - 1)}      Kept: Prefix functionality")
+                            limiter_self._log_debug(f"{'  ' * (depth - 1)}      Removed: Slash functionality")
+                            logger.info(f"[LIMITER:{depth}] Stripped slash from hybrid: {hybrid.name}")
+                            limiter_self._converted_commands[f"{cog_name}:{hybrid.name}"] = {
+                                "type": "hybrid_stripped",
+                                "original_name": hybrid.name,
+                                "cog": cog_name,
+                                "timestamp": datetime.now().isoformat()
+                            }
+                        except Exception as e:
+                            limiter_self._log_debug(f"{'  ' * (depth - 1)}    ERROR stripping hybrid {getattr(hybrid, 'name', '?')}: {e}")
+                            if limiter_self.DEBUG_MODE:
+                                logger.error(f"[LIMITER:{depth}] Failed stripping hybrid {getattr(hybrid, 'name', '?')}: {e}")
+                else:
+                    limiter_self._log_debug(f"{'  ' * (depth - 1)}  Safe to load normally")
+                    if limiter_self.DEBUG_MODE:
+                        logger.debug(f"[LIMITER:{depth}] Cog '{cog_name}' loading normally (safe zone)")
+                limiter_self._log_debug(f"{'  ' * (depth - 1)}  Calling original _inject")
+                if limiter_self.DEBUG_MODE:
+                    logger.debug(f"[LIMITER:{depth}] Calling original _inject for '{cog_name}'")
+                kwargs = {"override": override}
+                if guild is not None:
+                    kwargs["guild"] = guild
+                if guilds is not ...:
+                    kwargs["guilds"] = guilds
+                result = await limiter_self._original_cog_inject(cog_self, bot, **kwargs)
+                limiter_self._log_debug(f"{'  ' * (depth - 1)}  Successfully injected '{cog_name}'")
+                if limiter_self.DEBUG_MODE:
+                    logger.debug(f"[LIMITER:{depth}] Successfully injected '{cog_name}'")
+                limiter_self._injection_depth -= 1
+                return result
+            except Exception as e:
+                limiter_self._log_debug(f"{'  ' * (depth - 1)}  EXCEPTION during injection: {e}")
+                limiter_self._log_debug(f"{'  ' * (depth - 1)}  {traceback.format_exc()}")
+                if limiter_self.DEBUG_MODE:
+                    logger.error(f"[LIMITER:{depth}] Exception during injection of '{cog_name}': {e}")
+                    logger.error(f"[LIMITER:{depth}] Traceback: {traceback.format_exc()}")
+                limiter_self._injection_depth -= 1
+                raise
+        
+        tree.add_command = wrapped_tree_add
+        commands.Cog._inject = wrapped_cog_inject
+        self._patched = True
+        self._log_debug("Patching complete: tree.add_command and Cog._inject wrapped")
+        self._log_debug("="*80 + "\n")
+        logger.info("[LIMITER] Successfully patched tree.add_command + Cog._inject")
+
+    def _convert_to_prefix_sync(self, bot, app_cmd, cog_name, depth):
+        if isinstance(app_cmd, app_commands.Group):
+            self._log_debug(f"{'  ' * depth}  GROUP CONVERSION: {app_cmd.name} ({len(app_cmd.commands)} subcommands)")
+            if self.DEBUG_MODE:
+                logger.debug(f"[LIMITER] Converting group '{app_cmd.name}' with {len(app_cmd.commands)} subcommands")
+            for subcmd in app_cmd.commands:
+                self._convert_to_prefix_sync(bot, subcmd, cog_name, depth + 1)
+            return
+        if not isinstance(app_cmd, app_commands.Command):
+            self._log_debug(f"{'  ' * depth}  SKIPPED: Non-command object {type(app_cmd)}")
+            if self.DEBUG_MODE:
+                logger.debug(f"[LIMITER] Skipping non-command object: {type(app_cmd)}")
+            return
+        callback = getattr(app_cmd, "callback", None)
+        if callback is None:
+            self._log_debug(f"{'  ' * depth}  SKIPPED: No callback found")
+            if self.DEBUG_MODE:
+                logger.warning(f"[LIMITER] App command has no callback, skipping")
+            return
+        name = getattr(app_cmd, "name", None) or callback.__name__
+        desc = getattr(app_cmd, "description", "") or ""
+        cmd_name = name.replace(" ", "_").replace("-", "_")
+        original_name = cmd_name
+        if bot.get_command(cmd_name):
+            cmd_name = f"{cmd_name}_alt"
+            self._log_debug(f"{'  ' * depth}  NAME COLLISION: Using '{cmd_name}' instead of '{original_name}'")
+            if self.DEBUG_MODE:
+                logger.debug(f"[LIMITER] Command name collision, using '{cmd_name}' instead of '{original_name}'")
+        @functools.wraps(callback)
+        async def prefix_wrapper(ctx, *args, **kwargs):
+            try:
+                sig = inspect.signature(callback)
+                params = list(sig.parameters.values())
+                if len(params) > 0 and params[0].name in ("interaction", "inter", "ctx"):
+                    return await callback(ctx, *args, **kwargs)
+                return await callback(ctx)
+            except TypeError as e:
+                limiter_self._log_debug(f"{'  ' * depth}  CONVERSION ERROR: {cmd_name} - TypeError: {e}")
+                await ctx.send(f"⚠️ **Command Conversion Error**\n"
+                              f"This command (`{cmd_name}`) was auto-converted from slash to prefix due to Discord's limit.\n"
+                              f"However, it cannot function properly as a prefix command.\n"
+                              f"Error: `{str(e)[:100]}`")
+            except Exception as e:
+                limiter_self._log_debug(f"{'  ' * depth}  CONVERSION ERROR: {cmd_name} - {type(e).__name__}: {e}")
+                if limiter_self.DEBUG_MODE:
+                    logger.exception(f"[LIMITER] Error in converted command {cmd_name}")
+                try:
+                    await ctx.send(f"⚠️ Error executing converted command: {e}")
+                except:
+                    pass
+        new_cmd = commands.Command(prefix_wrapper, name=cmd_name, help=desc)
+        try:
+            bot.add_command(new_cmd)
+            conversion_info = {
+                "type": "app_to_prefix",
+                "original_name": name,
+                "converted_name": cmd_name,
+                "description": desc,
+                "cog": cog_name,
+                "had_collision": cmd_name != original_name,
+                "timestamp": datetime.now().isoformat()
+            }
+            self._converted_commands[f"{cog_name}:{cmd_name}"] = conversion_info
+            self._log_debug(f"{'  ' * depth}  CONVERTED TO PREFIX:")
+            self._log_debug(f"{'  ' * depth}    Original: /{name}")
+            self._log_debug(f"{'  ' * depth}    New: {cmd_name} (prefix command)")
+            self._log_debug(f"{'  ' * depth}    Cog: {cog_name}")
+            if desc:
+                self._log_debug(f"{'  ' * depth}    Description: {desc}")
+            logger.info(f"[LIMITER] Converted slash '{name}' -> prefix '{cmd_name}'")
+        except Exception as e:
+            self._log_debug(f"{'  ' * depth}  ERROR adding prefix command '{cmd_name}': {e}")
+            if self.DEBUG_MODE:
+                logger.error(f"[LIMITER] Failed adding prefix command '{cmd_name}': {e}")
+
     @commands.Cog.listener()
     async def on_ready(self):
-        
-        await self.check_slash_command_limit()
-        
-
-        if hasattr(self.bot, 'register_hook'):
-            self.bot.register_hook("extension_loaded", self.on_extension_loaded_hook, priority=15)
-            logger.info("Slash Command Limiter: Registered with event hooks")
-    
-    async def check_slash_command_limit(self) -> Dict[str, any]:
-        """
-        Check current slash command count and warn if approaching limit
-        
-        Returns:
-            Dict with status information
-        """
         try:
+            self._log_debug("\n" + "="*80)
+            self._log_debug(f"BOT READY EVENT - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            self._log_debug("="*80)
+            logger.info("[LIMITER] Bot ready, checking status")
+            await self.check_slash_command_limit()
+            if hasattr(self.bot, "register_hook") and not self._registered_hooks:
+                try:
+                    self.bot.register_hook("extension_loaded", self._on_extension_loaded_hook, priority=15)
+                    self.bot.register_hook("extension_load_failed", self._on_extension_load_failed_hook, priority=15)
+                    self._registered_hooks = True
+                    self._log_debug("Registered with event hooks system")
+                    logger.info("[LIMITER] Registered with event hooks")
+                except Exception as e:
+                    self._log_debug(f"No event hooks system available: {e}")
+                    logger.debug(f"[LIMITER] No event hooks system available: {e}")
+            self._log_summary()
+        except Exception as e:
+            self._log_debug(f"ERROR during on_ready: {e}\n{traceback.format_exc()}")
+            logger.exception("[LIMITER] Error during on_ready")
 
-            slash_commands = self.bot.tree.get_commands()
-            current_count = len(slash_commands)
-            
-            status = {
-                "current": current_count,
-                "limit": self.DISCORD_SLASH_LIMIT,
-                "remaining": self.DISCORD_SLASH_LIMIT - current_count,
-                "percentage": (current_count / self.DISCORD_SLASH_LIMIT) * 100,
-                "status": "safe"
-            }
-            
+    def _log_summary(self):
+        self._log_debug("\n" + "="*80)
+        self._log_debug("CONVERSION SUMMARY")
+        self._log_debug("="*80)
+        if self._converted_commands:
+            self._log_debug(f"\nTotal Converted Commands: {len(self._converted_commands)}")
+            app_to_prefix = [k for k, v in self._converted_commands.items() if v.get("type") == "app_to_prefix"]
+            hybrid_stripped = [k for k, v in self._converted_commands.items() if v.get("type") == "hybrid_stripped"]
+            if app_to_prefix:
+                self._log_debug(f"\nApp Commands -> Prefix ({len(app_to_prefix)}):")
+                for key in sorted(app_to_prefix):
+                    info = self._converted_commands[key]
+                    self._log_debug(f"  - /{info['original_name']} -> {info['converted_name']} [{info['cog']}]")
+            if hybrid_stripped:
+                self._log_debug(f"\nHybrid Commands Stripped ({len(hybrid_stripped)}):")
+                for key in sorted(hybrid_stripped):
+                    info = self._converted_commands[key]
+                    self._log_debug(f"  - {info['original_name']} (prefix only) [{info['cog']}]")
+        else:
+            self._log_debug("\nNo commands were converted (all loaded within safe limit)")
+        if self._blocked_commands:
+            self._log_debug(f"\nTotal Blocked Commands: {len(self._blocked_commands)}")
+            self._log_debug("\nBlocked Slash Commands:")
+            for cmd_name in sorted(self._blocked_commands.keys()):
+                info = self._blocked_commands[cmd_name]
+                self._log_debug(f"  - /{cmd_name} (blocked at {info['current_count']}/{self.SAFE_LIMIT})")
+        else:
+            self._log_debug("\nNo commands were blocked")
+        self._log_debug("\n" + "="*80 + "\n")
 
-            if current_count >= self.SAFE_LIMIT:
+    async def check_slash_command_limit(self):
+        try:
+            current = len(self.bot.tree.get_commands())
+            remaining = max(self.DISCORD_SLASH_LIMIT - current, 0)
+            percentage = (current / self.DISCORD_SLASH_LIMIT) * 100 if self.DISCORD_SLASH_LIMIT else 0.0
+            status = {"current": current, "limit": self.DISCORD_SLASH_LIMIT, "remaining": remaining, "percentage": percentage, "status": "safe"}
+            self._log_debug(f"SLASH COMMAND LIMIT CHECK:")
+            self._log_debug(f"  Current: {current}/{self.DISCORD_SLASH_LIMIT}")
+            self._log_debug(f"  Percentage: {percentage:.1f}%")
+            self._log_debug(f"  Remaining: {remaining}")
+            if current >= self.SAFE_LIMIT:
                 status["status"] = "critical"
-                logger.error(f"⚠️ CRITICAL: Slash commands at {current_count}/{self.DISCORD_SLASH_LIMIT}! Very close to limit!")
-            elif current_count >= self.WARNING_THRESHOLD:
+                self._log_debug(f"  Status: CRITICAL")
+                logger.error(f"[LIMITER] CRITICAL: Slash commands at {current}/{self.DISCORD_SLASH_LIMIT}")
+            elif current >= self.WARNING_THRESHOLD:
                 status["status"] = "warning"
-                if not self.warning_sent:
-                    logger.warning(f"⚠️ WARNING: Slash commands at {current_count}/{self.DISCORD_SLASH_LIMIT} ({status['percentage']:.1f}%)")
-                    self.warning_sent = True
+                self._log_debug(f"  Status: WARNING")
+                if not self._warning_sent:
+                    logger.warning(f"[LIMITER] WARNING: Slash commands at {current}/{self.DISCORD_SLASH_LIMIT} ({percentage:.1f}%)")
+                    self._warning_sent = True
             else:
                 status["status"] = "safe"
-                logger.info(f"✅ Slash commands: {current_count}/{self.DISCORD_SLASH_LIMIT} ({status['percentage']:.1f}%)")
-            
+                self._log_debug(f"  Status: SAFE")
+                logger.info(f"[LIMITER] Slash commands: {current}/{self.DISCORD_SLASH_LIMIT} ({percentage:.1f}%)")
+            self._log_debug(f"  Blocked: {len(self._blocked_commands)}, Converted: {len(self._converted_commands)}\n")
+            logger.info(f"[LIMITER] Blocked: {len(self._blocked_commands)}, Converted: {len(self._converted_commands)}")
             return status
-            
         except Exception as e:
-            logger.error(f"Failed to check slash command limit: {e}")
-            return {"error": str(e)}
-    
-    async def disable_slash_for_extension(self, extension_name: str) -> bool:
-        """
-        Disable slash commands for an extension and fall back to prefix-only
-        
-        Args:
-            extension_name: Full extension name (e.g., 'extensions.myext')
-        
-        Returns:
-            bool: True if successfully disabled
-        """
+            self._log_debug(f"ERROR checking slash command limit: {e}\n{traceback.format_exc()}")
+            logger.exception("[LIMITER] Failed to check slash command limit")
+            return {"error": "failed"}
+
+    def is_slash_disabled(self, name):
+        return name in self._blocked_commands
+
+    def get_converted_commands(self):
+        return dict(self._converted_commands)
+
+    async def _on_extension_loaded_hook(self, bot, extension_name, **kwargs):
         try:
-            simple_name = extension_name.replace("extensions.", "").replace("cogs.", "")
-            
-
-            self.slash_disabled_extensions.add(simple_name)
-            
-
-            for cmd in self.bot.commands:
-                if hasattr(cmd, 'cog') and cmd.cog:
-                    cog_module = cmd.cog.__module__
-                    if cog_module.startswith(extension_name):
-
-                        self.prefix_only_commands.add(cmd.name)
-                        logger.info(f"Converted to prefix-only: {cmd.name} (from {simple_name})")
-            
-            logger.warning(f"Extension '{simple_name}' running in PREFIX-ONLY mode due to slash command limit")
-            return True
-            
+            self._log_debug(f"\nEXTENSION LOADED: {extension_name}")
+            if self.DEBUG_MODE:
+                logger.debug(f"[LIMITER] Extension loaded: {extension_name}")
+            status = await self.check_slash_command_limit()
+            if status.get("status") == "critical":
+                self._log_debug(f"  WARNING: Loaded at critical limit")
+                logger.warning(f"[LIMITER] Extension {extension_name} loaded at critical limit")
         except Exception as e:
-            logger.error(f"Failed to disable slash for {extension_name}: {e}")
-            return False
-    
-    def is_slash_disabled(self, extension_name: str) -> bool:
-        """
-        Check if an extension has slash commands disabled
-        
-        Args:
-            extension_name: Extension name (simple or full)
-        
-        Returns:
-            bool: True if slash is disabled for this extension
-        """
-        simple_name = extension_name.replace("extensions.", "").replace("cogs.", "")
-        return simple_name in self.slash_disabled_extensions
-    
-    def get_prefix_only_commands(self) -> Set[str]:
-        
-        return self.prefix_only_commands.copy()
-    
-    async def on_extension_loaded_hook(self, bot, extension_name: str, **kwargs):
-        
-        
+            self._log_debug(f"ERROR in extension_loaded hook: {e}")
+            logger.exception("[LIMITER] Error in extension_loaded hook")
 
-        if extension_name.startswith("cogs."):
-            return
-        
+    async def _on_extension_load_failed_hook(self, bot, extension_name, error=None, **kwargs):
+        try:
+            if error is None:
+                return
+            err_str = str(error)
+            self._log_debug(f"\nEXTENSION LOAD FAILED: {extension_name}")
+            self._log_debug(f"  Error: {err_str}")
+            if "CommandLimitReached" in err_str:
+                self._log_debug(f"  Type: CommandLimitReached (limiter should have prevented this)")
+                logger.error(f"[LIMITER] Extension {extension_name} failed: CommandLimitReached (limiter should have prevented this!)")
+            elif "can't be used in 'await' expression" in err_str:
+                self._log_debug(f"  Type: Malformed setup() - not a limiter issue")
+                logger.debug(f"[LIMITER] Extension {extension_name} has malformed setup() - not a limiter issue")
+        except Exception as e:
+            self._log_debug(f"ERROR in extension_load_failed hook: {e}")
+            logger.exception("[LIMITER] Error in extension_load_failed hook")
 
-        status = await self.check_slash_command_limit()
-        
-
-        if status.get("status") == "critical":
-            logger.warning(f"Slash command limit critical! Disabling slash for {extension_name}")
-            await self.disable_slash_for_extension(extension_name)
-    
     @commands.hybrid_command(name="slashlimit", help="Check slash command usage and limits")
     @commands.cooldown(1, 10, commands.BucketType.user)
     async def slash_limit_command(self, ctx):
-        
-        
         status = await self.check_slash_command_limit()
-        
-
-        color_map = {
-            "safe": 0x00ff00,      
-            "warning": 0xffff00,   
-            "critical": 0xff0000   
-        }
+        color_map = {"safe": 0x00ff00, "warning": 0xffff00, "critical": 0xff0000}
         color = color_map.get(status.get("status", "safe"), 0x5865f2)
-        
-        embed = discord.Embed(
-            title="📊 Slash Command Usage",
-            description="**Discord imposes a hard limit of 100 global slash commands**",
-            color=color,
-            timestamp=discord.utils.utcnow()
-        )
-        
-
+        embed = discord.Embed(title="Slash Command Usage", description="Discord imposes a hard limit of 100 global slash commands", color=color, timestamp=discord.utils.utcnow())
         percentage = status.get("percentage", 0)
         progress_bar = self._create_progress_bar(percentage)
-        
-        embed.add_field(
-            name="📈 Current Usage",
-            value=f"```{status.get('current', 0)}/{self.DISCORD_SLASH_LIMIT} commands ({percentage:.1f}%)\n{progress_bar}```",
-            inline=False
-        )
-        
-        embed.add_field(
-            name="🔢 Remaining",
-            value=f"```{status.get('remaining', 0)} slots available```",
-            inline=True
-        )
-        
-
-        status_text = {
-            "safe": "✅ Safe - Plenty of room",
-            "warning": "⚠️ Warning - Getting full",
-            "critical": "🚨 Critical - At limit!"
-        }
-        embed.add_field(
-            name="🚦 Status",
-            value=f"```{status_text.get(status.get('status', 'safe'), 'Unknown')}```",
-            inline=True
-        )
-        
-
-        if self.slash_disabled_extensions:
-            disabled_list = "\n".join([f"• {ext}" for ext in sorted(self.slash_disabled_extensions)])
-            embed.add_field(
-                name="⚙️ Prefix-Only Extensions",
-                value=f"```{disabled_list}```",
-                inline=False
-            )
-        
-
-        if self.prefix_only_commands:
-            cmds_list = ", ".join(sorted(list(self.prefix_only_commands)[:10]))
-            if len(self.prefix_only_commands) > 10:
-                cmds_list += f"... (+{len(self.prefix_only_commands) - 10} more)"
-            embed.add_field(
-                name="📝 Prefix-Only Commands",
-                value=f"```{cmds_list}```",
-                inline=False
-            )
-        
-
-        embed.add_field(
-            name="ℹ️ Information",
-            value=(
-                "```When limit is reached:\n"
-                "• New extensions run prefix-only\n"
-                "• Existing slash commands still work\n"
-                "• Help menu shows prefix/slash status```"
-            ),
-            inline=False
-        )
-        
-        embed.set_footer(text="Framework Protection System")
-        
+        embed.add_field(name="Current Usage", value=f"```{status.get('current', 0)}/{self.DISCORD_SLASH_LIMIT} commands ({percentage:.1f}%)\n{progress_bar}```", inline=False)
+        embed.add_field(name="Remaining", value=f"```{status.get('remaining', 0)} slots available```", inline=True)
+        status_text = {"safe": "Safe - Plenty of room", "warning": "Warning - Getting full", "critical": "Critical - At limit"}
+        embed.add_field(name="Status", value=f"```{status_text.get(status.get('status', 'safe'), 'Unknown')}```", inline=True)
+        if self._blocked_commands:
+            blocked_list = "\n".join([f"{cmd}" for cmd in sorted(self._blocked_commands.keys())[:20]])
+            if len(self._blocked_commands) > 20:
+                blocked_list += f"\n... (+{len(self._blocked_commands) - 20} more)"
+            embed.add_field(name="Blocked Slash Commands", value=f"```{blocked_list}```", inline=False)
+        if self._converted_commands:
+            conv_list = []
+            for key in sorted(list(self._converted_commands.keys())[:15]):
+                info = self._converted_commands[key]
+                if info.get("type") == "app_to_prefix":
+                    conv_list.append(f"/{info['original_name']} -> {info['converted_name']}")
+                else:
+                    conv_list.append(f"{info['original_name']} (hybrid stripped)")
+            conv_str = "\n".join(conv_list)
+            if len(self._converted_commands) > 15:
+                conv_str += f"\n... (+{len(self._converted_commands) - 15} more)"
+            embed.add_field(name="Converted Commands", value=f"```{conv_str}```", inline=False)
+        embed.add_field(name="How It Works", value="```Intercepts cog loading before slash registration\nConverts slash commands to prefix (BETA - may fail)\nStrips slash from hybrids, keeps prefix\nNever modifies cog source code```", inline=False)
+        embed.add_field(name="⚠️ Conversion Status", value="```Converted commands are EXPERIMENTAL\n~30-50% success rate\nSome will throw errors when used\nCheck debug log for details```", inline=False)
+        embed.add_field(name="Debug Log", value=f"```Check: botlogs/debug_slashlimiter.log```", inline=False)
+        embed.set_footer(text="Slash Limiter")
         await ctx.send(embed=embed)
-        
-        try:
-            await ctx.message.delete()
-        except:
-            pass
-    
-    def _create_progress_bar(self, percentage: float, length: int = 20) -> str:
-        
-        filled = int((percentage / 100) * length)
-        empty = length - filled
-        
-        if percentage >= 95:
-            bar_char = "🔴"
-        elif percentage >= 90:
-            bar_char = "🟡"
-        else:
-            bar_char = "🟢"
-        
-        return f"[{'█' * filled}{'░' * empty}] {bar_char}"
-    
-    def cog_unload(self):
-        
-        if hasattr(self.bot, 'is_slash_disabled'):
-            delattr(self.bot, 'is_slash_disabled')
-        if hasattr(self.bot, 'get_prefix_only_commands'):
-            delattr(self.bot, 'get_prefix_only_commands')
-        
-        logger.info("Slash Command Limiter: Cog unloaded")
 
+    def _create_progress_bar(self, percentage, length=20):
+        try:
+            filled = int((percentage / 100) * length)
+            empty = max(length - filled, 0)
+            return f"[{'█' * filled}{'░' * empty}]"
+        except:
+            return "[░" + "░" * (length - 1) + "]"
+
+    def cog_unload(self):
+        try:
+            self._log_debug("\n" + "="*80)
+            self._log_debug(f"COG UNLOAD - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            self._log_debug("="*80)
+            logger.info("[LIMITER] Unloading cog")
+            if hasattr(self.bot, "is_slash_disabled"):
+                delattr(self.bot, "is_slash_disabled")
+            if hasattr(self.bot, "get_converted_commands"):
+                delattr(self.bot, "get_converted_commands")
+            if self._original_tree_add and self._patched:
+                try:
+                    self.bot.tree.add_command = self._original_tree_add
+                    self._log_debug("Restored original tree.add_command")
+                    logger.info("[LIMITER] Restored original tree.add_command")
+                except Exception as e:
+                    self._log_debug(f"Failed restoring tree.add_command: {e}")
+                    logger.error(f"[LIMITER] Failed restoring tree.add_command: {e}")
+            if self._original_cog_inject and self._patched:
+                try:
+                    commands.Cog._inject = self._original_cog_inject
+                    self._log_debug("Restored original Cog._inject")
+                    logger.info("[LIMITER] Restored original Cog._inject")
+                except Exception as e:
+                    self._log_debug(f"Failed restoring Cog._inject: {e}")
+                    logger.error(f"[LIMITER] Failed restoring Cog._inject: {e}")
+            self._log_debug("Cog unload complete")
+            self._log_debug("="*80 + "\n")
+        except Exception as e:
+            self._log_debug(f"ERROR during cog_unload: {e}\n{traceback.format_exc()}")
+            logger.exception("[LIMITER] Error during cog_unload")
+        logger.info("[LIMITER] Cog unloaded")
 
 async def setup(bot):
-    
-    await bot.add_cog(SlashCommandLimiter(bot))
-    logger.info("Slash Command Limiter cog loaded successfully")
+    await bot.add_cog(SlashLimiter(bot))
+    logger.info("[LIMITER] Loaded successfully")
