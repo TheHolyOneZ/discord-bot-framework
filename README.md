@@ -3266,7 +3266,7 @@ Need help? Have questions?
 
 - **ZygnalBot Framework**: https://zygnalbot.com/bot-framework/
 - **Extension Marketplace**: https://zygnalbot.com/extension/
-- **Documentation**: https://zygnalbot.com/docs/
+
 
 ### Learning Resources
 
