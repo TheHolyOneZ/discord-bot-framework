@@ -3301,19 +3301,8 @@ Want to see the framework in action? Check the `/images` directory for screensho
 **TheHolyOneZ**
 
 - **GitHub**: [@TheHolyOneZ](https://github.com/TheHolyOneZ)
-- **Website**: [zygnalbot.com](https://zygnalbot.com/bot-framework/)
+- **Website**: [zygnalbot.com/bot-framework](https://zygnalbot.com/bot-framework/)
 - **Discord**: theholyonez
-
----
-
-## 🌟 Acknowledgments
-
-Special thanks to:
-
-- **discord.py** - For the amazing Discord library
-- **Contributors** - Everyone who has contributed to this project
-- **Community** - For feedback, bug reports, and feature requests
-- **You** - For using this framework!
 
 ---
 
