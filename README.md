@@ -95,37 +95,143 @@ Built with **discord.py 2.0+** and modern Python async patterns, this framework 
 **Event Hooks System** (`cogs/event_hooks.py`)
 - Internal event system for framework lifecycle events
 - Priority-based callback execution
-- Asynchronous queue processing (1000 event queue)
+- **Asynchronous queue processing:**
+  - 1000 event capacity with backpressure (5s wait before drop)
+  - Queue delay tracking for performance monitoring
+  - Worker auto-restart on crash (up to 10 attempts)
+- **Circuit Breaker Pattern:**
+  - Opens after 5 failures in 5 minutes
+  - Disables hook for 60 seconds
+  - Automatic recovery with manual override
+  - Prevents cascading failures
+- **Hook timeout protection:**
+  - 10-second timeout per hook execution
+  - Prevents blocking the entire queue
+  - Timeout triggers circuit breaker
+- **Performance monitoring:**
+  - Execution time tracking per hook
+  - Success/failure counts
+  - Average execution time calculations
+  - Queue delay metrics
+- **Hook management:**
+  - Disable/enable hooks without code changes
+  - Status indicators (🔴 disabled, ⚠️ circuit open)
+  - Manual circuit breaker reset
+- **Alert system:**
+  - Queue full notifications
+  - Circuit breaker triggers
+  - Worker crash alerts
+  - Configurable alert channel
 - Hook execution history (100 total, 20 per event)
 - Built-in events: bot_ready, guild_joined, guild_left, command_executed, command_error
 - Custom event emission support
 
+
 **Plugin Registry** (`cogs/plugin_registry.py`)
-- Automatic metadata extraction from extensions
-- Dependency and conflict tracking
-- Version management and author attribution
+- Automatic metadata extraction from extensions with error logging
+- **Dependency validation and enforcement:**
+  - Version comparison support (`>=`, `>`, `==`, `<=`, `<`)
+  - Missing dependency detection
+  - Version mismatch detection
+- **Conflict detection and prevention:**
+  - Bidirectional conflict checking
+  - Automatic conflict alerts
+- **Circular dependency detection:**
+  - Prevents infinite dependency loops
+  - Shows full dependency cycle path
 - Command and cog enumeration
 - Load time tracking per plugin
-- Auto-registration on extension load
-- JSON-based registry persistence
+- Auto-registration on extension load via event hooks
+- JSON-based registry persistence with enforcement settings
+- **Alert system:**
+  - Configurable alert channel
+  - Validation issue warnings
+  - Scan error notifications
+- **Status indicators:**
+  - ✅ Valid plugin
+  - ⚠️ Warnings (conflicts, scan errors)
+  - ❌ Missing dependencies
+  - 🔄 Circular dependencies
+- **Toggleable enforcement:**
+  - Enable/disable dependency checking
+  - Enable/disable conflict checking
+
 
 **Framework Diagnostics** (`cogs/framework_diagnostics.py`)
-- Real-time system health monitoring
-- CPU and memory usage tracking
-- Command/error rate metrics
+- Real-time system health monitoring with three-tier status (healthy/degraded/critical)
+- CPU, memory, threads, open files, and connections tracking
+- Command/error rate metrics with automatic calculation
+- Event loop lag monitoring (checks every second)
 - Uptime and latency monitoring
 - Extension load time analysis
-- Health status: healthy (<5% error rate) or degraded
 - Automatic diagnostics generation every 5 minutes
+- Alert system with configurable channel (`!fw_alert_channel`)
+- Automatic alerts for:
+  - Critical health status (≥10% error rate)
+  - Degraded health status (≥5% error rate)
+  - Event loop blocking/lag
+  - Consecutive write failures (≥3 failures)
+- Comprehensive diagnostics saved to JSON files:
+  - `framework_diagnostics.json` - Full system report
+  - `framework_health.json` - Real-time health metrics
 
 **Slash Command Limiter** (`cogs/slash_command_limiter.py`)
-- Monitors Discord's 100 global slash command limit
-- Configurable thresholds: warning (90), safe limit (95)
-- Automatic conversion to prefix-only mode
-- Extension-level slash command disabling
-- Visual progress bars in command output
-- Integration with help system for command type display
-
+- **Intelligent Discord 100-command limit management with automatic conversion**
+- **Thread-safe singleton pattern** - Only one instance allowed per bot
+- **Configurable thresholds:**
+  - Warning threshold (default: 90/100)
+  - Safe limit (default: 95/100) 
+  - Hard limit (100/100)
+- **Multi-layered interception system:**
+  - `tree.add_command()` monkey-patching for dynamic command blocking
+  - `Cog._inject()` interception for cog-level slash stripping
+  - Prevents commands from ever reaching Discord's API
+- **Intelligent command type detection:**
+  - ✅ **Skips `HybridCommand`** - Already have prefix support, no conversion needed
+  - ✅ **Skips `commands.Command`** - Already prefix-only
+  - ✅ **Skips `app_commands.Group`** - Command groups cannot be converted
+  - 🔄 **Converts `app_commands.Command`** - Pure slash commands to prefix equivalents
+- **Advanced parameter conversion system:**
+  - Automatic type detection from function signatures
+  - **Discord object conversion:**
+    - `discord.Member` / `discord.User` - Converts @mentions and IDs to Member objects
+    - `discord.Role` - Converts role mentions and IDs to Role objects
+    - `discord.TextChannel` / `discord.VoiceChannel` - Converts #channel mentions to Channel objects
+  - **Primitive type handling:**
+    - `int` - String to integer conversion
+    - `float` - String to float conversion  
+    - `bool` - Handles "true", "yes", "1", "y", "on" variations
+  - **Intelligent error messages:**
+    - Missing required parameters with usage examples
+    - Type conversion failures with helpful hints
+    - Guild context validation (DM protection)
+- **Production-ready MockInteraction wrapper:**
+  - Emulates full `discord.Interaction` object for seamless compatibility
+  - Handles `interaction.response.send_message()`, `interaction.followup.send()`
+  - Supports embeds, files, views (buttons/dropdowns), and all Discord features
+  - Proper attribute forwarding: `guild`, `user`, `channel`, `permissions`, `command`
+  - Modal support with graceful degradation message
+- **Comprehensive tracking and logging:**
+  - Blocked commands registry with timestamps and caller info
+  - Converted commands tracking with conversion type metadata
+  - Warning threshold system with automatic reset
+  - Debug logging to `botlogs/debug_slashlimiter.log`
+  - Caller tracking shows which file/line triggered blocking
+- **Self-protection mechanisms:**
+  - Limiter's own commands (`slashlimit`) exempted from blocking
+  - Async startup to prevent bot hang during initialization  
+  - Non-blocking background tasks for scanning
+  - Graceful degradation on conversion failures
+- **User-friendly status display (`/slashlimit`):**
+  - Visual progress bars showing command usage
+  - Color-coded status (green=safe, yellow=warning, red=critical)
+  - Lists blocked and converted commands
+  - Shows system status and verification state
+- **Integration with help system:**
+  - Command type indicators: ⚡ (hybrid), 🔸 (prefix-only), 🔹 (converted from slash)
+  - Automatic updates when commands are converted
+  - Real-time command count tracking
+  
 ### 🛒 Integrated Extension Marketplace
 
 **Direct Extension Installation**
@@ -285,7 +391,17 @@ Built with **discord.py 2.0+** and modern Python async patterns, this framework 
 
 ### System Architecture
 
-✅ **Atomic File Operations** - Thread-safe file handling with LRU caching  
+✅ **Atomic File Operations** - Thread-safe file handling with LRU caching and retry logic
+- Zero data corruption through tempfile-based writes
+- 300s TTL, 1000 entry LRU cache
+- Automatic lock cleanup (500 lock threshold)
+- 3-attempt retry with exponential backoff
+- Comprehensive metrics and health monitoring
+- Diagnostic commands: `!atomicstats`, `!atomictest`
+- Cache hit rate tracking and optimization
+- Cross-platform compatibility (Windows/Linux)
+
+
 ✅ **SQLite Database** - Optimized with WAL mode and connection pooling  
 ✅ **Safe Log Rotation** - Automatic management with size and age limits  
 ✅ **Hot-Reload System** - File-watching based auto-reload (optional)  
@@ -523,26 +639,46 @@ discord-bot-framework/
 | `!marketplace fixdeps` | Auto-install missing dependencies (Owner) | 60s | ✅ |
 | `!marketplace myid` | View your ZygnalID (Owner only) | - | ✅ |
 
+
+### Atomic File System Commands
+
+| Command | Description | Cooldown | Hybrid |
+|---------|-------------|----------|--------|
+| `!atomicstats` / `/atomicstats` | Display atomic file system statistics (Owner) | - | Yes |
+| `!atomictest` / `/atomictest` | Run comprehensive atomic operations test suite (Owner) | - | Yes |
+
+
+
 ### 🔌 Plugin Registry Commands
 
 | Command | Description | Cooldown | Hybrid |
 |---------|-------------|----------|--------|
-| `!plugins` / `/plugins` | List all registered plugins with metadata | 10s | ✅ |
-| `!plugininfo <name>` | Detailed information about a plugin | 10s | ✅ |
+| `!pr_list` / `/pr_list` | List all registered plugins with status indicators | 10s | ✅ |
+| `!pr_info <name>` / `/pr_info` | Detailed information about a specific plugin | 10s | ✅ |
+| `!pr_validate <name>` | Validate plugin dependencies and conflicts (Owner) | - | ✅ |
+| `!pr_enforce <mode>` | Toggle dependency/conflict enforcement (Owner) | - | ✅ |
+| `!pr_alert_channel [channel]` | Set alert channel for registry warnings (Owner) | - | ✅ |
 
 ### 📊 Framework Diagnostics Commands
 
 | Command | Description | Cooldown | Hybrid |
 |---------|-------------|----------|--------|
-| `!diagnostics` / `/diagnostics` | Display framework health and diagnostics (Owner) | - | ✅ |
+| `!fw_diagnostics` / `/fw_diagnostics` | Display framework health and diagnostics (Owner) | - | ✅ |
+| `!fw_alert_channel` / `/fw_alert_channel` | Set alert channel for framework diagnostics (Owner) | - | ✅ |
 | `!slashlimit` / `/slashlimit` | Check slash command usage and limits | 10s | ✅ |
+
 
 ### 🪝 Event Hooks Commands
 
 | Command | Description | Cooldown | Hybrid |
 |---------|-------------|----------|--------|
-| `!hooks` / `/hooks` | Display registered framework hooks (Owner) | - | ✅ |
-| `!hookhistory [limit]` | Display hook execution history (Owner) | - | ✅ |
+| `!eh_list` / `/eh_list` | Display registered hooks with metrics (Owner) | - | ✅ |
+| `!eh_history [limit]` / `/eh_history` | Display hook execution history (Owner) | - | ✅ |
+| `!eh_disable <hook_id>` | Disable a problematic hook (Owner) | - | ✅ |
+| `!eh_enable <hook_id>` | Re-enable a disabled hook (Owner) | - | ✅ |
+| `!eh_reset_circuit <hook_id>` | Reset circuit breaker for hook (Owner) | - | ✅ |
+| `!eh_alert_channel [channel]` | Set alert channel for event hooks (Owner) | - | ✅ |
+
 
 ### 🔧 Owner-Only Commands
 
@@ -552,7 +688,8 @@ discord-bot-framework/
 | `!reload <extension>` | Hot-reload specific extension | Bot Owner |
 | `!load <extension>` | Load extension | Bot Owner |
 | `!unload <extension>` | Unload extension | Bot Owner |
-| `!atomictest` | Test atomic file operations | Bot Owner |
+| `!fw_diagnostics` | Display framework diagnostics and health | Bot Owner |
+| `!fw_alert_channel <channel>` | Set alert channel for framework diagnostics | Bot Owner |
 | `!cachestats` | Display cache statistics | Bot Owner |
 | `!dbstats` | Display database connection stats | Bot Owner |
 | `!integritycheck` | Run full system integrity check | Bot Owner |
@@ -771,6 +908,79 @@ async def setup(bot):
     await bot.add_cog(MyExtension(bot))
 ```
 
+### Using Atomic File Operations in Extensions
+
+**Basic File Operations:**
+```python
+from atomic_file_system import global_file_handler
+
+class MyExtension(commands.Cog):
+    async def save_data(self, data: dict):
+        # Atomic write with cache invalidation
+        success = await global_file_handler.atomic_write_json(
+            "./data/my_extension_data.json",
+            data,
+            invalidate_cache_after=True
+        )
+        return success
+    
+    async def load_data(self) -> dict:
+        # Read with caching enabled (300s TTL)
+        data = await global_file_handler.atomic_read_json(
+            "./data/my_extension_data.json",
+            use_cache=True
+        )
+        return data or {}
+```
+
+**Advanced Usage with Manual Cache Control:**
+```python
+class AdvancedExtension(commands.Cog):
+    async def update_config(self, key: str, value: str):
+        # Read current config (cached)
+        config = await global_file_handler.atomic_read_json(
+            "./data/config.json",
+            use_cache=True
+        ) or {}
+        
+        # Update config
+        config[key] = value
+        
+        # Write and keep in cache (frequent reads)
+        await global_file_handler.atomic_write_json(
+            "./data/config.json",
+            config,
+            invalidate_cache_after=False  # Keep in cache
+        )
+    
+    async def force_reload(self):
+        # Bypass cache for critical reads
+        config = await global_file_handler.atomic_read_json(
+            "./data/config.json",
+            use_cache=False
+        )
+        
+        # Or manually invalidate cache
+        global_file_handler.invalidate_cache("./data/config.json")
+```
+
+**Cache Statistics in Extensions:**
+```python
+class MonitoringExtension(commands.Cog):
+    @commands.command()
+    async def check_cache(self, ctx):
+        stats = global_file_handler.get_cache_stats()
+        
+        await ctx.send(f"""
+        Cache Performance:
+        - Size: {stats['cache_size']}/{stats['max_cache_size']}
+        - Hit Rate: {stats['hit_rate']}%
+        - Total Ops: {stats['total_reads'] + stats['total_writes']}
+        - Failures: {stats['write_failures'] + stats['read_failures']}
+        """)
+```
+
+
 ### Extension with Plugin Metadata
 ```python
 import discord
@@ -898,6 +1108,41 @@ class DatabaseExtension(commands.Cog):
 async def setup(bot):
     await bot.add_cog(DatabaseExtension(bot))
 ```
+
+### Integration with Atomic File System
+
+The database system uses the atomic file handler for:
+- **Configuration persistence** - `config.json` written atomically
+- **Plugin registry storage** - Registry JSON with ACID compliance
+- **Framework diagnostics** - Diagnostic reports saved safely
+- **Extension data** - Any JSON-based extension storage
+
+**Benefits:**
+- Zero data corruption even during crashes
+- Concurrent access safety
+- Automatic retry on transient failures
+- Cache acceleration for frequently accessed files
+- Lock-free reads (when cached)
+
+**Performance Optimization:**
+```python
+# High-frequency reads (use cache)
+prefix = await bot.config.get("prefix")  # Cached
+
+# Critical writes (bypass cache)
+await bot.config.file_handler.atomic_write_json(
+    path, 
+    data, 
+    invalidate_cache_after=True
+)
+
+# Batch operations (manual cache management)
+for item in items:
+    await process_item(item)
+global_file_handler.clear_all_cache()  # Clear after batch
+```
+
+
 
 ### Using Atomic File Operations
 ```python
@@ -1656,10 +1901,94 @@ File: cogs/event_hooks.py
 | extension_loaded      | Extension is loaded (custom)      | extension_name                            |
 | extension_unloaded    | Extension is unloaded (custom)    | extension_name                            |
 
-#### Using Event Hooks
 
+
+
+### Atomic File System
+
+File: `atomic_file_system.py`
+
+**What It Does**
+- Thread-safe atomic file operations with zero data corruption
+- LRU cache system (300s TTL, 1000 entry limit)
+- Automatic file lock management with cleanup
+- Retry logic for write operations (3 attempts)
+- Comprehensive diagnostics and metrics tracking
+
+**Key Features:**
+
+**Atomic Write Protection**
+- Tempfile-based writes prevent partial updates
+- Automatic retry on permission errors
+- Windows/Linux compatible file operations
+- Cross-platform atomic move operations
+
+**LRU Cache System**
+- Configurable TTL (default: 300 seconds)
+- Automatic eviction when full (max 1000 entries)
+- Cache hit rate tracking
+- Manual invalidation support
+- Thread-safe cache access
+
+**Lock Management**
+- Per-file lock acquisition
+- Automatic cleanup of inactive locks (threshold: 500)
+- Lock age tracking for diagnostics
+- Deadlock prevention
+
+**Performance Metrics**
+- Read/write operation counters
+- Cache hit rate calculation
+- Failure rate monitoring
+- Lock cleanup statistics
+
+**Health Monitoring**
+- Real-time failure rate tracking
+- Three-tier status: Healthy (<1%), Degraded (1-5%), Critical (>5%)
+- Operation history tracking
+
+
+
+
+### Using Atomic File System
+
+**View System Statistics:**
+```bash
+!atomicstats
+```
+Shows:
+- Cache size and hit rate
+- Active file locks
+- Total read/write operations
+- Failure rates and health status
+- System uptime
+
+**Run Diagnostic Tests:**
+```bash
+!atomictest
+```
+Performs:
+1. Atomic write test
+2. Read test without cache
+3. Read test with cache (verifies caching)
+4. Concurrent write test (10 simultaneous writes)
+5. Cache invalidation test
+
+**Performance Metrics:**
+- Cache hit rate >70% is healthy
+- Active locks should be <100 normally
+- Failure rate should be <1%
+- Lock cleanup runs automatically at 500+ locks
+
+
+
+
+
+### Using Event Hooks
+
+**Register a Hook:**
 ```python
-# Register a hook
+# Register hook with priority
 bot.register_hook("bot_ready", my_callback, priority=10)
 
 # Hook callback signature
@@ -1667,20 +1996,236 @@ async def my_callback(bot, **kwargs):
     # bot: Bot instance
     # kwargs: Event-specific parameters
     pass
-
-# Unregister a hook
-bot.unregister_hook("bot_ready", my_callback)
-
-# Emit custom events
-await bot.emit_hook("custom_event", custom_param="value")
-
-# List all registered hooks
-hooks = bot.list_hooks()
-# Returns: {"event_name": ["callback_name1", "callback_name2"], ...}
-
-# Get execution history
-history = bot.get_hook_history(limit=20)
 ```
+
+**Hook ID Format:**
+- Format: `event_name:callback_name`
+- Example: `bot_ready:on_bot_ready`
+- Used for disabling/enabling specific hooks
+
+**View Registered Hooks:**
+```bash
+!eh_list
+```
+Shows:
+- All registered hooks by event
+- Priority levels
+- Execution counts and failure counts
+- Average execution time
+- Status indicators:
+  - 🔴 - Hook disabled manually
+  - ⚠️ - Circuit breaker open
+  - No icon - Working normally
+
+**View Execution History:**
+```bash
+# Last 10 executions
+!eh_history
+
+# Last 30 executions
+!eh_history 30
+```
+
+**Manage Problematic Hooks:**
+```bash
+# Disable a hook that's causing issues
+!eh_disable bot_ready:on_bot_ready
+
+# Re-enable when fixed
+!eh_enable bot_ready:on_bot_ready
+
+# Reset circuit breaker (if hook keeps failing)
+!eh_reset_circuit command_executed:log_command
+```
+
+**Set Alert Channel:**
+```bash
+# Set current channel
+!eh_alert_channel
+
+# Set specific channel
+!eh_alert_channel #hook-alerts
+```
+
+**Automatic Alerts Sent For:**
+- Queue full (dropped events)
+- Circuit breaker opens (hook disabled due to failures)
+- Worker crashes (with restart attempt count)
+- Max restart attempts reached
+
+**Built-in Events:**
+- `bot_ready` - Bot becomes ready (kwargs: `bot_user`)
+- `guild_joined` - Bot joins guild (kwargs: `guild`)
+- `guild_left` - Bot leaves guild (kwargs: `guild`)
+- `command_executed` - Command runs (kwargs: `command_name`, `author`, `guild`)
+- `command_error` - Command error (kwargs: `command_name`, `error`, `author`, `guild`)
+
+**Custom Events:**
+```python
+# Emit custom event from your extension
+await bot.emit_hook("custom_event", custom_param="value")
+```
+
+**Circuit Breaker Behavior:**
+1. Hook fails 5 times within 5 minutes
+2. Circuit breaker opens (hook disabled)
+3. Hook disabled for 60 seconds
+4. Automatically closes after timeout
+5. Can manually reset with `!eh_reset_circuit`
+
+**Performance Considerations:**
+- Each hook has 10-second timeout
+- Queue processes sequentially (high-priority first)
+- Average execution time tracked per hook
+- Slow hooks should be optimized or disabled
+
+**Unregister Hooks:**
+```python
+# In cog_unload()
+bot.unregister_hook("event_name", my_callback)
+```
+
+### Using Framework Diagnostics
+
+**View Current Health:**
+```bash
+!fw_diagnostics
+```
+
+**Set Alert Channel:**
+```bash
+# Set current channel as alert channel
+!fw_alert_channel
+
+# Set specific channel
+!fw_alert_channel #alerts
+```
+
+**What Gets Monitored:**
+- **Health Status:**
+  - ✅ Healthy: Error rate < 5%
+  - ⚠️ Degraded: Error rate 5-9.9%
+  - 🚨 Critical: Error rate ≥ 10%
+
+- **System Metrics:**
+  - Memory usage (MB)
+  - CPU percentage
+  - Active threads
+  - Open file handles
+  - Network connections
+  - Event loop lag (ms)
+
+- **Bot Statistics:**
+  - Uptime
+  - Latency
+  - Commands processed
+  - Error count
+  - Extensions loaded
+  - Servers/users/channels
+
+**Automatic Alerts:**
+The system automatically sends alerts to your configured channel for:
+- Health status changes (degraded/critical)
+- Event loop lag above threshold (500ms)
+- Repeated diagnostics write failures (3+ consecutive)
+
+**Diagnostics Files:**
+- `./data/framework_diagnostics.json` - Complete system snapshot (updated every 5 min)
+- `./data/framework_health.json` - Real-time health metrics (updated every 5 min)
+
+**Health Check Frequency:**
+- Event loop lag: Every 1 second
+- Health monitoring: Every 5 minutes
+- Diagnostics generation: Every 5 minutes
+
+
+### Using Plugin Registry
+
+**List All Plugins:**
+```bash
+!pr_list
+```
+Shows all registered plugins with status indicators:
+- ✅ - All checks passed
+- ⚠️ - Has warnings (conflicts, scan errors)
+- ❌ - Missing dependencies
+- 🔄 - Circular dependency detected
+
+**View Plugin Details:**
+```bash
+!pr_info extension_name
+```
+Shows:
+- Version, author, description
+- Commands and cogs provided
+- Dependencies with version requirements
+- Conflict status
+- Circular dependency paths (if any)
+- Scan errors (if any)
+
+**Validate Plugin:**
+```bash
+!pr_validate extension_name
+```
+Checks if a plugin is safe to load by validating:
+- All dependencies are met
+- No conflicts with loaded plugins
+- No circular dependencies
+
+**Toggle Enforcement:**
+```bash
+# Toggle dependency enforcement
+!pr_enforce deps
+
+# Toggle conflict enforcement
+!pr_enforce conflicts
+```
+When enforcement is **enabled** (default):
+- Plugins with issues trigger warnings
+- Validation errors are logged
+
+When enforcement is **disabled**:
+- Plugins load regardless of issues
+- Only informational warnings
+
+**Set Alert Channel:**
+```bash
+# Set current channel
+!pr_alert_channel
+
+# Set specific channel
+!pr_alert_channel #plugin-alerts
+```
+
+**Automatic Alerts Sent For:**
+- Plugins loaded with missing dependencies
+- Plugins loaded with conflicts
+- Extension scan failures
+- Circular dependency detection
+
+**Version Requirements:**
+
+In your extension, specify dependencies with versions:
+```python
+# Supports: >=, >, ==, <=, 
+__dependencies__ = {
+    "other_extension": ">=1.0.0",
+    "another_ext": "==2.5.1"
+}
+```
+
+**Conflict Declaration:**
+```python
+# List incompatible extensions
+__conflicts__ = ["incompatible_ext", "old_version_ext"]
+```
+
+**Registry File:**
+- Location: `./data/plugin_registry.json`
+- Auto-saved on changes
+- Contains all plugin metadata
+- Includes enforcement settings
+
 #### Priority System
 
 - Higher priority = executes first
@@ -1698,6 +2243,28 @@ history = bot.get_hook_history(limit=20)
 !hookhistory [limit]
 ```
 # 🔐 Security Features
+
+### Atomic File System Security
+
+**Data Integrity:**
+- Tempfile-based writes prevent partial updates
+- Atomic move operations (all-or-nothing)
+- Automatic retry on transient failures
+- Lock-based concurrency control
+- Cache invalidation on successful writes
+
+**Protection Against:**
+- Race conditions (per-file locks)
+- Partial writes (tempfile staging)
+- Data corruption (atomic moves)
+- Concurrent access (lock management)
+- Cache inconsistency (TTL + invalidation)
+
+**Monitoring:**
+- Real-time failure tracking
+- Health status calculation
+- Comprehensive operation logging
+- Test suite for verification
 
 ## Permission System
 
@@ -2045,6 +2612,53 @@ Solution:
 3. Ensure all imports are available
 4. Use `!marketplace fixdeps` for missing packages
 
+### Atomic File System Issues
+
+**High Cache Miss Rate (<50%):**
+
+Solution:
+1. Check if files are being modified externally
+2. Verify cache TTL isn't too short (default: 300s)
+3. Run `!atomicstats` to view statistics
+4. Consider increasing `max_cache_size` in code
+
+**Many Active Locks (>100):**
+
+Solution:
+1. Check `!atomicstats` for lock count
+2. Locks cleanup automatically at 500 threshold
+3. Restart bot if locks are permanently stuck
+4. Review code for proper async/await usage
+
+**Write Failures:**
+
+Solution:
+1. Check file permissions in `./data` directory
+2. Ensure sufficient disk space
+3. Verify no external process is locking files
+4. Check `!atomicstats` for failure patterns
+5. Review logs for specific error messages
+
+**Cache Not Invalidating:**
+
+Solution:
+```python
+# Manual invalidation in code
+global_file_handler.invalidate_cache("./data/problematic_file.json")
+
+# Or clear all cache
+global_file_handler.clear_all_cache()
+```
+
+**Performance Degradation:**
+
+Solution:
+1. Check `!atomicstats` for health status
+2. If failure rate >5%, check disk I/O
+3. Monitor lock count (should be <50 normally)
+4. Run `!atomictest` to verify system health
+5. Consider restarting bot if critical
+
 ### Extensions Not Loading
 
 **Check logs:**
@@ -2248,6 +2862,59 @@ Solution:
 ---
 
 ## 📈 Performance Tips
+
+### Atomic File System Optimization
+
+**Cache Strategy:**
+```python
+# Frequently read files - USE cache
+config = await global_file_handler.atomic_read_json(
+    "config.json",
+    use_cache=True  # Fast repeated reads
+)
+
+# Rarely read files - BYPASS cache
+log_data = await global_file_handler.atomic_read_json(
+    "large_log.json",
+    use_cache=False  # Don't pollute cache
+)
+
+# After bulk updates - CLEAR cache
+await process_many_files()
+global_file_handler.clear_all_cache()
+```
+
+**Lock Optimization:**
+```python
+# Bad: Multiple separate operations
+for file in files:
+    data = await read_file(file)
+    await write_file(file, process(data))
+
+# Good: Batch operations
+all_data = {}
+for file in files:
+    all_data[file] = await read_file(file)
+
+for file, data in all_data.items():
+    await write_file(file, process(data))
+```
+
+**Monitoring Health:**
+```bash
+# Regular health checks
+!atomicstats  # View overall health
+
+# Performance testing
+!atomictest   # Verify operation speeds
+```
+
+**Best Practices:**
+1. Use cache for config files (read-heavy)
+2. Bypass cache for log files (write-heavy)
+3. Invalidate cache after critical writes
+4. Monitor failure rate (should be <1%)
+5. Run cleanup during low-activity periods
 
 ### Database Optimization
 
