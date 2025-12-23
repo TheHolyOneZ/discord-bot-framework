@@ -1,45 +1,32 @@
-# 🤖 Advanced Discord Bot Framework
+<p align="center">
+  <img src="assets/banner.png" alt="Zoryx Discord Bot Framework Banner" />
+</p>
 
-[![Python Version](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
-[![discord.py](https://img.shields.io/badge/discord.py-2.0+-blue.svg)](https://github.com/Rapptz/discord.py)
+<h1 align="center">🤖 Zoryx Discord Bot Framework</h1>
 
-> A production-ready, enterprise-grade Discord bot framework featuring atomic file operations, advanced permission systems, dynamic extension loading, comprehensive monitoring, modular framework cogs, and an integrated extension marketplace.
+<p align="center">
+  <strong>Advanced • Modular • Production-Ready</strong>
+</p>
 
-**Website**: [https://zygnalbot.com/bot-framework/](https://zygnalbot.com/bot-framework/)
+<p align="center">
+  <a href="https://www.python.org/downloads/">
+    <img src="https://img.shields.io/badge/python-3.12+-blue.svg" />
+  </a>
+  <a href="https://github.com/Rapptz/discord.py">
+    <img src="https://img.shields.io/badge/discord.py-2.0+-blue.svg" />
+  </a>
+</p>
 
----
+<p align="center">
+  A production-ready, enterprise-grade Discord bot framework featuring atomic file operations, advanced permission systems, dynamic extension loading, comprehensive monitoring, modular framework cogs, and an integrated extension marketplace.
+</p>
 
-## 📑 Table of Contents
-
-- [✨ Overview](#-overview)
-- [🌟 What Makes This Framework Special](#-what-makes-this-framework-special)
-- [🎯 Core Features](#-core-features)
-- [📋 Requirements](#-requirements)
-- [🐳 Docker Setup](#-docker-setup)
-- [🚀 Quick Start](#-quick-start)
-- [📁 Project Structure](#-project-structure)
-- [🎮 Built-in Commands](#-built-in-commands)
-- [🛒 Extension Marketplace](#-extension-marketplace)
-- [🔧 Creating Extensions](#-creating-extensions)
-- [⚙️ Configuration Guide](#️-configuration-guide)
-- [🗄️ Database System](#️-database-system)
-- [📊 Framework Cogs System](#-framework-cogs-system)
-- [🔐 Security Features](#-security-features)
-- [🎨 Customization](#-customization)
-- [🛠 Troubleshooting](#-troubleshooting)
-- [📈 Performance Tips](#-performance-tips)
-- [📜 License](#-license)
-- [👤 Author](#-author)
+<p align="center">
+  🌐 <a href="https://zygnalbot.com/bot-framework/">Website</a>
+</p>
 
 ---
 
-## ✨ Overview
-
-This Discord bot framework is a comprehensive, production-ready foundation for building scalable Discord bots. It combines enterprise-level architecture with developer-friendly features, providing everything you need from atomic file operations to an integrated extension marketplace.
-
-Built with **discord.py 2.0+** and modern Python async patterns, this framework eliminates common pitfalls in bot development while providing powerful tools for both beginners and advanced developers.
-
----
 
 ## 🌟 What Makes This Framework Special
 
