@@ -87,6 +87,10 @@ class PluginRegistry(commands.Cog):
     async def scan_loaded_extensions(self):
         logger.info("Plugin Registry: Scanning loaded extensions")
         
+        # Clear registry to remove stale data from deleted extensions
+        self.registry.clear()
+        logger.info("Plugin Registry: Cleared stale registry data")
+        
         scan_tasks = []
         for ext_name in list(self.bot.extensions.keys()):
             if ext_name.startswith("cogs."):
