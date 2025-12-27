@@ -27,6 +27,51 @@
 
 ---
 
+## 📑 Table of Contents
+
+<details>
+<summary><strong>Click to expand</strong></summary>
+
+- [🌟 What Makes This Framework Special](#-what-makes-this-framework-special)
+  - [🏗️ Enterprise-Grade Architecture](#️-enterprise-grade-architecture)
+  - [🎯 Developer Experience](#-developer-experience)
+  - [🔌 Modular Framework Cogs](#-modular-framework-cogs)
+  - [🛒 Integrated Extension Marketplace](#-integrated-extension-marketplace)
+  - [🎨 Modern User Interface](#-modern-user-interface)
+  - [🔒 Advanced Security](#-advanced-security)
+  - [📊 Comprehensive Monitoring](#-comprehensive-monitoring)
+  - [🔧 Developer Tools](#-developer-tools)
+- [🎯 Core Features](#-core-features)
+- [📋 Requirements](#-requirements)
+- [🐳 Docker Setup](#-docker-setup)
+- [🚀 Quick Start](#-quick-start)
+- [📁 Project Structure](#-project-structure)
+- [🎮 Built-in Commands](#-built-in-commands)
+  - [👥 User Commands](#-user-commands)
+  - [🛒 Marketplace Commands](#-marketplace-commands)
+  - [Atomic File System Commands](#atomic-file-system-commands)
+  - [🔌 Plugin Registry Commands](#-plugin-registry-commands)
+  - [📊 Framework Diagnostics Commands](#-framework-diagnostics-commands)
+  - [🪝 Event Hooks Commands](#-event-hooks-commands)
+  - [📡 Live Monitor Commands](#-live-monitor-commands)
+  - [🔧 Owner-Only Commands](#-owner-only-commands)
+- [🛒 Extension Marketplace](#-extension-marketplace)
+- [🔧 Creating Extensions](#-creating-extensions)
+- [⚙️ Configuration Guide](#️-configuration-guide)
+- [🗄️ Database System](#️-database-system)
+- [📊 Framework Cogs System](#-framework-cogs-system)
+- [🛠 Troubleshooting](#-troubleshooting)
+- [📈 Performance Tips](#-performance-tips)
+- [📜 License](#-license)
+- [🤝 Contributing](#-contributing)
+- [💬 Support](#-support)
+- [📚 Additional Resources](#-additional-resources)
+- [🎉 Showcase](#-showcase)
+- [👤 Author](#-author)
+
+</details>
+
+---
 
 ## 🌟 What Makes This Framework Special
 
@@ -76,6 +121,17 @@
 - Slash command limit protection (100 command cap)
 - Graceful degradation to prefix-only mode
 - Visual indicators: ⚡ (hybrid), 🔸 (prefix-only), 🔹 (limit reached)
+
+**Web-Based Monitoring Dashboard**
+- Real-time bot status via Live Monitor cog (~12,000+ lines)
+- 15 dashboard tabs: Dashboard, Commands, Plugins, Hooks, Files, Chat, Guilds, Events, System, and more
+- Remote extension management (load/unload/reload from browser)
+- Full file browser with read/write/delete operations
+- Chat console to send Discord messages from dashboard
+- Role-based access control (Owner/Helper/Visitor)
+- One-command dashboard deployment (`/livemonitor quickstart`)
+- 2-second update interval for near real-time data
+- Requires PHP hosting (Strato, Hostinger, any cPanel host)
 
 ### 🔌 Modular Framework Cogs
 
@@ -218,6 +274,150 @@
   - Command type indicators: ⚡ (hybrid), 🔸 (prefix-only), 🔹 (converted from slash)
   - Automatic updates when commands are converted
   - Real-time command count tracking
+
+**Live Monitor** (`cogs/live_monitor.py`)
+- **Web-based dashboard for real-time bot monitoring and remote management (~12,000+ lines)**
+- **Bridge between running Discord bot and external PHP-powered monitoring interface**
+- **⚠️ IMPORTANT: Credits tab and visual design © 2025 TheHolyOneZ - NOT covered by MIT license and MUST remain visible**
+
+> 📺 **COMING SOON: YouTube Tutorial**  
+> A comprehensive video tutorial is coming soon that will showcase the Live Monitor dashboard, demonstrate all features in action, and provide a step-by-step guide on how to properly set everything up. Stay tuned!
+
+**Server Requirements:**
+- PHP 7.4+ hosting (shared hosting works fine - e.g., Strato, Hostinger, Bluehost, any cPanel host)
+- SQLite3 PHP extension (usually pre-installed)
+- HTTPS recommended for security
+- No database server required (uses SQLite files)
+
+**Dashboard Tabs (15 total):**
+| Tab | Description |
+|-----|-------------|
+| Dashboard | Real-time bot stats, latency, uptime, guild/user counts |
+| Commands | All prefix/slash/hybrid commands with usage stats |
+| Plugins & Extensions | Loaded extensions, dependencies, conflicts, versions |
+| Event Hooks | Hook status, circuit breakers, execution metrics |
+| File System | Directory statistics, cache hits/misses, file counts |
+| File Browser | Full file explorer with read/write/delete/rename/create |
+| Chat Console (EXPERIMENTAL) | Send messages to Discord channels from dashboard |
+| Guilds / Servers | All servers with member counts, channels, join dates |
+| Events | Recent command executions, errors, guild joins/leaves |
+| System | CPU, memory, threads, connections, platform info |
+| Bot Invite Helper | Generate invite links with permission calculator |
+| Database | Browse guild SQLite databases and tables |
+| Roles & Access | Manage dashboard user roles (Owner/Helper/Visitor) |
+| Security & Logs | Audit logs, login history, security events |
+| Credits | Framework attribution (required to remain visible) |
+
+**Generated PHP Files (quickstart creates these in `./live_monitor_website/`):**
+| File | Purpose |
+|------|---------|
+| `index.php` | Main dashboard interface with all tabs |
+| `receive.php` | Receives bot data via HTTP POST |
+| `get_commands.php` | Bot polls this for pending commands |
+| `send_command.php` | Dashboard sends commands to bot |
+| `lm_bootstrap.php` | Core initialization and config |
+| `lm_db.php` | SQLite database helper functions |
+| `lm_auth.php` | Authentication and session management |
+| `setup.php` | First-time claim wizard |
+| `login.php` | Discord OAuth login page |
+| `oauth_callback.php` | OAuth callback handler |
+| `logout.php` | Session logout handler |
+| `owner_audit.php` | Admin audit log viewer |
+| `owner_roles.php` | Role management panel |
+| `owner_db.php` | Database management panel |
+| `backup_dashboard.php` | Bot backup interface |
+
+**Slash Command (`/livemonitor`):**
+```
+/livemonitor action:<choice> [url:<text>] [interval:<number>]
+
+Actions:
+  • Quick Start (Setup + Files) - Generate dashboard files and configure
+  • Status                      - Show current configuration and connection status
+  • Enable                      - Start sending data to dashboard
+  • Disable                     - Stop data transmission
+  • Get Files                   - Regenerate dashboard files
+```
+
+**Prefix Command (`!livemonitor`):**
+```
+!livemonitor <action> [url] [interval]
+  • !livemonitor status
+  • !livemonitor quickstart https://yoursite.com/monitor
+  • !livemonitor enable
+  • !livemonitor disable
+  • !livemonitor files
+```
+
+**Comprehensive data collection:**
+  - Bot metadata (username, ID, guilds, users, latency, uptime, loaded cogs/extensions)
+  - System resources via `psutil` (CPU%, memory MB/%, threads, open files, network connections, platform)
+  - Guild summaries with member counts, text channels (with NSFW status), owner info, join dates
+  - Command usage statistics with execution counts, last used timestamps, error tracking
+  - Integration status of framework cogs (EventHooks, SlashLimiter, PluginRegistry, FrameworkDiagnostics)
+  - Atomic File System cache stats (hits, misses, active locks, read/write counts)
+  - Health metrics from FrameworkDiagnostics when available
+  - Detailed plugin information via PluginRegistry integration
+  - Available extensions scan from `./extensions` directory
+  - Framework version info and documentation links
+- **Event logging system:**
+  - Listens to: `on_command`, `on_command_error`, `on_guild_join`, `on_guild_remove`, `on_message`, `on_app_command_completion`
+  - Configurable event log capacity (`_max_event_log`: 1000 entries)
+  - Hook execution history (`_max_hook_execution_log`: 1000 entries)
+  - Message activity aggregation for engagement metrics
+- **Remote command execution from web dashboard:**
+
+| Command | Permission | Description |
+|---------|------------|-------------|
+| `reload_extension` | Helper+ | Hot-reload an extension |
+| `load_extension` | Helper+ | Load a new extension |
+| `unload_extension` | Helper+ | Unload an extension |
+| `clear_cache` | Helper+ | Clear bot caches |
+| `write_file` | Helper+ | Write/create files |
+| `read_file` | Helper+ | Read file contents |
+| `list_dir` | Helper+ | List directory contents |
+| `rename_file` | Helper+ | Rename files |
+| `create_dir` | Helper+ | Create directories |
+| `delete_path` | Helper+ | Delete files/directories |
+| `send_chat_message` | Helper+ | Send message to Discord channel |
+| `shutdown_bot` | Owner | Gracefully stop the bot |
+| `leave_guild` | Owner | Leave a Discord server |
+| `backup_bot_directory` | Owner | Create bot backup archive |
+| `fetch_marketplace_extensions` | Permission | Browse marketplace |
+| `download_marketplace_extension` | Permission | Download from marketplace |
+
+- **Role-based access control:**
+  - **Owner** - Full access to all dashboard features including shutdown
+  - **Helper** - Extension management, file operations, chat console
+  - **Visitor** - Read-only access, view chat history
+  - Granular permissions: `control_core`, `control_plugins`, `control_files`, `control_chat`, `control_hooks`, `control_guilds`, `control_backup`, `control_marketplace`
+- **Task loop system (`send_status_loop`):**
+  - 2-second update interval for near real-time monitoring
+  - Multi-payload JSON packaging (core, commands, plugins, hooks, filesystem, etc.)
+  - HTTP POST to configured `receive.php` endpoint
+  - Command polling from `get_commands.php` endpoint
+  - `aiohttp` client session management with configurable timeouts
+  - Failure tracking (`send_failures`) with success state (`last_send_success`)
+  - Graceful task cancellation on `asyncio.CancelledError`
+  - Asset syncing (branding images) to remote server
+- **Configuration (`data/live_monitor_config.json`):**
+  - `enabled` - Toggle monitoring on/off
+  - `website_url` - Dashboard URL
+  - `secret_token` - Bot↔Server authentication token
+  - `setup_token` - One-time dashboard claim token
+  - `update_interval` - Seconds between updates (5-60)
+- **Thread-safe file operations:**
+  - `asyncio.Lock` (`_fileops_lock`) prevents race conditions
+  - `asyncio.to_thread` for blocking I/O operations
+  - Response tracking via `_fileops_response` dictionary
+  - Concurrent command execution with `asyncio.create_task`
+- **Security features:**
+  - Token-based API authentication (32-byte cryptographic tokens)
+  - Discord OAuth integration for dashboard login
+  - One-time setup token prevents unauthorized claiming
+  - Role-based command restrictions
+  - Audit logging for all sensitive operations
+  - HTTPS recommended for production
   
 ### 🛒 Integrated Extension Marketplace
 
@@ -561,6 +761,7 @@ discord-bot-framework/
 │   ├── event_hooks.py           # Internal event system
 │   ├── plugin_registry.py       # Plugin metadata & dependency tracking
 │   ├── framework_diagnostics.py # Health monitoring
+│   ├── live_monitor.py          # Web dashboard & remote management
 │   └── slash_command_limiter.py # Slash command protection
 │
 ├── data/                        # Auto-generated data directory
@@ -573,6 +774,7 @@ discord-bot-framework/
 │   ├── plugin_registry.json     # Plugin metadata cache
 │   ├── framework_diagnostics.json # System diagnostics
 │   ├── framework_health.json    # Health monitoring data
+│   ├── live_monitor_config.json # Live Monitor settings
 │   └── marketplace/
 │       ├── ZygnalID.txt         # Unique bot identifier
 │       └── license_accepted.json # License acceptance tracking
@@ -586,6 +788,29 @@ discord-bot-framework/
 │   ├── Terminal-1.png
 │   ├── HelpMenu-Example.png
 │   └── ... (showcase images)
+│
+├── assets/                      # Live Monitor dashboard assets (optional branding)
+│   ├── zoryx-framework.png      # Dashboard logo
+│   ├── zoryx-framework.ico      # Favicon
+│   └── banner.png               # Banner image
+│
+├── live_monitor_website/        # Generated dashboard files (upload to PHP server)
+│   ├── index.php                # Main dashboard interface (~10,000+ lines)
+│   ├── receive.php              # Bot data reception endpoint
+│   ├── get_commands.php         # Command polling endpoint
+│   ├── send_command.php         # Command submission with role checks
+│   ├── lm_bootstrap.php         # Core initialization and tokens
+│   ├── lm_db.php                # SQLite database helpers
+│   ├── lm_auth.php              # Authentication and sessions
+│   ├── setup.php                # One-time claim wizard
+│   ├── login.php                # Discord OAuth login
+│   ├── oauth_callback.php       # OAuth callback handler
+│   ├── logout.php               # Session logout
+│   ├── owner_audit.php          # Admin audit log viewer
+│   ├── owner_roles.php          # Role management panel
+│   ├── owner_db.php             # Database admin panel
+│   ├── backup_dashboard.php     # Bot backup interface
+│   └── assets/                  # Copied branding assets
 │
 ├── config.json                  # Bot configuration (auto-generated)
 ├── .env                         # Environment variables (YOU CREATE THIS)
@@ -665,6 +890,18 @@ discord-bot-framework/
 | `!eh_enable <hook_id>` | Re-enable a disabled hook (Owner) | - | ✅ |
 | `!eh_reset_circuit <hook_id>` | Reset circuit breaker for hook (Owner) | - | ✅ |
 | `!eh_alert_channel [channel]` | Set alert channel for event hooks (Owner) | - | ✅ |
+
+### 📡 Live Monitor Commands
+
+| Command | Description | Cooldown | Hybrid |
+|---------|-------------|----------|--------|
+| `/livemonitor quickstart <url>` | Generate dashboard files and configure monitoring | - | ✅ |
+| `/livemonitor status` | Show current configuration, connection status, failure count | - | ✅ |
+| `/livemonitor enable` | Start sending data to dashboard (2-second intervals) | - | ✅ |
+| `/livemonitor disable` | Stop all data transmission and command polling | - | ✅ |
+| `/livemonitor files` | Regenerate dashboard PHP/HTML/JS files | - | ✅ |
+
+**Note:** Live Monitor requires a PHP web server (e.g., Strato, Hostinger, any cPanel host). See the [Using Live Monitor](#using-live-monitor) section for complete setup instructions.
 
 
 ### 🔧 Owner-Only Commands
@@ -2229,6 +2466,271 @@ __conflicts__ = ["incompatible_ext", "old_version_ext"]
 # View execution history (Owner only)
 !hookhistory [limit]
 ```
+
+### Using Live Monitor
+
+> 📺 **VIDEO TUTORIAL COMING SOON!**  
+> A full YouTube video tutorial is in the works! It will cover:
+> - 🎬 Complete dashboard showcase and feature walkthrough
+> - ⚙️ Step-by-step setup guide from start to finish
+> - 💡 Tips and best practices for production use
+> - 🔧 Troubleshooting common issues
+>
+> Keep an eye on the [ZygnalBot YouTube channel](https://youtube.com/@zygnalbot) or the Discord server for the announcement!
+
+**⚠️ IMPORTANT LICENSE NOTICE:**
+The Credits tab and visual design of the Live Monitor dashboard are © 2025 TheHolyOneZ and are NOT covered by the MIT license. The Credits section (layout, wording, and SVG crown artwork) MUST remain clearly visible at all times in any use or modification of this dashboard.
+
+---
+
+#### Server Requirements
+
+Live Monitor requires a PHP web server to host the dashboard. Any standard shared hosting works:
+
+| Provider | Notes |
+|----------|-------|
+| **Strato** | Cheap, reliable German hosting - works great |
+| **Hostinger** | Budget-friendly, good performance |
+| **Bluehost** | Popular cPanel hosting |
+| **Any cPanel host** | Standard PHP hosting works |
+| **VPS (Nginx/Apache)** | Full control option |
+
+**Technical Requirements:**
+- PHP 7.4 or higher
+- SQLite3 PHP extension (usually pre-installed)
+- HTTPS strongly recommended
+- ~50MB storage for dashboard + data files
+- No MySQL/PostgreSQL required (uses SQLite)
+
+---
+
+#### Quick Setup Guide
+
+**Step 1: Run Quickstart Command**
+```bash
+# Slash command
+/livemonitor action:Quick Start (Setup + Files) url:https://yoursite.com/monitor
+
+# Or prefix command
+!livemonitor quickstart https://yoursite.com/monitor
+```
+
+This generates files in `./live_monitor_website/` folder.
+
+**Step 2: Upload Files to Your Server**
+
+Upload the entire contents of `./live_monitor_website/` to your web server:
+```
+yoursite.com/monitor/
+├── index.php
+├── receive.php
+├── get_commands.php
+├── send_command.php
+├── lm_bootstrap.php
+├── lm_db.php
+├── lm_auth.php
+├── setup.php
+├── login.php
+├── oauth_callback.php
+├── logout.php
+├── owner_audit.php
+├── owner_roles.php
+├── owner_db.php
+├── backup_dashboard.php
+└── assets/
+    └── (branding images if present)
+```
+
+**Step 3: Claim Your Dashboard**
+
+1. Visit `https://yoursite.com/monitor/setup.php`
+2. Enter the **Setup Token** shown in Discord after quickstart
+3. This one-time token prevents others from claiming your dashboard
+4. You become the Owner with full access
+
+**Step 4: Enable Monitoring**
+```bash
+/livemonitor action:Enable
+# or
+!livemonitor enable
+```
+
+Your dashboard is now live! Data updates every 2 seconds.
+
+---
+
+#### Dashboard Tabs Explained
+
+| Tab | What You Can Do |
+|-----|-----------------|
+| **Dashboard** | View bot status, latency graph, uptime, guild/user counts at a glance |
+| **Commands** | See all commands with usage counts, filter by type (hybrid/prefix/slash), view errors |
+| **Plugins & Extensions** | Manage extensions - reload/unload/load, view dependencies and conflicts |
+| **Event Hooks** | Monitor hook execution times, circuit breaker status, disable problematic hooks |
+| **File System** | View directory statistics, cache hit rates, storage usage |
+| **File Browser** | Full file explorer - navigate, read, edit, create, delete files |
+| **Chat Console** | Send messages to Discord channels directly from dashboard (experimental) |
+| **Guilds / Servers** | List all servers with member counts, channels, owner info, leave servers |
+| **Events** | Real-time event log - command executions, errors, guild joins/leaves |
+| **System** | CPU/memory usage, thread count, open files, network connections |
+| **Bot Invite Helper** | Generate invite links with customizable permissions |
+| **Database** | Browse per-guild SQLite databases, view tables and data |
+| **Roles & Access** | Manage dashboard users - assign Owner/Helper/Visitor roles |
+| **Security & Logs** | View audit logs, login history, security events |
+| **Credits** | Framework attribution (MUST remain visible per license) |
+
+---
+
+#### Role-Based Access
+
+| Role | Capabilities |
+|------|-------------|
+| **Owner** | Full access - shutdown bot, leave guilds, manage roles, all file operations |
+| **Helper** | Extension management, file operations, send chat messages, view all data |
+| **Visitor** | Read-only access, view dashboard data, view chat history |
+
+**Granular Permissions:**
+- `control_core` - Shutdown, diagnostics
+- `control_plugins` - Load/unload/reload extensions
+- `control_files` - File browser operations
+- `control_chat` - Send Discord messages
+- `control_hooks` - Enable/disable hooks
+- `control_guilds` - Leave servers
+- `control_backup` - Create backups
+- `control_marketplace` - Download marketplace extensions
+
+---
+
+#### Commands Reference
+
+**Check Status:**
+```bash
+/livemonitor action:Status
+# or
+!livemonitor status
+```
+Shows: enabled state, dashboard URL, last successful transmission, failure count, update interval.
+
+**Enable/Disable:**
+```bash
+/livemonitor action:Enable
+/livemonitor action:Disable
+# or
+!livemonitor enable
+!livemonitor disable
+```
+
+**Regenerate Dashboard Files:**
+```bash
+/livemonitor action:Get Files
+# or
+!livemonitor files
+```
+Creates fresh dashboard files without changing your tokens.
+
+**Change Update Interval:**
+```bash
+/livemonitor action:Quick Start url:https://yoursite.com/monitor interval:10
+```
+Set interval between 5-60 seconds (default: 5).
+
+---
+
+#### Remote Commands (from Dashboard)
+
+| Command | Description |
+|---------|-------------|
+| **Extension Management** | |
+| `reload_extension` | Hot-reload an extension without restart |
+| `load_extension` | Load a new extension |
+| `unload_extension` | Unload an extension |
+| **File Operations** | |
+| `read_file` | Read file contents |
+| `write_file` | Create or overwrite files |
+| `list_dir` | List directory contents |
+| `rename_file` | Rename files or directories |
+| `create_dir` | Create new directories |
+| `delete_path` | Delete files or directories |
+| **Bot Control** | |
+| `shutdown_bot` | Gracefully stop the bot (Owner only) |
+| `leave_guild` | Leave a Discord server (Owner only) |
+| `backup_bot_directory` | Create backup archive (Owner only) |
+| `clear_cache` | Clear bot caches |
+| `send_chat_message` | Send message to Discord channel |
+| **Marketplace** | |
+| `fetch_marketplace_extensions` | Browse available extensions |
+| `download_marketplace_extension` | Download and install extension |
+| `load_downloaded_extension` | Load newly downloaded extension |
+
+---
+
+#### Configuration File
+
+**Location:** `./data/live_monitor_config.json`
+
+```json
+{
+    "enabled": true,
+    "website_url": "https://yoursite.com/monitor",
+    "secret_token": "abc123...",
+    "setup_token": "xyz789...",
+    "update_interval": 5
+}
+```
+
+| Setting | Description |
+|---------|-------------|
+| `enabled` | Whether monitoring is active |
+| `website_url` | Your dashboard URL |
+| `secret_token` | 32-byte token for bot↔server auth |
+| `setup_token` | One-time token for claiming dashboard |
+| `update_interval` | Seconds between data transmissions |
+
+---
+
+#### Collected Data
+
+| Category | Data Points |
+|----------|-------------|
+| **Bot Info** | Username, ID, guild count, user count, latency, uptime |
+| **System** | CPU%, memory MB/%, threads, open files, connections, platform |
+| **Guilds** | Names, IDs, member counts, owners, channels (with NSFW status), join dates |
+| **Commands** | All commands with type, usage count, last used, error count, aliases |
+| **Extensions** | Loaded cogs, versions, authors, dependencies, conflicts |
+| **Hooks** | Event hooks with execution counts, failure rates, circuit breaker status |
+| **Atomic FS** | Cache size, hit rate, active locks, read/write counts |
+| **Events** | Command executions, errors, guild joins/leaves, message activity |
+
+---
+
+#### Security Best Practices
+
+1. **Use HTTPS** - Tokens are transmitted in URLs
+2. **Keep setup token secret** - Only shown once after quickstart
+3. **Monitor audit logs** - Check Security tab regularly
+4. **Limit Helper access** - Only trusted users
+5. **Regular backups** - Use backup feature before major changes
+
+---
+
+#### Troubleshooting
+
+**Dashboard not receiving data:**
+- Check `!livemonitor status` for failures
+- Verify URL is correct and accessible
+- Check PHP error logs on server
+- Ensure `receive.php` has write permissions
+
+**Can't claim dashboard:**
+- Setup token is one-time use
+- Run quickstart again for new token
+- Check if `lm_bootstrap.php` exists
+
+**Commands not executing:**
+- Check your role has required permissions
+- View Security & Logs tab for denied commands
+- Verify bot is running and connected
+
 # 🔐 Security Features
 
 ### Atomic File System Security
@@ -3051,17 +3553,52 @@ SHARD_IDS=0,1
 
 ## 📜 License
 
-### MIT License
-MIT License
+### MIT License + Additional Terms
+
+```
+MIT License + Additional Terms
 Copyright (c) 2025 TheHolyOneZ
+
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
 in the Software without restriction, including without limitation the rights
 to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 copies of the Software, and to permit persons to whom the Software is
 furnished to do so, subject to the following conditions:
+
 The above copyright notice and this permission notice shall be included in all
 copies or substantial portions of the Software.
+
+ADDITIONAL TERMS:
+
+1. The file main.py, and any version or derivative thereof, remains under
+   the MIT License and can be freely modified, provided that this license
+   and the original copyright notice remain intact.
+
+2. The CreditsButton class (as originally defined in the Software) must
+   remain present in all distributed, forked, or modified versions of the Software.
+   Its functionality and visibility must not be removed or obscured.
+   Specifically:
+   - The Credits Button must continue to exist and be displayed in the same
+     interface location as in the original version.
+   - The Credits Button must contain visible credit to the original author,
+     "TheHolyOneZ", and a link or reference to the original repository:
+     https://github.com/TheHolyOneZ/discord-bot-framework
+   - The textual credit contents (embed fields such as "Created By", "License",
+     and related original attribution text) must remain clearly visible and
+     intact. Additional information may be added, but the original credits must
+     not be removed, replaced, or hidden.
+
+3. Altering, deleting, or renaming the author's name "TheHolyOneZ" in this
+   license or within the Credits Button is strictly prohibited.
+
+4. The discordbotframework command (including its aliases framework and
+   botinfo) as defined in the Software must remain intact. This includes
+   its function body and the original list of "Framework Features" and "User
+   Commands" in its generated embed. Functionality or content that provides
+   credit or information about the original framework must not be removed,
+   modified, or obscured. Additional fields or information may be added.
+
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -3069,23 +3606,44 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-### Additional Terms
+```
 
-**IMPORTANT:** The following components must remain intact in all versions:
+### Protected Components Summary
 
-1. **CreditsButton class** in `main.py` - Must remain visible and functional
-2. **Author attribution** - "TheHolyOneZ" must not be removed or altered
-3. **Repository link** - GitHub link must remain in credits section
-4. **Framework command** - `!discordbotframework` must remain with original features
+| Component | Requirement |
+|-----------|-------------|
+| `main.py` | Freely modifiable under MIT, keep license & copyright |
+| **CreditsButton** class | Must remain visible and functional in same location |
+| **"TheHolyOneZ"** attribution | Cannot be removed, altered, or renamed anywhere |
+| **Repository link** | Must link to original GitHub repo |
+| `!discordbotframework` command | Must remain with original features and credits |
+| **Live Monitor Credits tab** | © 2025 TheHolyOneZ - NOT covered by MIT, must remain visible |
 
-**Marketplace License:**
-Extensions downloaded through the marketplace have additional terms:
-- Only usable within ZygnalBot ecosystem (including Zoryx Bot Framework)
-- Cannot remove names: ZygnalBot, zygnalbot, TheHolyOneZ, TheZ
-- Respect individual extension licenses
-- No redistribution outside authorized systems
+### Live Monitor Dashboard License
 
-Violations result in ZygnalID deactivation and service ban.
+The **Credits tab** and **visual design** of the Live Monitor dashboard (`cogs/live_monitor.py`) are **separately copyrighted** and are **NOT covered by the MIT license**:
+
+- © 2025 TheHolyOneZ
+- The Credits section (layout, wording, and SVG crown artwork) **MUST remain clearly visible** at all times
+- This applies to any use, modification, fork, or redistribution of the dashboard
+- The Credits tab cannot be hidden, removed, or obscured
+
+### Marketplace License
+
+Extensions downloaded through the Extension Marketplace have additional licensing terms:
+
+| Requirement | Description |
+|-------------|-------------|
+| **Ecosystem Only** | Extensions are only usable within the ZygnalBot ecosystem (including Zoryx Bot Framework) |
+| **Attribution Protected** | Cannot remove or alter: `ZygnalBot`, `zygnalbot`, `TheHolyOneZ`, `TheZ` |
+| **Individual Licenses** | Each extension may have its own additional license terms - respect them |
+| **No Redistribution** | Extensions cannot be redistributed outside authorized ZygnalBot systems |
+| **ZygnalID Required** | Valid, activated ZygnalID required for marketplace access |
+
+**⚠️ Violations Result In:**
+- Immediate ZygnalID deactivation
+- Permanent service ban
+- Potential legal action for severe violations
 
 ---
 
