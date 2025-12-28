@@ -1848,6 +1848,7 @@ class LiveMonitor(commands.Cog):
         app_commands.Choice(name="Disable", value="disable"),
         app_commands.Choice(name="Get Files", value="files")
     ])
+    @app_commands.check(lambda interaction: interaction.client.is_owner(interaction.user))
     async def livemonitor_slash(
         self,
         interaction: discord.Interaction,
@@ -1856,8 +1857,10 @@ class LiveMonitor(commands.Cog):
         interval: Optional[int] = None
     ):
         await self._livemonitor_logic(interaction, action, url, interval)
+
     
     @commands.command(name="livemonitor")
+    @commands.is_owner()
     async def livemonitor_prefix(self, ctx, action: str = "status", url: Optional[str] = None, interval: Optional[int] = None):
         await self._livemonitor_logic(ctx, action, url, interval)
     
