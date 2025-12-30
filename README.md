@@ -280,8 +280,9 @@
 - **Bridge between running Discord bot and external PHP-powered monitoring interface**
 - **⚠️ IMPORTANT: Credits tab and visual design © 2025 TheHolyOneZ - NOT covered by MIT license and MUST remain visible**
 
-> 📺 **COMING SOON: YouTube Tutorial**  
+> 📺 **YouTube Tutorial**  
 > A comprehensive video tutorial is coming soon that will showcase the Live Monitor dashboard, demonstrate all features in action, and provide a step-by-step guide on how to properly set everything up. Stay tuned!
+> Tutorial and showcase/walkthrough is out now: **https://www.youtube.com/watch?v=ir3AsxZOshw** 
 
 **Server Requirements:**
 - PHP 7.4+ hosting (shared hosting works fine - e.g., Strato, Hostinger, Bluehost, any cPanel host)
@@ -3857,6 +3858,7 @@ Want to see the framework in action? Check the `/images` directory for screensho
 
 **Made with 💜 by TheHolyOneZ**
 
-[GitHub Repository](https://github.com/TheHolyOneZ/discord-bot-framework) | [Website](https://zygnalbot.com/bot-framework/) | [Discord](gg/sgZnXca5ts)
+[GitHub Repository](https://github.com/TheHolyOneZ/discord-bot-framework) | [Website](https://zygnalbot.com/bot-framework/) | Discord = gg/sgZnXca5ts
+
 
 ---
