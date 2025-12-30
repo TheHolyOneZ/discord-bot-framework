@@ -275,14 +275,20 @@
   - Automatic updates when commands are converted
   - Real-time command count tracking
 
-**Live Monitor** (`cogs/live_monitor.py`)
-- **Web-based dashboard for real-time bot monitoring and remote management (~12,000+ lines)**
-- **Bridge between running Discord bot and external PHP-powered monitoring interface**
-- **⚠️ IMPORTANT: Credits tab and visual design © 2025 TheHolyOneZ - NOT covered by MIT license and MUST remain visible**
+**📡 Live Monitor (`cogs/live_monitor.py`)**
 
-> 📺 **YouTube Tutorial**  
-> A comprehensive video tutorial is coming soon that will showcase the Live Monitor dashboard, demonstrate all features in action, and provide a step-by-step guide on how to properly set everything up. Stay tuned!
-> Tutorial and showcase/walkthrough is out now: **https://www.youtube.com/watch?v=ir3AsxZOshw** 
+- **Web-based dashboard for real-time bot monitoring and remote management**  
+  _(~12,000+ lines of functionality)_
+- **Acts as a bridge between the running Discord bot and an external PHP-powered monitoring interface**
+- **⚠️ IMPORTANT:** The **Credits tab and visual design** are © 2025 **TheHolyOneZ**  
+  These elements are **NOT covered by the MIT license** and **MUST remain visible and unmodified**
+
+> 📺 **YouTube Tutorial & Showcase**  
+> The full video tutorial is **now live** 🎉  
+> It provides a complete walkthrough of the Live Monitor dashboard, showcases all features in action, and includes a step-by-step setup guide.  
+>  
+> 👉 **Watch here:**  
+> https://www.youtube.com/watch?v=ir3AsxZOshw
 
 **Server Requirements:**
 - PHP 7.4+ hosting (shared hosting works fine - e.g., Strato, Hostinger, Bluehost, any cPanel host)
@@ -3862,3 +3868,4 @@ Want to see the framework in action? Check the `/images` directory for screensho
 
 
 ---
+
