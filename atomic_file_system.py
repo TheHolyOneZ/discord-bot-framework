@@ -159,6 +159,55 @@ class AtomicFileHandler:
             "cache_invalidations": self.metrics["cache_invalidations"]
         }
     
+    def get_lock_details(self) -> Dict[str, Any]:
+        """
+        Get detailed information about all file locks
+        Returns lock details for Live Monitor dashboard
+        """
+        current_time = time.time()
+        locks_list = []
+        active_count = 0
+        
+        for filepath, (lock, created_time) in self._locks.items():
+            is_locked = lock.locked()
+            if is_locked:
+                active_count += 1
+            
+            # Determine last operation
+            cache_key = self._get_cache_key(filepath)
+            last_operation = "idle"
+            last_used_time = created_time
+            
+            if cache_key in self._cache:
+                _, cache_timestamp = self._cache[cache_key]
+                last_used_time = cache_timestamp
+                # If cache exists and is recent, it was likely a read
+                if (current_time - cache_timestamp) < 60:
+                    last_operation = "read"
+                else:
+                    last_operation = "idle"
+            
+            # If lock is currently held, it's actively writing
+            if is_locked:
+                last_operation = "write"
+            
+            locks_list.append({
+                "path": filepath,
+                "locked": is_locked,
+                "last_operation": last_operation,
+                "last_used": datetime.fromtimestamp(last_used_time).isoformat(),
+                "created_at": datetime.fromtimestamp(created_time).isoformat()
+            })
+        
+        # Sort by last_used (most recent first)
+        locks_list.sort(key=lambda x: x["last_used"], reverse=True)
+        
+        return {
+            "total_locks": len(self._locks),
+            "active_locks": active_count,
+            "locks": locks_list
+        }
+    
     async def atomic_read(self, filepath: str, use_cache: bool = True) -> Optional[str]:
         """
         Atomically read file with optional caching
