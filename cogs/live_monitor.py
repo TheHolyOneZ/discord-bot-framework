@@ -27,6 +27,7 @@ import time
 import inspect
 import shutil
 import platform
+import sys
 logger = logging.getLogger('discord')
 
 
@@ -42,6 +43,7 @@ class LiveMonitor(commands.Cog):
         
         self.config = self._load_config()
         self.is_enabled = False
+        self.verbose_logging = self.config.get("verbose_logging", False)
         self.last_send_success = None
         self.send_failures = 0
         
@@ -140,7 +142,7 @@ class LiveMonitor(commands.Cog):
             "secret_token": None,
             "website_url": None,
             "update_interval": 5,
-
+            "verbose_logging": False,
             "setup_token": None,
         }
 
@@ -276,9 +278,15 @@ class LiveMonitor(commands.Cog):
         extensions_dir = Path("./extensions")
         botlogs_dir = Path("./botlogs")
 
-        def get_dir_info(path: Path) -> Dict[str, Any]:
+        def get_dir_info(path: Path, name: str) -> Dict[str, Any]:
             if not path.exists():
-                return {"exists": False, "file_count": 0, "total_size": 0}
+                return {
+                    "exists": False,
+                    "file_count": 0,
+                    "total_size": 0,
+                    "path": str(path),
+                    "name": name
+                }
 
             try:
                 files = list(path.rglob("*"))
@@ -292,14 +300,16 @@ class LiveMonitor(commands.Cog):
             return {
                 "exists": True,
                 "file_count": file_count,
-                "total_size": total_size
+                "total_size": total_size,
+                "path": str(path),
+                "name": name
             }
 
         return {
-            "data": get_dir_info(data_dir),
-            "cogs": get_dir_info(cogs_dir),
-            "extensions": get_dir_info(extensions_dir),
-            "botlogs": get_dir_info(botlogs_dir)
+            "data": get_dir_info(data_dir, "./data"),
+            "cogs": get_dir_info(cogs_dir, "./cogs"),
+            "extensions": get_dir_info(extensions_dir, "./extensions"),
+            "botlogs": get_dir_info(botlogs_dir, "./botlogs")
         }
 
     def _get_dashboard_assets(self) -> List[Path]:
@@ -431,10 +441,13 @@ class LiveMonitor(commands.Cog):
         self._command_usage[cmd_name]["last_used"] = datetime.now().isoformat()
     
     async def cog_load(self):
+        logger.info(f"Live Monitor: Config loaded - enabled={self.config.get('enabled')}, website_url={self.config.get('website_url')}, has_token={bool(self.config.get('secret_token'))}")
         if self.config.get("enabled") and self.config.get("website_url"):
             self.is_enabled = True
             self.send_status_loop.start()
-            logger.info("Live Monitor: Auto-started from saved config")
+            logger.info(f"Live Monitor: Auto-started from saved config (sending data every 2 seconds to {self.config.get('website_url')})")
+        else:
+            logger.warning(f"Live Monitor: NOT auto-started - enabled={self.config.get('enabled')}, has_website_url={bool(self.config.get('website_url'))}")
     
     def cog_unload(self):
         if self.send_status_loop.is_running():
@@ -657,9 +670,9 @@ class LiveMonitor(commands.Cog):
                 }
                 fw_section = self.bot.config.get("framework", {}) or {}
                 framework_info = {
-                    "version": fw_section.get("version"),
-                    "recommended_python": fw_section.get("recommended_python"),
-                    "python_runtime": fw_section.get("python_runtime"),
+                    "version": "1.4.5",
+                    "recommended_python": fw_section.get("recommended_python", "3.12.7"),
+                    "python_runtime": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
                     "docs_url": "https://zygnalbot.com/bot-framework/",
                     "github_url": "https://github.com/TheHolyOneZ/discord-bot-framework",
                     "support_url": "https://zygnalbot.com/support.html",
@@ -820,6 +833,29 @@ class LiveMonitor(commands.Cog):
 
         recent_events = self._event_log[-30:]
         
+        hook_creator_data = {}
+        try:
+            creator_cog = self.bot.get_cog("EventHooksCreater")
+            
+            if creator_cog:
+                hook_creator_data = {
+                    "templates": creator_cog.get_templates(),
+                    "created_hooks": creator_cog.get_all_created_hooks(),
+                    "stats": creator_cog.get_hook_stats(),
+                    "analytics": {}
+                }
+                
+                for hook in creator_cog.get_all_created_hooks():
+                    hook_analytics = creator_cog.get_analytics(hook["hook_id"])
+                    if hook_analytics:
+                        hook_creator_data["analytics"][hook["hook_id"]] = hook_analytics
+        except Exception as e:
+            logger.error(f"Live Monitor: Failed to collect hook creator data: {e}")
+        
+        monitor_settings = {
+            "verbose_logging": self.verbose_logging,
+        }
+        
         return {
             "timestamp": datetime.now().isoformat(),
             "bot": bot_info,
@@ -828,6 +864,7 @@ class LiveMonitor(commands.Cog):
             "slash_limiter": slash_limiter_data,
             "atomic_fs": atomic_fs_data,
             "core_settings": core_settings,
+            "monitor_settings": monitor_settings,
             "framework": framework_info,
             "plugins": plugins_data,
             "available_extensions": available_extensions,
@@ -836,11 +873,137 @@ class LiveMonitor(commands.Cog):
             "file_system": {**file_system_data, "fileops": fileops_data},
             "events": recent_events,
             "chat_history": chat_history,
+            "hook_creator": hook_creator_data,
         }
+
+    async def _process_ticket_deletions(self):
+        """Check for and process pending ticket deletion requests from the dashboard."""
+        try:
+            website_url = self.config.get("website_url", "").rstrip('/')
+            if not website_url:
+                return
+            
+            deletion_queue_url = f"{website_url}/monitor_data_ticket_deletions.json"
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.get(deletion_queue_url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+                    if resp.status != 200:
+                        return
+                    
+                    deletions = await resp.json()
+                    if not deletions or not isinstance(deletions, list) or len(deletions) == 0:
+                        return
+                    
+                    processed_count = 0
+                    for deletion_request in deletions:
+                        ticket_id = deletion_request.get('ticket_id')
+                        guild_id = deletion_request.get('guild_id')
+                        
+                        if not ticket_id or not guild_id:
+                            continue
+                        
+                        tickets_dir = Path(f"./data/tickets/{guild_id}/transcripts")
+                        if not tickets_dir.exists():
+                            continue
+                        
+                        meta_file = tickets_dir / f"{ticket_id}_meta.json"
+                        html_file = tickets_dir / f"{ticket_id}.html"
+                        
+                        deleted = False
+                        if meta_file.exists():
+                            meta_file.unlink()
+                            deleted = True
+                            logger.info(f"Live Monitor: Deleted ticket meta file {ticket_id} for guild {guild_id}")
+                        
+                        if html_file.exists():
+                            html_file.unlink()
+                            deleted = True
+                            logger.info(f"Live Monitor: Deleted ticket HTML file {ticket_id} for guild {guild_id}")
+                        
+                        if deleted:
+                            processed_count += 1
+                            logger.info(f"Live Monitor: Successfully processed deletion for ticket {ticket_id}")
+                    
+                    # Only clear if we actually processed something
+                    if processed_count > 0:
+                        async with session.post(
+                            deletion_queue_url,
+                            data=json.dumps([]),
+                            headers={'Content-Type': 'application/json'},
+                            timeout=aiohttp.ClientTimeout(total=5)
+                        ) as clear_resp:
+                            if clear_resp.status == 200:
+                                logger.info(f"Live Monitor: Cleared ticket deletion queue ({processed_count} tickets processed)")
+                            else:
+                                logger.warning(f"Live Monitor: Failed to clear ticket deletion queue, status: {clear_resp.status}")
+        
+        except asyncio.TimeoutError:
+            pass
+        except Exception as e:
+            logger.error(f"Live Monitor: Error processing ticket deletions: {e}")
     
-    @tasks.loop(seconds=2)
+    async def _collect_tickets_data(self) -> Dict[str, Any]:
+        tickets_data = {"guilds": []}
+        tickets_dir = Path("./data/tickets")
+        
+        if not tickets_dir.exists():
+            return tickets_data
+        
+        try:
+            for guild_dir in tickets_dir.iterdir():
+                if not guild_dir.is_dir():
+                    continue
+                
+                guild_id = guild_dir.name
+                transcripts_dir = guild_dir / "transcripts"
+                
+                if not transcripts_dir.exists():
+                    continue
+                
+                tickets = []
+                for file in transcripts_dir.iterdir():
+                    if file.suffix == '.json' and file.stem.endswith('_meta'):
+                        try:
+                            with open(file, 'r', encoding='utf-8') as f:
+                                ticket_meta = json.load(f)
+                            
+                            ticket_id = ticket_meta.get('ticket_id')
+                            html_file = transcripts_dir / f"{ticket_id}.html"
+                            
+                            if html_file.exists():
+                                try:
+                                    with open(html_file, 'r', encoding='utf-8') as f:
+                                        ticket_meta['html_content'] = f.read()
+                                except Exception as e:
+                                    logger.error(f"Live Monitor: Failed to read HTML for ticket {ticket_id}: {e}")
+                                    ticket_meta['html_content'] = None
+                            else:
+                                ticket_meta['html_content'] = None
+                            
+                            tickets.append(ticket_meta)
+                        except Exception as e:
+                            logger.error(f"Live Monitor: Failed to read ticket metadata {file}: {e}")
+                
+                if tickets:
+                    tickets_data["guilds"].append({
+                        "guild_id": guild_id,
+                        "tickets": tickets
+                    })
+        except Exception as e:
+            logger.error(f"Live Monitor: Error collecting tickets data: {e}")
+        
+        return tickets_data
+    
+    @tasks.loop(seconds=1)
     async def send_status_loop(self):
-        if not self.is_enabled or not self.config.get("website_url") or not self.config.get("secret_token"):
+        if not self.is_enabled:
+            logger.debug("Live Monitor: send_status_loop skipped - not enabled")
+            return
+        if not self.config.get("website_url"):
+            logger.warning("Live Monitor: send_status_loop skipped - no website_url configured")
+            return
+        if not self.config.get("secret_token"):
+            logger.warning("Live Monitor: send_status_loop skipped - no secret_token configured")
             return
         
         try:
@@ -867,26 +1030,40 @@ class LiveMonitor(commands.Cog):
                     "framework": data.get("framework", {}),
                 },
                 "events": {"events": data.get("events", [])},
-                "filesystem": data.get("file_system", {})
+                "filesystem": data.get("file_system", {}),
+                "hook_creator": data.get("hook_creator", {}),
             }
+            
+            await self._process_ticket_deletions()
+            packages["tickets"] = await self._collect_tickets_data()
             
             base_url = self.config['website_url']
             token = self.config['secret_token']
+            
+            sent_count = 0
+            failed_count = 0
             
             async with aiohttp.ClientSession() as session:
                 for package_name, package_data in packages.items():
                     url = f"{base_url}/receive.php?token={token}&package={package_name}"
                     try:
                         async with session.post(url, json=package_data, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                            if resp.status != 200:
+                            if resp.status == 200:
+                                sent_count += 1
+                            else:
+                                failed_count += 1
                                 logger.warning(f"Live Monitor: Package '{package_name}' send failed with status {resp.status}")
                     except asyncio.CancelledError:
 
                         logger.info("Live Monitor: send_status_loop HTTP send cancelled")
                         raise
                     except Exception as e:
+                        failed_count += 1
                         logger.error(f"Live Monitor: Error sending package '{package_name}': {e}")
             
+            if sent_count > 0:
+                if self.verbose_logging:
+                    logger.info(f"Live Monitor: Data sent successfully ({sent_count} packages, {failed_count} failed)")
             self.last_send_success = datetime.now()
             self.send_failures = 0
         
@@ -974,6 +1151,38 @@ class LiveMonitor(commands.Cog):
                 if event_hooks_cog:
                     event_hooks_cog.circuit_breaker.reset(hook_id)
                     self._log_event("circuit_reset", {"hook_id": hook_id})
+            
+            elif cmd_type == "create_custom_hook":
+                creator_cog = self.bot.get_cog("EventHooksCreater")
+                if creator_cog:
+                    template_id = params.get("template_id")
+                    hook_params = params.get("params", {})
+                    guild_id = params.get("guild_id")
+                    created_by = params.get("created_by", "Dashboard User")
+                    
+                    result = creator_cog.create_hook(template_id, hook_params, guild_id, created_by)
+                    self._log_event("custom_hook_created", {
+                        "template_id": template_id,
+                        "guild_id": guild_id,
+                        "success": result.get("success", False)
+                    })
+            
+            elif cmd_type == "delete_custom_hook":
+                creator_cog = self.bot.get_cog("EventHooksCreater")
+                if creator_cog:
+                    hook_id = params.get("hook_id")
+                    result = creator_cog.delete_hook(hook_id)
+                    self._log_event("custom_hook_deleted", {"hook_id": hook_id})
+            
+            elif cmd_type == "toggle_custom_hook":
+                creator_cog = self.bot.get_cog("EventHooksCreater")
+                if creator_cog:
+                    hook_id = params.get("hook_id")
+                    result = creator_cog.toggle_hook(hook_id)
+                    self._log_event("custom_hook_toggled", {
+                        "hook_id": hook_id,
+                        "enabled": result.get("enabled", False)
+                    })
             
             elif cmd_type == "reload_extension":
                 ext_name = params.get("extension")
@@ -1080,10 +1289,42 @@ class LiveMonitor(commands.Cog):
                 except Exception as e:
                     logger.error(f"Live Monitor: Failed to update extensions.auto_load in config: {e}")
             
+            elif cmd_type == "set_verbose_logging":
+                enabled = bool(params.get("enabled"))
+                self.verbose_logging = enabled
+                self.config["verbose_logging"] = enabled
+                self._save_config()
+                self._log_event("verbose_logging_updated", {"enabled": enabled})
+                logger.info(f"Live Monitor: Verbose logging {'enabled' if enabled else 'disabled'}")
+            
             elif cmd_type == "clear_cache":
                 if hasattr(self.bot.config, 'file_handler'):
                     self.bot.config.file_handler.clear_all_cache()
                     self._log_event("cache_cleared", {})
+            
+            elif cmd_type == "toggle_debug_packages":
+                enabled = params.get("enabled", False)
+                try:
+                    if enabled:
+                        logging.getLogger('discord').setLevel(logging.DEBUG)
+                        logging.getLogger('discord.http').setLevel(logging.DEBUG)
+                        logging.getLogger('discord.gateway').setLevel(logging.DEBUG)
+                        logger.info("Live Monitor: Debug packages enabled - verbose logging active")
+                    else:
+                        logging.getLogger('discord').setLevel(logging.INFO)
+                        logging.getLogger('discord.http').setLevel(logging.INFO)
+                        logging.getLogger('discord.gateway').setLevel(logging.INFO)
+                        logger.info("Live Monitor: Debug packages disabled - normal logging resumed")
+                    
+                    if hasattr(self.bot, 'config'):
+                        if not hasattr(self.bot.config, 'debug_packages'):
+                            self.bot.config.debug_packages = enabled
+                        else:
+                            self.bot.config.debug_packages = enabled
+                    
+                    self._log_event("debug_packages_toggled", {"enabled": enabled})
+                except Exception as e:
+                    logger.error(f"Failed to toggle debug packages: {e}")
 
             elif cmd_type == "generate_framework_diagnostics":
                 diagnostics_cog = self.bot.get_cog("FrameworkDiagnostics")
@@ -1605,14 +1846,18 @@ class LiveMonitor(commands.Cog):
                             return
 
                         response_data = {
+                            "success": False,
+                            "error": error,
+                            "command_type": "read_file",
                             "type": "read_file",
                             "path": path,
                             "content": f"ERROR: {error}",
-                            "error": True,
                             "request_id": params.get("request_id")
                         }
                     else:
                         response_data = {
+                            "success": True,
+                            "command_type": "read_file",
                             "type": "read_file",
                             "path": path,
                             "content": content,
@@ -1640,10 +1885,12 @@ class LiveMonitor(commands.Cog):
                     async with self._fileops_lock:
                         try:
                             response_data = {
+                                "success": False,
+                                "error": str(e),
+                                "command_type": "read_file",
                                 "type": "read_file",
                                 "path": path,
                                 "content": f"ERROR: Failed to read file - {str(e)}",
-                                "error": True,
                                 "request_id": params.get("request_id")
                             }
                             base_url = self.config['website_url']
@@ -1874,7 +2121,7 @@ class LiveMonitor(commands.Cog):
             
             embed.add_field(
                 name="Status",
-                value="✅ Enabled" if self.is_enabled else "⏸️ Disabled",
+                value=" Enabled" if self.is_enabled else "⏸️ Disabled",
                 inline=True
             )
             
@@ -1888,7 +2135,7 @@ class LiveMonitor(commands.Cog):
             if self.config.get("secret_token"):
                 embed.add_field(
                     name="Setup Complete",
-                    value="✅ Token configured",
+                    value=" Token configured",
                     inline=True
                 )
             else:
@@ -1999,6 +2246,12 @@ class LiveMonitor(commands.Cog):
             (output_dir / "receive.php").write_text(self._generate_receive_php(token), encoding='utf-8')
             (output_dir / "get_commands.php").write_text(self._generate_get_commands_php(token), encoding='utf-8')
             (output_dir / "send_command.php").write_text(self._generate_send_command_php(token), encoding='utf-8')
+            (output_dir / "get_user_permissions.php").write_text(self._generate_get_user_permissions_php(), encoding='utf-8')
+            (output_dir / "get_tickets.php").write_text(self._generate_get_tickets_php(), encoding='utf-8')
+            (output_dir / "get_transcript.php").write_text(self._generate_get_transcript_php(), encoding='utf-8')
+            (output_dir / "download_transcript.php").write_text(self._generate_download_transcript_php(), encoding='utf-8')
+            (output_dir / "delete_ticket.php").write_text(self._generate_delete_ticket_php(), encoding='utf-8')
+            (output_dir / "transcript_view.php").write_text(self._generate_transcript_view_php(), encoding='utf-8')
 
 
 
@@ -2023,7 +2276,7 @@ class LiveMonitor(commands.Cog):
             ]
             
             embed = discord.Embed(
-                title="✅ Live Monitor - Setup Complete!",
+                title=" Live Monitor - Setup Complete!",
                 color=0x00ff00,
                 description="Your dashboard files are ready. Follow the steps below:"
             )
@@ -2062,7 +2315,7 @@ class LiveMonitor(commands.Cog):
             )
             
             embed.add_field(
-                name="📋 What’s Inside the Zip",
+                name=" What’s Inside the Zip",
                 value=(
                     "• `index.php` - Dashboard interface (Discord login protected)\\n"\
                     "• Bridge endpoints: `receive.php`, `get_commands.php`, `send_command.php`\\n"\
@@ -2112,7 +2365,7 @@ class LiveMonitor(commands.Cog):
                 logger.error(f"Live Monitor: Asset sync on enable failed: {e}")
             
             embed = discord.Embed(
-                title="✅ Live Monitor Enabled",
+                title=" Live Monitor Enabled",
                 color=0x00ff00,
                 description="Bot is now sending data to your dashboard"
             )
@@ -2193,6 +2446,12 @@ class LiveMonitor(commands.Cog):
             (output_dir / "receive.php").write_text(self._generate_receive_php(token), encoding='utf-8')
             (output_dir / "get_commands.php").write_text(self._generate_get_commands_php(token), encoding='utf-8')
             (output_dir / "send_command.php").write_text(self._generate_send_command_php(token), encoding='utf-8')
+            (output_dir / "get_user_permissions.php").write_text(self._generate_get_user_permissions_php(), encoding='utf-8')
+            (output_dir / "get_tickets.php").write_text(self._generate_get_tickets_php(), encoding='utf-8')
+            (output_dir / "get_transcript.php").write_text(self._generate_get_transcript_php(), encoding='utf-8')
+            (output_dir / "download_transcript.php").write_text(self._generate_download_transcript_php(), encoding='utf-8')
+            (output_dir / "delete_ticket.php").write_text(self._generate_delete_ticket_php(), encoding='utf-8')
+            (output_dir / "transcript_view.php").write_text(self._generate_transcript_view_php(), encoding='utf-8')
 
 
 
@@ -4729,6 +4988,39 @@ class LiveMonitor(commands.Cog):
             min-height: 200px;
             overflow-y: auto;
         }
+
+        .tickets-select {
+            width: 100%;
+            padding: 10px 36px 10px 12px;
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid rgba(124, 58, 237, 0.3);
+            border-radius: 8px;
+            color: #e5e7eb;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%23a855f7' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 12px center;
+        }
+        
+        .tickets-select:hover {
+            border-color: rgba(124, 58, 237, 0.5);
+            background: rgba(15, 23, 42, 0.8);
+        }
+        
+        .tickets-select:focus {
+            outline: none;
+            border-color: #7c3aed;
+            box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.1);
+        }
+        
+        .tickets-select option {
+            background: #0f172a;
+            color: #e5e7eb;
+            padding: 8px;
+        }
     </style>
 </head>
 <body>
@@ -4807,12 +5099,20 @@ class LiveMonitor(commands.Cog):
                     <button class="lm-sidebar-item" data-tab="commands">Commands</button>
                     <button class="lm-sidebar-item" data-tab="plugins">Plugins &amp; Extensions</button>
                     <button class="lm-sidebar-item" data-tab="hooks">Event Hooks</button>
+                    <button class="lm-sidebar-item" data-tab="hook-creator">Hook Creator</button>
                     <button class="lm-sidebar-item" data-tab="filesystem">File System</button>
                     <button class="lm-sidebar-item" data-tab="system">System</button>
 
                     <div class="lm-sidebar-group-label">Tools</div>
                     <button class="lm-sidebar-item" data-tab="files">File Browser</button>
                     <button class="lm-sidebar-item" data-tab="chat">Chat Console</button>
+                    <button class="lm-sidebar-item" data-tab="tickets">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" style="display:inline-block;vertical-align:middle;margin-right:8px;">
+                            <path d="M3 7C3 5.89543 3.89543 5 5 5H19C20.1046 5 21 5.89543 21 7V10C19.8954 10 19 10.8954 19 12C19 13.1046 19.8954 14 21 14V17C21 18.1046 20.1046 19 19 19H5C3.89543 19 3 18.1046 3 17V14C4.10457 14 5 13.1046 5 12C5 10.8954 4.10457 10 3 10V7Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                            <path d="M9 9L9 15M12 9V15M15 9V15" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                        </svg>
+                        Discord Tickets
+                    </button>
                     <button class="lm-sidebar-item" data-tab="guilds">Guilds / Servers</button>
                     <button class="lm-sidebar-item" data-tab="events">Events</button>
                     <button class="lm-sidebar-item" data-tab="invite">Bot Invite Helper</button>
@@ -4838,9 +5138,11 @@ class LiveMonitor(commands.Cog):
                     <button class="tab" onclick="switchTab('commands')">Commands</button>
                     <button class="tab" onclick="switchTab('plugins')">Plugins & Extensions</button>
                     <button class="tab" onclick="switchTab('hooks')">Event Hooks</button>
+                    <button class="tab" onclick="switchTab('hook-creator')">Hook Creator</button>
                     <button class="tab" onclick="switchTab('filesystem')">File System</button>
                     <button class="tab" onclick="switchTab('files')">File Browser</button>
                     <button class="tab" onclick="switchTab('chat')">Chat Console (EXPERIMENTAL)</button>
+                    <button class="tab" onclick="switchTab('tickets')">Discord Tickets</button>
                     <button class="tab" onclick="switchTab('guilds')">Guilds / Servers</button>
                     <button class="tab" onclick="switchTab('events')">Events</button>
                     <button class="tab" onclick="switchTab('system')">System</button>
@@ -5230,6 +5532,894 @@ class LiveMonitor(commands.Cog):
                     </div>
                 </div>
 
+                <!-- Event Hooks Creator Tab - Enhanced Version -->
+<!-- This replaces the tab-hook-creator section in live_monitor.py -->
+
+<div id="tab-hook-creator" class="tab-content">
+    <div class="section-header">
+        <div style="display:flex;align-items:center;gap:8px;">
+            <div class="section-title">🎯 Advanced Hook Creator</div>
+            <button class="header-info-button" onclick="openSectionHelp('hook-creator')">?</button>
+        </div>
+        <div style="display: flex; gap: 8px;">
+            <button class="button button-secondary" onclick="refreshHookCreator()">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg> Refresh
+            </button>
+            <button class="button" onclick="exportHooksJSON()" id="export-hooks-btn">
+                <span style="margin-right: 6px;">📤</span> Export
+            </button>
+        </div>
+    </div>
+    
+    <div class="card" style="margin-bottom: 20px; background: linear-gradient(135deg, rgba(124, 58, 237, 0.1) 0%, rgba(168, 85, 247, 0.1) 100%); border: 1px solid rgba(168, 85, 247, 0.3);">
+        <div class="card-header">
+            <div class="card-title">📊 Statistics Dashboard</div>
+        </div>
+        <div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));">
+            <div class="stat">
+                <span class="stat-label">Total Hooks</span>
+                <span class="stat-value" id="hc-total">0</span>
+            </div>
+            <div class="stat">
+                <span class="stat-label">Active</span>
+                <span class="stat-value" style="color: #10b981;" id="hc-enabled">0</span>
+            </div>
+            <div class="stat">
+                <span class="stat-label">Disabled</span>
+                <span class="stat-value" style="color: #64748b;" id="hc-disabled">0</span>
+            </div>
+            <div class="stat">
+                <span class="stat-label">Templates Available</span>
+                <span class="stat-value" id="hc-templates">0</span>
+            </div>
+            <div class="stat">
+                <span class="stat-label">Total Executions</span>
+                <span class="stat-value" id="hc-executions">0</span>
+            </div>
+            <div class="stat">
+                <span class="stat-label">Success Rate</span>
+                <span class="stat-value" id="hc-success-rate">100%</span>
+            </div>
+        </div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: 400px 1fr; gap: 20px; margin-bottom: 20px;">
+        <div class="card" style="position: sticky; top: 20px; max-height: calc(100vh - 140px); overflow-y: auto;">
+            <div class="card-header">
+                <div class="card-title"> Template Library</div>
+            </div>
+            <div style="padding: 12px;">
+                <div style="margin-bottom: 12px;">
+                    <input 
+                        type="text" 
+                        id="template-search" 
+                        class="input-text" 
+                        placeholder="Search templates..." 
+                        style="width: 100%;"
+                        oninput="filterTemplates()"
+                    />
+                </div>
+                <div style="margin-bottom: 12px;">
+                    <select id="category-filter" class="select" style="width: 100%;" onchange="filterTemplates()">
+                        <option value="">All Categories</option>
+                    </select>
+                </div>
+                <div id="hc-templates-list"></div>
+            </div>
+        </div>
+
+        <div>
+            <div class="card" style="margin-bottom: 20px;">
+                <div class="card-header">
+                    <div class="card-title"> Create New Hook</div>
+                </div>
+                <div style="padding: 20px;">
+                    <div style="margin-bottom: 16px;">
+                        <label style="display: block; margin-bottom: 8px; font-size: 13px; font-weight: 600; color: #94a3b8;">
+                            Select Template <span style="color: #ef4444;">*</span>
+                        </label>
+                        <select id="hc-template-select" class="select" style="width: 100%;" onchange="loadTemplateParams()">
+                            <option value="">Choose a template...</option>
+                        </select>
+                    </div>
+                    
+                    <div id="hc-template-info" style="display: none; padding: 16px; background: linear-gradient(135deg, rgba(124, 58, 237, 0.1), rgba(168, 85, 247, 0.1)); border: 1px solid rgba(124, 58, 237, 0.3); border-radius: 8px; margin-bottom: 16px;">
+                        <div style="display: flex; align-items: start; gap: 12px; margin-bottom: 8px;">
+                            <span id="hc-template-icon" style="font-size: 24px;"></span>
+                            <div style="flex: 1;">
+                                <div style="font-size: 14px; color: #a855f7; font-weight: 700; margin-bottom: 4px;">
+                                    <span id="hc-template-name"></span>
+                                </div>
+                                <div id="hc-template-description" style="font-size: 12px; color: #cbd5e1;"></div>
+                            </div>
+                        </div>
+                        <div id="hc-template-event" style="font-size: 11px; color: #94a3b8; padding: 6px 12px; background: rgba(15, 23, 42, 0.5); border-radius: 4px; display: inline-block;"></div>
+                    </div>
+
+                    <div id="hc-params-container"></div>
+
+                    <div style="margin-top: 20px; display: flex; gap: 8px;">
+                        <button class="button" onclick="createCustomHook()" style="flex: 1;">
+                            <span style="margin-right: 6px;"></span> Create Hook
+                        </button>
+                        <button class="button button-secondary" onclick="clearHookForm()">
+                            <span style="margin-right: 6px;"></span> Clear
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title"> Created Hooks</div>
+                    <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                        <select id="hc-filter-guild" class="select" onchange="filterCreatedHooks()" style="min-width: 150px;">
+                            <option value="">All Guilds</option>
+                        </select>
+                        <select id="hc-filter-template" class="select" onchange="filterCreatedHooks()" style="min-width: 150px;">
+                            <option value="">All Templates</option>
+                        </select>
+                        <select id="hc-filter-status" class="select" onchange="filterCreatedHooks()" style="min-width: 120px;">
+                            <option value="">All Status</option>
+                            <option value="enabled">Active Only</option>
+                            <option value="disabled">Disabled Only</option>
+                        </select>
+                    </div>
+                </div>
+                <div style="padding: 12px;">
+                    <div id="hc-created-hooks-list"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.hook-template-card {
+    background: rgba(15, 23, 42, 0.4);
+    border: 1px solid rgba(148, 163, 184, 0.15);
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 10px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.hook-template-card:hover {
+    background: rgba(15, 23, 42, 0.6);
+    border-color: rgba(168, 85, 247, 0.4);
+    transform: translateX(4px);
+}
+
+.hook-template-card.selected {
+    background: linear-gradient(135deg, rgba(124, 58, 237, 0.2), rgba(168, 85, 247, 0.2));
+    border-color: rgba(168, 85, 247, 0.6);
+}
+
+.hook-template-icon {
+    font-size: 20px;
+    margin-right: 10px;
+}
+
+.hook-template-badge {
+    display: inline-block;
+    font-size: 9px;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.hook-template-badge.advanced {
+    background: linear-gradient(135deg, #ef4444, #dc2626);
+    color: white;
+}
+
+.hook-template-badge.basic {
+    background: linear-gradient(135deg, #10b981, #059669);
+    color: white;
+}
+
+.param-input-wrapper {
+    margin-bottom: 16px;
+    animation: slideIn 0.3s ease-out;
+}
+
+@keyframes slideIn {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.param-label {
+    display: block;
+    margin-bottom: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    color: #94a3b8;
+}
+
+.param-label .required {
+    color: #ef4444;
+    margin-left: 4px;
+}
+
+.param-description {
+    font-size: 11px;
+    color: #64748b;
+    margin-top: 4px;
+    line-height: 1.4;
+}
+
+.json-editor {
+    font-family: 'Courier New', monospace;
+    font-size: 12px;
+    background: #0f172a;
+    border: 1px solid rgba(148, 163, 184, 0.2);
+    border-radius: 6px;
+    padding: 12px;
+    color: #e5e7eb;
+    min-height: 100px;
+    resize: vertical;
+}
+
+.json-editor:focus {
+    outline: none;
+    border-color: rgba(168, 85, 247, 0.5);
+    box-shadow: 0 0 0 3px rgba(168, 85, 247, 0.1);
+}
+
+.json-validate-btn {
+    font-size: 11px;
+    padding: 4px 10px;
+    background: rgba(168, 85, 247, 0.2);
+    border: 1px solid rgba(168, 85, 247, 0.3);
+    border-radius: 4px;
+    color: #a855f7;
+    cursor: pointer;
+    margin-top: 6px;
+    transition: all 0.2s;
+}
+
+.json-validate-btn:hover {
+    background: rgba(168, 85, 247, 0.3);
+}
+
+.color-picker-wrapper {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.color-preview {
+    width: 40px;
+    height: 40px;
+    border-radius: 6px;
+    border: 2px solid rgba(148, 163, 184, 0.2);
+    cursor: pointer;
+}
+
+.hook-card {
+    background: rgba(15, 23, 42, 0.5);
+    border: 1px solid rgba(148, 163, 184, 0.2);
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 12px;
+    transition: all 0.2s;
+}
+
+.hook-card:hover {
+    border-color: rgba(168, 85, 247, 0.4);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.hook-card.disabled {
+    opacity: 0.6;
+    background: rgba(15, 23, 42, 0.3);
+}
+
+.hook-status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 4px 8px;
+    border-radius: 4px;
+    text-transform: uppercase;
+}
+
+.hook-status-badge.active {
+    background: rgba(16, 185, 129, 0.2);
+    color: #10b981;
+    border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.hook-status-badge.disabled {
+    background: rgba(100, 116, 139, 0.2);
+    color: #64748b;
+    border: 1px solid rgba(100, 116, 139, 0.3);
+}
+
+.hook-actions {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.hook-btn {
+    font-size: 11px;
+    padding: 6px 12px;
+    border-radius: 4px;
+    border: 1px solid;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-weight: 600;
+}
+
+.hook-btn.toggle {
+    background: rgba(168, 85, 247, 0.2);
+    border-color: rgba(168, 85, 247, 0.3);
+    color: #a855f7;
+}
+
+.hook-btn.toggle:hover {
+    background: rgba(168, 85, 247, 0.3);
+}
+
+.hook-btn.delete {
+    background: rgba(239, 68, 68, 0.2);
+    border-color: rgba(239, 68, 68, 0.3);
+    color: #ef4444;
+}
+
+.hook-btn.delete:hover {
+    background: rgba(239, 68, 68, 0.3);
+}
+
+.hook-btn.analytics {
+    background: rgba(59, 130, 246, 0.2);
+    border-color: rgba(59, 130, 246, 0.3);
+    color: #3b82f6;
+}
+
+.hook-btn.analytics:hover {
+    background: rgba(59, 130, 246, 0.3);
+}
+</style>
+
+<script>
+function refreshHookCreator() {
+    fetch('monitor_data_hook_creator.json?t=' + Date.now())
+        .then(response => response.json())
+        .then(data => {
+            if (data) {
+                updateHookCreator(data);
+            }
+        })
+        .catch(error => console.error('Failed to refresh hook creator:', error));
+}
+
+function filterTemplates() {
+    const searchTerm = document.getElementById('template-search').value.toLowerCase();
+    const category = document.getElementById('category-filter').value;
+    
+    let filtered = hookCreatorData.templates || [];
+    
+    if (searchTerm) {
+        filtered = filtered.filter(t => 
+            t.name.toLowerCase().includes(searchTerm) || 
+            t.description.toLowerCase().includes(searchTerm)
+        );
+    }
+    
+    if (category) {
+        filtered = filtered.filter(t => t.category === category);
+    }
+    
+    renderTemplatesList(filtered);
+}
+
+function getHookIconSVG(iconName) {
+    const icons = {
+        'wave': '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>',
+        'zap': '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>',
+        'shield': '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>',
+        'chart': '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>',
+        'clock': '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',
+        'ticket': '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 9a3 3 0 0 1 0 6v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2a3 3 0 0 1 0-6V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2Z"/><path d="M13 5v2"/><path d="M13 17v2"/><path d="M13 11v2"/></svg>',
+        'volume': '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>',
+        'link': '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>',
+        'microphone': '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/></svg>',
+    };
+    return icons[iconName] || icons['link'];
+}
+
+function renderTemplatesList(templates) {
+    const container = document.getElementById('hc-templates-list');
+    if (!container) return;
+    
+    const grouped = {};
+    templates.forEach(t => {
+        if (!grouped[t.category]) grouped[t.category] = [];
+        grouped[t.category].push(t);
+    });
+    
+    let html = '';
+    Object.keys(grouped).sort().forEach(category => {
+        html += `<div style="margin-bottom: 20px;">`;
+        html += `<div style="font-size: 11px; font-weight: 700; color: #a855f7; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 1px;">${category}</div>`;
+        
+        grouped[category].forEach(template => {
+            const isSelected = document.getElementById('hc-template-select')?.value === template.id;
+            html += `
+                <div class="hook-template-card ${isSelected ? 'selected' : ''}" onclick="selectTemplate('${template.id}')">
+                    <div style="display: flex; align-items: start; gap: 12px;">
+                        <span class="hook-template-icon">${getHookIconSVG(template.icon)}</span>
+                        <div style="flex: 1; min-width: 0;">
+                            <div style="font-size: 13px; font-weight: 600; color: #e5e7eb; margin-bottom: 4px; display: flex; align-items: center; gap: 6px;">
+                                ${template.name}
+                                <span class="hook-template-badge ${template.advanced ? 'advanced' : 'basic'}">
+                                    ${template.advanced ? 'Advanced' : 'Basic'}
+                                </span>
+                            </div>
+                            <div style="font-size: 11px; color: #94a3b8; line-height: 1.4;">
+                                ${template.description}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        });
+        
+        html += `</div>`;
+    });
+    
+    container.innerHTML = html || '<div style="text-align: center; padding: 20px; color: #64748b;">No templates found</div>';
+}
+
+function selectTemplate(templateId) {
+    document.getElementById('hc-template-select').value = templateId;
+    loadTemplateParams();
+    renderTemplatesList(hookCreatorData.templates || []);
+}
+
+function loadTemplateParams() {
+    const templateId = document.getElementById('hc-template-select').value;
+    if (!templateId) {
+        document.getElementById('hc-template-info').style.display = 'none';
+        document.getElementById('hc-params-container').innerHTML = '';
+        renderTemplatesList(hookCreatorData.templates || []);
+        return;
+    }
+
+    const template = hookCreatorData.templates?.find(t => t.id === templateId);
+    if (!template) return;
+
+    document.getElementById('hc-template-info').style.display = 'block';
+    document.getElementById('hc-template-icon').textContent = template.icon || '';
+    document.getElementById('hc-template-name').textContent = template.name;
+    document.getElementById('hc-template-description').textContent = template.description;
+    document.getElementById('hc-template-event').textContent = `Event: ${template.event} | Category: ${template.category}`;
+
+    let paramsHtml = '';
+    template.params.forEach((param, index) => {
+        let inputHtml = '';
+        const defaultValue = param.default || '';
+        
+        if (param.type === 'text') {
+            inputHtml = `<input type="text" id="param-${param.name}" class="input-text" value="${defaultValue}" placeholder="${param.description || ''}" style="width: 100%;">`;
+        } 
+        else if (param.type === 'textarea') {
+            inputHtml = `<textarea id="param-${param.name}" class="input-text" placeholder="${param.description || ''}" style="width: 100%; min-height: 80px; resize: vertical;">${defaultValue}</textarea>`;
+        }
+        else if (param.type === 'number') {
+            inputHtml = `<input type="number" id="param-${param.name}" class="input-text" value="${defaultValue}" placeholder="${param.description || ''}" style="width: 100%;">`;
+        }
+        else if (param.type === 'boolean') {
+            const checked = defaultValue === true || defaultValue === 'true' ? 'checked' : '';
+            inputHtml = `
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none;">
+                    <input type="checkbox" id="param-${param.name}" ${checked} style="width: 18px; height: 18px; cursor: pointer;">
+                    <span style="font-size: 12px; color: #cbd5e1;">Enable this option</span>
+                </label>
+            `;
+        }
+        else if (param.type === 'select') {
+            inputHtml = `<select id="param-${param.name}" class="select" style="width: 100%;">`;
+            (param.options || []).forEach(opt => {
+                const selected = opt === defaultValue ? 'selected' : '';
+                inputHtml += `<option value="${opt}" ${selected}>${opt}</option>`;
+            });
+            inputHtml += `</select>`;
+        }
+        else if (param.type === 'channel') {
+            inputHtml = `<input type="text" id="param-${param.name}" class="input-text" placeholder="Enter channel ID" style="width: 100%;">`;
+        }
+        else if (param.type === 'role') {
+            inputHtml = `<input type="text" id="param-${param.name}" class="input-text" placeholder="Enter role ID" style="width: 100%;">`;
+        }
+        else if (param.type === 'color') {
+            const colorVal = defaultValue || '7C3AED';
+            inputHtml = `
+                <div class="color-picker-wrapper">
+                    <div class="color-preview" id="color-preview-${param.name}" style="background-color: #${colorVal};" onclick="document.getElementById('param-${param.name}').focus();"></div>
+                    <input type="text" id="param-${param.name}" class="input-text" value="${colorVal}" placeholder="Hex color (e.g., 7C3AED)" style="flex: 1;" oninput="updateColorPreview('${param.name}', this.value)">
+                </div>
+            `;
+        }
+        else if (param.type === 'json') {
+            inputHtml = `
+                <textarea id="param-${param.name}" class="json-editor" placeholder='${param.description || "Enter JSON..."}'>${defaultValue}</textarea>
+                <button class="json-validate-btn" onclick="validateJSON('param-${param.name}')">✓ Validate JSON</button>
+            `;
+        }
+
+        paramsHtml += `
+            <div class="param-input-wrapper">
+                <label class="param-label">
+                    ${param.name}${param.required ? '<span class="required">*</span>' : ''}
+                </label>
+                ${inputHtml}
+                ${param.description ? `<div class="param-description">${param.description}</div>` : ''}
+            </div>
+        `;
+    });
+
+    paramsHtml += `
+        <div class="param-input-wrapper">
+            <label class="param-label">
+                Guild / Server<span class="required">*</span>
+            </label>
+            <select id="param-guild-id" class="select" style="width: 100%;">
+                <option value="">Select a guild...</option>
+            </select>
+        </div>
+    `;
+
+    document.getElementById('hc-params-container').innerHTML = paramsHtml;
+
+    const guildSelect = document.getElementById('param-guild-id');
+    if (guildSelect && currentGuilds) {
+        currentGuilds.forEach(guild => {
+            const option = document.createElement('option');
+            option.value = guild.id;
+            option.textContent = guild.name;
+            guildSelect.appendChild(option);
+        });
+    }
+    
+    renderTemplatesList(hookCreatorData.templates || []);
+}
+
+function updateColorPreview(paramName, value) {
+    const preview = document.getElementById(`color-preview-${paramName}`);
+    if (preview) {
+        const cleanHex = value.replace('#', '');
+        preview.style.backgroundColor = `#${cleanHex}`;
+    }
+}
+
+function validateJSON(inputId) {
+    const input = document.getElementById(inputId);
+    if (!input) return;
+    
+    try {
+        JSON.parse(input.value);
+        showNotification('✓ Valid JSON', 'success');
+        input.style.borderColor = 'rgba(16, 185, 129, 0.5)';
+        setTimeout(() => {
+            input.style.borderColor = '';
+        }, 2000);
+    } catch (e) {
+        showNotification('✗ Invalid JSON: ' + e.message, 'error');
+        input.style.borderColor = 'rgba(239, 68, 68, 0.5)';
+    }
+}
+
+function createCustomHook() {
+    const templateId = document.getElementById('hc-template-select').value;
+    if (!templateId) {
+        showNotification('Please select a template', 'error');
+        return;
+    }
+
+    const template = hookCreatorData.templates?.find(t => t.id === templateId);
+    if (!template) return;
+
+    const guildId = document.getElementById('param-guild-id')?.value;
+    if (!guildId) {
+        showNotification('Please select a guild', 'error');
+        return;
+    }
+
+    const params = {};
+    let hasError = false;
+
+    template.params.forEach(param => {
+        const input = document.getElementById(`param-${param.name}`);
+        if (input) {
+            let value;
+            
+            if (param.type === 'boolean') {
+                value = input.checked;
+            } else if (param.type === 'number') {
+                value = parseFloat(input.value);
+                if (isNaN(value)) value = param.default || 0;
+            } else if (param.type === 'json') {
+                try {
+                    value = input.value.trim() ? JSON.parse(input.value) : (param.default ? JSON.parse(param.default) : {});
+                } catch (e) {
+                    showNotification(`Invalid JSON in ${param.name}: ${e.message}`, 'error');
+                    hasError = true;
+                    return;
+                }
+            } else {
+                value = input.value.trim();
+            }
+            
+            if (param.required && !value && value !== false && value !== 0) {
+                showNotification(`${param.name} is required`, 'error');
+                hasError = true;
+                return;
+            }
+            
+            if (value || value === false || value === 0) {
+                params[param.name] = value;
+            }
+        }
+    });
+
+    if (hasError) return;
+
+    sendCommand('create_custom_hook', {
+        template_id: templateId,
+        params: params,
+        guild_id: guildId,
+        created_by: 'Dashboard User'
+    });
+
+    showNotification(' Creating custom hook...', 'success');
+    setTimeout(() => {
+        clearHookForm();
+        refreshHookCreator();
+    }, 1000);
+}
+
+function clearHookForm() {
+    document.getElementById('hc-template-select').value = '';
+    document.getElementById('hc-template-info').style.display = 'none';
+    document.getElementById('hc-params-container').innerHTML = '';
+    renderTemplatesList(hookCreatorData.templates || []);
+}
+
+function deleteCustomHook(hookId) {
+    if (!confirm('Are you sure you want to delete this hook? This action cannot be undone.')) return;
+
+    sendCommand('delete_custom_hook', { hook_id: hookId });
+
+    showNotification(' Deleting hook...', 'info');
+    setTimeout(refreshHookCreator, 500);
+}
+
+function toggleCustomHook(hookId) {
+    sendCommand('toggle_custom_hook', { hook_id: hookId });
+
+    showNotification('Toggling hook...', 'info');
+    setTimeout(refreshHookCreator, 500);
+}
+
+function filterCreatedHooks() {
+    renderCreatedHooks(hookCreatorData.created_hooks || []);
+}
+
+function renderCreatedHooks(hooks) {
+    const container = document.getElementById('hc-created-hooks-list');
+    if (!container) return;
+
+    const guildFilter = document.getElementById('hc-filter-guild')?.value;
+    const templateFilter = document.getElementById('hc-filter-template')?.value;
+    const statusFilter = document.getElementById('hc-filter-status')?.value;
+
+    let filtered = hooks;
+    if (guildFilter) filtered = filtered.filter(h => String(h.guild_id) === String(guildFilter));
+    if (templateFilter) filtered = filtered.filter(h => h.template_id === templateFilter);
+    if (statusFilter === 'enabled') filtered = filtered.filter(h => h.enabled);
+    if (statusFilter === 'disabled') filtered = filtered.filter(h => !h.enabled);
+
+    if (filtered.length === 0) {
+        container.innerHTML = '<div style="text-align: center; padding: 40px; color: #64748b;">No hooks found matching your filters</div>';
+        return;
+    }
+
+    let html = '<div style="display: grid; gap: 12px;">';
+    filtered.forEach(hook => {
+        const guild = currentGuilds.find(g => g.id === hook.guild_id);
+        const guildName = guild ? guild.name : `Guild ${hook.guild_id}`;
+        const template = hookCreatorData.templates?.find(t => t.id === hook.template_id);
+        const icon = template?.icon || 'link';
+        const successRate = hook.execution_count > 0 ? 
+            ((hook.execution_count - (hook.error_count || 0)) / hook.execution_count * 100).toFixed(1) : 100;
+
+        html += `
+            <div class="hook-card ${hook.enabled ? '' : 'disabled'}">
+                <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 12px;">
+                    <div style="flex: 1;">
+                        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 6px;">
+                            <span style="display: flex; align-items: center; color: #a855f7;">${getHookIconSVG(icon)}</span>
+                            <div style="font-size: 14px; font-weight: 600; color: #e5e7eb;">
+                                ${hook.template_name}
+                            </div>
+                            <span class="hook-status-badge ${hook.enabled ? 'active' : 'disabled'}">
+                                ${hook.enabled ? '● Active' : '○ Disabled'}
+                            </span>
+                        </div>
+                        <div style="font-size: 11px; color: #94a3b8; margin-bottom: 8px;">
+                            ${hook.event} | ${guildName}
+                        </div>
+                        <div style="display: flex; gap: 16px; font-size: 11px; color: #64748b;">
+                            <span>Executions: <strong style="color: #a855f7;">${hook.execution_count || 0}</strong></span>
+                            <span>Errors: <strong style="color: ${hook.error_count > 0 ? '#ef4444' : '#10b981'};">${hook.error_count || 0}</strong></span>
+                            <span>Success: <strong style="color: #10b981;">${successRate}%</strong></span>
+                        </div>
+                    </div>
+                    <div class="hook-actions">
+                        <button onclick="toggleCustomHook(this.getAttribute('data-hook-id'))" data-hook-id="${hook.hook_id}" class="hook-btn toggle">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+                            ${hook.enabled ? 'Disable' : 'Enable'}
+                        </button>
+                        <button onclick="viewHookAnalytics(this.getAttribute('data-hook-id'))" data-hook-id="${hook.hook_id}" class="hook-btn analytics">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+                            Analytics
+                        </button>
+                        <button onclick="deleteCustomHook(this.getAttribute('data-hook-id'))" data-hook-id="${hook.hook_id}" class="hook-btn delete">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                            Delete
+                        </button>
+                    </div>
+                </div>
+                <div style="font-size: 10px; color: #64748b; padding-top: 8px; border-top: 1px solid rgba(148, 163, 184, 0.1);">
+                    Created: ${new Date(hook.created_at).toLocaleString()} | ID: ${hook.hook_id}
+                </div>
+            </div>
+        `;
+    });
+    html += '</div>';
+
+    container.innerHTML = html;
+}
+
+function viewHookAnalytics(hookId) {
+    const hook = hookCreatorData.created_hooks?.find(h => h.hook_id === hookId);
+    if (!hook) return;
+    
+    const successRate = hook.execution_count > 0 ? 
+        ((hook.execution_count - (hook.error_count || 0)) / hook.execution_count * 100).toFixed(2) : 100;
+    
+    showNotification(`
+        Analytics for ${hook.template_name}
+        
+        Total Executions: ${hook.execution_count || 0}
+        Successful: ${(hook.execution_count || 0) - (hook.error_count || 0)}
+        Failed: ${hook.error_count || 0}
+        Success Rate: ${successRate}%
+        
+        Status: ${hook.enabled ? 'Active' : 'Disabled'}
+        Created: ${new Date(hook.created_at).toLocaleString()}
+    `, 'info');
+}
+
+function exportHooksJSON() {
+    const dataStr = JSON.stringify(hookCreatorData.created_hooks, null, 2);
+    const blob = new Blob([dataStr], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `hooks-export-${Date.now()}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+    showNotification(' Hooks exported successfully', 'success');
+}
+
+function updateHookCreator(data) {
+    if (!data) return;
+
+    hookCreatorData = data;
+
+    if (data.stats) {
+        document.getElementById('hc-total').textContent = data.stats.total || 0;
+        document.getElementById('hc-enabled').textContent = data.stats.enabled || 0;
+        document.getElementById('hc-disabled').textContent = data.stats.disabled || 0;
+        document.getElementById('hc-executions').textContent = data.stats.total_executions || 0;
+        document.getElementById('hc-success-rate').textContent = (data.stats.success_rate || 100) + '%';
+    }
+
+    if (data.templates) {
+        document.getElementById('hc-templates').textContent = data.templates.length;
+
+        const templateSelect = document.getElementById('hc-template-select');
+        if (templateSelect) {
+            const currentValue = templateSelect.value;
+            templateSelect.innerHTML = '<option value="">Choose a template...</option>';
+            data.templates.forEach(template => {
+                const option = document.createElement('option');
+                option.value = template.id;
+                option.textContent = `${template.icon || ''} ${template.name}`;
+                templateSelect.appendChild(option);
+            });
+            templateSelect.value = currentValue;
+        }
+
+        const categories = [...new Set(data.templates.map(t => t.category))].sort();
+        const categoryFilter = document.getElementById('category-filter');
+        if (categoryFilter) {
+            const currentCat = categoryFilter.value;
+            categoryFilter.innerHTML = '<option value="">All Categories</option>';
+            categories.forEach(cat => {
+                const option = document.createElement('option');
+                option.value = cat;
+                option.textContent = cat;
+                categoryFilter.appendChild(option);
+            });
+            categoryFilter.value = currentCat;
+        }
+
+        renderTemplatesList(data.templates);
+    }
+
+    if (data.created_hooks) {
+        renderCreatedHooks(data.created_hooks);
+
+        const guildFilterSelect = document.getElementById('hc-filter-guild');
+        const templateFilterSelect = document.getElementById('hc-filter-template');
+
+        if (guildFilterSelect) {
+            const guilds = [...new Set(data.created_hooks.map(h => h.guild_id))];
+            const currentGuild = guildFilterSelect.value;
+            guildFilterSelect.innerHTML = '<option value="">All Guilds</option>';
+            guilds.forEach(guildId => {
+                const guild = currentGuilds.find(g => g.id === guildId);
+                if (guild) {
+                    const option = document.createElement('option');
+                    option.value = guildId;
+                    option.textContent = guild.name;
+                    guildFilterSelect.appendChild(option);
+                }
+            });
+            guildFilterSelect.value = currentGuild;
+        }
+
+        if (templateFilterSelect && data.templates) {
+            const templates = [...new Set(data.created_hooks.map(h => h.template_id))];
+            const currentTemplate = templateFilterSelect.value;
+            templateFilterSelect.innerHTML = '<option value="">All Templates</option>';
+            templates.forEach(templateId => {
+                const template = data.templates.find(t => t.id === templateId);
+                if (template) {
+                    const option = document.createElement('option');
+                    option.value = templateId;
+                    option.textContent = template.name;
+                    templateFilterSelect.appendChild(option);
+                }
+            });
+            templateFilterSelect.value = currentTemplate;
+        }
+    }
+}
+
+if (typeof window !== 'undefined') {
+    window.addEventListener('DOMContentLoaded', () => {
+        setTimeout(refreshHookCreator, 1000);
+    });
+}
+</script>
+
                 <div id="tab-filesystem" class="tab-content">
                     <div class="section-header">
                         <div style="display:flex;align-items:center;gap:8px;">
@@ -5377,6 +6567,134 @@ class LiveMonitor(commands.Cog):
                     </div>
                 </div>
 
+
+                <div id="tab-tickets" class="tab-content">
+                    <div class="section-header">
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <h2 style="font-size:22px;font-weight:700;margin:0;color:#e5e7eb;display:flex;align-items:center;gap:12px;">
+                                <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                                    <path d="M3 7C3 5.89543 3.89543 5 5 5H19C20.1046 5 21 5.89543 21 7V10C19.8954 10 19 10.8954 19 12C19 13.1046 19.8954 14 21 14V17C21 18.1046 20.1046 19 19 19H5C3.89543 19 3 18.1046 3 17V14C4.10457 14 5 13.1046 5 12C5 10.8954 4.10457 10 3 10V7Z" stroke="#a855f7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                                    <path d="M9 9L9 15M12 9V15M15 9V15" stroke="#a855f7" stroke-width="2" stroke-linecap="round"/>
+                                </svg>
+                                Discord Tickets
+                            </h2>
+                        </div>
+                    </div>
+
+                    <div class="card" style="margin-bottom:20px;background:linear-gradient(135deg, rgba(124, 58, 237, 0.1) 0%, rgba(168, 85, 247, 0.1) 100%);border:1px solid rgba(168, 85, 247, 0.3);">
+                        <div class="card-body" style="display:flex;align-items:center;gap:16px;padding:16px 20px;">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" style="flex-shrink:0;">
+                                <path d="M12 16V12M12 8H12.01M22 12C22 17.5228 17.5228 22 12 22C6.47715 22 2 17.5228 2 12C2 6.47715 6.47715 2 12 2C17.5228 2 22 6.47715 22 12Z" stroke="#a855f7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                            </svg>
+                            <div style="flex:1;">
+                                <div style="font-size:14px;font-weight:600;color:#e5e7eb;margin-bottom:4px;">
+                                    Multi-Ticket System Required
+                                </div>
+                                <div style="font-size:13px;color:#94a3b8;line-height:1.5;">
+                                    This dashboard integrates with <strong style="color:#a855f7;">Multi-Ticket System V4.0.0+</strong> from the ZygnalBot Marketplace. 
+                                    <a href="https://zygnalbot.com/extension/view.php?id=116" target="_blank" style="color:#a855f7;text-decoration:none;font-weight:600;margin-left:4px;">
+                                        Install Extension →
+                                    </a>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card" style="margin-bottom:20px;">
+                        <div class="card-header">
+                            <div class="card-title">Ticket Filters & Controls</div>
+                        </div>
+                        <div class="card-body" style="display:flex;flex-direction:column;gap:16px;">
+                            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;">
+                                <div>
+                                    <label class="property-label" style="display:block;margin-bottom:8px;">Guild/Server</label>
+                                    <select id="tickets-guild-filter" class="tickets-select">
+                                        <option value="">All Guilds</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="property-label" style="display:block;margin-bottom:8px;">Category</label>
+                                    <select id="tickets-category-filter" class="tickets-select">
+                                        <option value="">All Categories</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="property-label" style="display:block;margin-bottom:8px;">Sort By</label>
+                                    <select id="tickets-sort" class="tickets-select">
+                                        <option value="closed_desc">Closed Date (Newest First)</option>
+                                        <option value="closed_asc">Closed Date (Oldest First)</option>
+                                        <option value="created_desc">Created Date (Newest First)</option>
+                                        <option value="created_asc">Created Date (Oldest First)</option>
+                                        <option value="number_desc">Ticket # (High to Low)</option>
+                                        <option value="number_asc">Ticket # (Low to High)</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div style="display:grid;grid-template-columns:1fr auto;gap:12px;align-items:end;">
+                                <div>
+                                    <label class="property-label" style="display:block;margin-bottom:8px;">Search</label>
+                                    <input type="text" id="tickets-search" class="input-text" placeholder="Search by ticket #, creator, or subject..." style="width:100%;padding:10px;background:rgba(0,0,0,0.3);border:1px solid rgba(148,163,184,0.3);border-radius:8px;color:#e5e7eb;">
+                                </div>
+                                <div style="display:flex;gap:12px;">
+                                    <div>
+                                        <label class="property-label" style="display:block;margin-bottom:8px;">Auto-Refresh</label>
+                                        <select id="tickets-autorefresh" class="tickets-select" style="width:140px;">
+                                            <option value="0">Off</option>
+                                            <option value="5000">5 seconds</option>
+                                            <option value="10000">10 seconds</option>
+                                            <option value="20000">20 seconds</option>
+                                        </select>
+                                    </div>
+                                    <button class="button button-primary" onclick="loadTickets()" style="padding:10px 20px;align-self:flex-end;">
+                                        🔄 Refresh
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card expanded">
+                        <div class="card-header">
+                            <div class="card-title">Tickets</div>
+                            <div id="tickets-count" style="color:#94a3b8;font-size:14px;">Loading...</div>
+                        </div>
+                        <div class="card-body" style="padding:0;overflow:hidden;">
+                            <div id="tickets-empty-state" style="display:none;padding:40px 24px;text-align:center;color:#94a3b8;">
+                                <div style="font-size:48px;margin-bottom:16px;">🎫</div>
+                                <div style="font-size:16px;font-weight:600;margin-bottom:8px;color:#e5e7eb;">No tickets exist yet across all guilds</div>
+                                <div style="font-size:14px;margin-bottom:16px;">If you need a good ticket system, check out:</div>
+                                <a href="https://zygnalbot.com/extension/view.php?id=116" target="_blank" style="color:#7c3aed;text-decoration:none;font-weight:600;">https://zygnalbot.com/extension/view.php?id=116</a>
+                                <div style="font-size:13px;margin-top:8px;color:#64748b;">Read the docs, then click back to all extensions and search for "multi-ticket" to find Multi-Ticket System</div>
+                            </div>
+                            <div id="tickets-loading" style="padding:40px 24px;text-align:center;color:#94a3b8;">
+                                <div style="font-size:32px;margin-bottom:12px;">⏳</div>
+                                <div>Loading tickets...</div>
+                            </div>
+                            <div id="tickets-table-container" style="display:none;overflow-x:auto;">
+                                <table class="data-table" style="width:100%;border-collapse:collapse;">
+                                    <thead>
+                                        <tr style="background:rgba(0,0,0,0.2);border-bottom:1px solid rgba(148,163,184,0.2);">
+                                            <th style="padding:12px 16px;text-align:left;font-weight:600;color:#94a3b8;font-size:13px;">Ticket #</th>
+                                            <th style="padding:12px 16px;text-align:left;font-weight:600;color:#94a3b8;font-size:13px;">Category</th>
+                                            <th style="padding:12px 16px;text-align:left;font-weight:600;color:#94a3b8;font-size:13px;">Creator</th>
+                                            <th style="padding:12px 16px;text-align:left;font-weight:600;color:#94a3b8;font-size:13px;">Status</th>
+                                            <th style="padding:12px 16px;text-align:left;font-weight:600;color:#94a3b8;font-size:13px;">Created</th>
+                                            <th style="padding:12px 16px;text-align:left;font-weight:600;color:#94a3b8;font-size:13px;">Closed</th>
+                                            <th style="padding:12px 16px;text-align:left;font-weight:600;color:#94a3b8;font-size:13px;">Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="tickets-tbody">
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <div id="tickets-pagination" style="display:none;padding:16px 24px;border-top:1px solid rgba(148,163,184,0.2);justify-content:space-between;align-items:center;">
+                            <button class="button button-secondary" id="tickets-prev-btn" onclick="ticketsPreviousPage()" disabled>← Previous</button>
+                            <div id="tickets-page-info" style="color:#94a3b8;font-size:14px;">Page 1 of 1</div>
+                            <button class="button button-secondary" id="tickets-next-btn" onclick="ticketsNextPage()" disabled>Next →</button>
+                        </div>
+                    </div>
+                </div>
                 <div id="tab-guilds" class="tab-content">
                     <div class="section-header">
                         <div style="display:flex;align-items:center;gap:8px;">
@@ -5499,6 +6817,33 @@ class LiveMonitor(commands.Cog):
                         <strong>📁 Downloads:</strong> Extensions are saved directly to <code>./extensions/</code> folder.
                     </div>
                     
+                    <div id="zygnalid-activation-notice" style="margin-bottom:16px;padding:16px;background:linear-gradient(135deg,rgba(251,146,60,0.15),rgba(249,115,22,0.15));border-radius:10px;border:1px solid rgba(251,146,60,0.3);">
+                        <div style="font-size:14px;font-weight:600;color:#fb923c;margin-bottom:8px;display:flex;align-items:center;gap:8px;">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
+                            </svg>
+                            ZygnalID Activation Required
+                        </div>
+                        <div style="font-size:13px;line-height:1.6;color:#fcd34d;margin-bottom:12px;">
+                            To download extensions, you need an activated ZygnalID. Your ZygnalID is stored in <code style="background:rgba(0,0,0,0.3);padding:2px 6px;border-radius:4px;">./data/marketplace/ZygnalID.txt</code>
+                        </div>
+                        <div style="font-size:12px;line-height:1.7;color:#fde68a;background:rgba(0,0,0,0.2);padding:12px;border-radius:8px;margin-bottom:12px;">
+                            <strong style="color:#fb923c;">Activation Steps:</strong><br/>
+                            1. Copy your ZygnalID from the error message when you try to download<br/>
+                            2. Join the ZygnalBot support server: <code style="background:rgba(0,0,0,0.3);padding:2px 6px;border-radius:4px;">discord.gg/sgZnXca5ts</code><br/>
+                            3. Verify yourself (enable all channels if you can't see verify channel)<br/>
+                            4. Go to "Create Ticket" channel and open a ticket with subject: <strong>"zygnal activation"</strong><br/>
+                            5. Paste your ZygnalID in the ticket
+                        </div>
+                        <button class="button button-secondary" onclick="refreshZygnalIDCache()" style="font-size:13px;padding:8px 16px;">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:6px;display:inline-block;vertical-align:middle;">
+                                <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
+                            </svg>
+                            Refresh ZygnalID Cache
+                        </button>
+                        <span style="font-size:11px;color:#fde68a;margin-left:12px;">Click this if you changed your ZygnalID file</span>
+                    </div>
+                    
                     <div style="display:flex;gap:12px;margin-bottom:20px;">
                         <button class="button button-primary" onclick="fetchMarketplaceExtensions()" ${typeof LM_PERMS !== 'undefined' && !LM_PERMS.control_marketplace ? 'disabled title="You don\'t have permission to refresh marketplace"' : ''}>
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:6px;display:inline-block;vertical-align:middle;">
@@ -5538,7 +6883,16 @@ class LiveMonitor(commands.Cog):
                             <div class="section-title">Security &amp; Logs</div>
                             <button class="header-info-button" onclick="openSectionHelp('security')">?</button>
                         </div>
-                        <button class="button button-secondary button-compact" onclick="window.location='owner_audit.php?export=csv'">Export Logs</button>
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <select id="logs-refresh-interval" onchange="setLogsAutoRefresh(this.value)" style="background:#1e293b;color:#e5e7eb;border:1px solid #334155;border-radius:4px;padding:6px 12px;font-size:13px;">
+                                <option value="0">Auto-refresh: Off</option>
+                                <option value="5">Every 5s</option>
+                                <option value="10">Every 10s</option>
+                                <option value="20">Every 20s</option>
+                            </select>
+                            <button class="button button-secondary button-compact" onclick="refreshSecurityLogs()">Refresh Now</button>
+                            <button class="button button-secondary button-compact" onclick="window.location='owner_audit.php?export=csv'">Export Logs</button>
+                        </div>
                     </div>
                     <div style="border-radius:12px;overflow:hidden;border:1px solid var(--border);height:520px;">
                         <iframe src="owner_audit.php" style="width:100%;height:100%;border:0;background:transparent;"></iframe>
@@ -5560,7 +6914,7 @@ class LiveMonitor(commands.Cog):
                                     <div class="column-subtitle">dashboard.sqlite (local dashboard database)</div>
                                 </div>
                             </div>
-                            <div id="db-tables" class="list" style="padding:12px;"></div>
+                            <div id="db-tables" class="list" style="padding:12px;max-height:70vh;min-height:500px;overflow:auto;"></div>
                         </div>
                         <div class="column-card">
                             <div class="column-header">
@@ -5569,7 +6923,7 @@ class LiveMonitor(commands.Cog):
                                     <div class="column-subtitle" id="db-selected-subtitle"></div>
                                 </div>
                             </div>
-                            <div id="db-rows" class="list" style="padding:12px;max-height:420px;overflow:auto;"></div>
+                            <div id="db-rows" class="list" style="padding:12px;max-height:70vh;min-height:500px;overflow:auto;"></div>
                         </div>
                     </div>
                 </div>
@@ -5737,6 +7091,9 @@ class LiveMonitor(commands.Cog):
                     </button>
                     <button class="lm-nav-palette-item" data-tab="chat">
                         <span>Chat Console</span><span class="lm-badge">Tools</span>
+                    <button class="lm-nav-palette-item" data-tab="tickets">
+                        <span>Discord Tickets</span><span class="lm-badge">Tools</span>
+                    </button>
                     </button>
                     <button class="lm-nav-palette-item" data-tab="guilds">
                         <span>Guilds / Servers</span><span class="lm-badge">Tools</span>
@@ -5788,12 +7145,20 @@ class LiveMonitor(commands.Cog):
             <button class="lm-drawer-item" data-tab="commands">Commands</button>
             <button class="lm-drawer-item" data-tab="plugins">Plugins &amp; Extensions</button>
             <button class="lm-drawer-item" data-tab="hooks">Event Hooks</button>
+            <button class="lm-drawer-item" data-tab="hook-creator">Hook Creator</button>
             <button class="lm-drawer-item" data-tab="filesystem">File System</button>
             <button class="lm-drawer-item" data-tab="system">System</button>
 
             <div class="lm-drawer-group-label">Tools</div>
             <button class="lm-drawer-item" data-tab="files">File Browser</button>
             <button class="lm-drawer-item" data-tab="chat">Chat Console</button>
+            <button class="lm-drawer-item" data-tab="tickets">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" style="display:inline-block;vertical-align:middle;margin-right:8px;">
+                    <path d="M3 7C3 5.89543 3.89543 5 5 5H19C20.1046 5 21 5.89543 21 7V10C19.8954 10 19 10.8954 19 12C19 13.1046 19.8954 14 21 14V17C21 18.1046 20.1046 19 19 19H5C3.89543 19 3 18.1046 3 17V14C4.10457 14 5 13.1046 5 12C5 10.8954 4.10457 10 3 10V7Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M9 9L9 15M12 9V15M15 9V15" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+                Discord Tickets
+            </button>
             <button class="lm-drawer-item" data-tab="guilds">Guilds / Servers</button>
             <button class="lm-drawer-item" data-tab="events">Events</button>
             <button class="lm-drawer-item" data-tab="invite">Bot Invite Helper</button>
@@ -5856,7 +7221,7 @@ class LiveMonitor(commands.Cog):
     <script>
 <?php
     $u = lm_current_user();
-    $roleName = $u['role'] ?? 'VISITOR';
+    $roleName = $u['role'] ?? 'CUSTOM';
     $tier = lm_resolve_role_tier($roleName);
     $perms = lm_role_permissions($roleName, $tier);
     $info = [
@@ -5868,13 +7233,53 @@ class LiveMonitor(commands.Cog):
     echo 'const LM_CURRENT_USER = ' . json_encode($info, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . ';';
     echo 'const LM_PERMS = ' . json_encode($perms, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . ';';
 ?>
-        const TOKEN = '{{TOKEN}}';
         const DEFAULT_PREFIX = '{{PREFIX}}';
+        let currentTab = 'dashboard';
         let currentData = null;
+        let currentGuilds = [];
         let platformOS = null;
+        
+        // Permission refresh mechanism
+        async function refreshPermissions() {
+            try {
+                const response = await fetch('get_user_permissions.php', {
+                    credentials: 'include',
+                    cache: 'no-cache'
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data && data.permissions) {
+                        // Update global permissions
+                        window.LM_PERMS = data.permissions;
+                        
+                        // CRITICAL: Reapply permission visibility for current tab
+                        // This ensures if permissions change (e.g., role updated), buttons update immediately
+                        applyPermissionVisibility(currentTab);
+                        console.log('[PERMISSIONS] Auto-refreshed permissions for tab:', currentTab);
+                        
+                        showNotification('Permissions refreshed successfully!', 'success');
+                        return true;
+                    }
+                }
+                
+                throw new Error('Failed to refresh permissions');
+            } catch (error) {
+                console.error('Permission refresh error:', error);
+                showNotification('Failed to refresh permissions. Try reloading the page.', 'error');
+                return false;
+            }
+        }
+        
+        // CRITICAL: Auto-refresh permissions every 30 seconds
+        // This ensures if an OWNER changes your permissions, they take effect quickly
+        setInterval(() => {
+            refreshPermissions();
+        }, 30000);
 
         function switchTab(tabName) {
             if (!tabName) return;
+            currentTab = tabName;
 
             // Activate tab contents
             document.querySelectorAll('.tab-content').forEach(panel => {
@@ -5897,6 +7302,269 @@ class LiveMonitor(commands.Cog):
             document.querySelectorAll('#lm-drawer-nav .lm-drawer-item').forEach(btn => {
                 btn.classList.toggle('lm-active', btn.dataset.tab === tabName);
             });
+            
+            // CRITICAL: Apply permission-based visibility EVERY TIME tab changes
+            // This ensures buttons are always properly gated based on current permissions
+            applyPermissionVisibility(tabName);
+            console.log('[PERMISSIONS] Applied permission checks to tab:', tabName);
+            
+            // Auto-load tickets on first visit
+            if (tabName === 'tickets' && !window._ticketsLoaded) {
+                window._ticketsLoaded = true;
+                setTimeout(() => loadTickets(), 100);
+            }
+        }
+        
+        function applyPermissionVisibility(tabName) {
+            if (!window.LM_PERMS) return;
+            const perms = window.LM_PERMS;
+            
+            // Helper function to check permission with fallback
+            const hasPermission = (newPerm, oldPerm) => {
+                return perms[newPerm] || perms[oldPerm] || false;
+            };
+            
+            // Helper function to disable button
+            const disableButton = (selector, newPerm, oldPerm) => {
+                document.querySelectorAll(selector).forEach(btn => {
+                    const allowed = hasPermission(newPerm, oldPerm);
+                    btn.disabled = !allowed;
+                    btn.style.opacity = allowed ? '1' : '0.5';
+                    btn.style.cursor = allowed ? 'pointer' : 'not-allowed';
+                    if (!allowed) {
+                        btn.title = `Requires ${newPerm} permission`;
+                    } else {
+                        btn.title = '';
+                    }
+                });
+            };
+            
+            // DASHBOARD TAB
+            if (tabName === 'dashboard') {
+                disableButton('button[onclick*="clear_cache"]', 'action_clear_cache', 'control_core');
+                disableButton('button[onclick*="toggle_verbose_logging"]', 'action_toggle_logging', 'control_core');
+                disableButton('button[onclick*="toggle_debug_packages"]', 'action_toggle_debug', 'control_core');
+                disableButton('button[onclick*="backup_bot_directory"]', 'action_backup_bot', 'control_backup');
+                
+                // Backup Dashboard button (uses window.location onclick)
+                document.querySelectorAll('button[onclick*="backup_dashboard.php"], a[href*="backup_dashboard.php"]').forEach(link => {
+                    const allowed = hasPermission('action_backup_dashboard', 'control_backup');
+                    link.disabled = !allowed;
+                    link.style.opacity = allowed ? '1' : '0.5';
+                    link.style.pointerEvents = allowed ? '' : 'none';
+                    if (!allowed) link.title = 'Requires action_backup_dashboard permission';
+                });
+            }
+            
+            // PLUGINS TAB
+            if (tabName === 'plugins') {
+                disableButton('button[onclick*="reload_extension"]', 'action_reload_extension', 'control_plugins');
+                disableButton('button[onclick*="load_extension"]', 'action_load_extension', 'control_plugins');
+                disableButton('button[onclick*="unload_extension"]', 'action_unload_extension', 'control_plugins');
+                disableButton('button[onclick*="set_auto_reload"]', 'action_set_auto_reload', 'control_plugins');
+                disableButton('button[onclick*="set_extensions_auto_load"]', 'action_set_auto_load', 'control_plugins');
+                disableButton('button[onclick*="plugin_registry_set_enforcement"]', 'action_set_enforcement', 'control_plugins');
+            }
+            
+            // EVENT HOOKS TAB
+            if (tabName === 'hooks') {
+                disableButton('button[onclick*="enable_hook"]', 'action_enable_hook', 'control_hooks');
+                disableButton('button[onclick*="disable_hook"]', 'action_disable_hook', 'control_hooks');
+                disableButton('button[onclick*="reset_circuit"]', 'action_reset_circuit', 'control_hooks');
+                disableButton('button[onclick*="delete_custom_hook"]', 'action_delete_hook', 'control_hooks');
+                disableButton('button[onclick*="deleteCustomHook"]', 'action_delete_hook', 'control_hooks');
+            }
+            
+            // HOOK CREATOR TAB
+            if (tabName === 'hook-creator') {
+                disableButton('#export-hooks-btn', 'action_export_hooks', 'control_hooks');
+                disableButton('button[onclick*="create_custom_hook"]', 'action_create_hook', 'control_hooks');
+                disableButton('button[onclick*="createCustomHook"]', 'action_create_hook', 'control_hooks');
+            }
+            
+            // FILE BROWSER TAB
+            if (tabName === 'files') {
+                disableButton('button[onclick*="uploadFile"]', 'action_upload_file', 'control_files');
+                disableButton('button[onclick*="renameFile"]', 'action_rename_file', 'control_files');
+                disableButton('button[onclick*="deleteFile"]', 'action_delete_file', 'control_files');
+                disableButton('button[onclick*="deletePath"]', 'action_delete_file', 'control_files');
+                disableButton('button[onclick*="createFolder"]', 'action_create_folder', 'control_files');
+                disableButton('button[onclick*="editFile"]', 'action_edit_file', 'control_files');
+                disableButton('button[onclick*="saveFile"]', 'action_save_file', 'control_files');
+            }
+            
+            // SYSTEM TAB
+            if (tabName === 'system') {
+                disableButton('button[onclick*="confirmShutdownBot"]', 'action_shutdown_bot', 'control_core');
+                disableButton('button[onclick*="generate_framework_diagnostics"]', 'action_generate_diagnostics', 'control_core');
+                disableButton('button[onclick*="af_invalidate_cache_entry"]', 'action_invalidate_cache', 'control_core');
+                disableButton('button[onclick*="af_force_release_lock"]', 'action_force_release_lock', 'control_core');
+                
+                // Force button in file locks section
+                document.querySelectorAll('.af-release-lock').forEach(btn => {
+                    const allowed = hasPermission('action_force_release_lock', 'control_core');
+                    btn.disabled = !allowed;
+                    btn.style.opacity = allowed ? '1' : '0.5';
+                    if (!allowed) btn.title = 'Requires action_force_release_lock permission';
+                });
+            }
+            
+            // CHAT CONSOLE TAB
+            if (tabName === 'chat') {
+                disableButton('button[onclick*="send_chat_message"]', 'action_send_message', 'control_chat');
+                disableButton('button[onclick*="sendChatMessage"]', 'action_send_message', 'control_chat');
+                disableButton('button[onclick*="requestChatHistory"]', 'action_request_chat_data', 'control_chat');
+                
+                // Also disable the input field if no permission
+                document.querySelectorAll('#chat-input').forEach(input => {
+                    const allowed = hasPermission('action_send_message', 'control_chat');
+                    input.disabled = !allowed;
+                    input.style.opacity = allowed ? '1' : '0.5';
+                    if (!allowed) input.placeholder = 'You do not have permission to send messages';
+                });
+            }
+            
+            // DISCORD TICKETS TAB
+            if (tabName === 'tickets') {
+                disableButton('button[onclick*="deleteTicket"]', 'action_delete_ticket', 'control_tickets');
+                
+                // Open ticket transcript buttons
+                document.querySelectorAll('button[onclick*="openTicket"], .ticket-open-btn').forEach(btn => {
+                    const allowed = hasPermission('action_view_ticket', 'control_tickets');
+                    btn.disabled = !allowed;
+                    btn.style.opacity = allowed ? '1' : '0.5';
+                    btn.style.cursor = allowed ? 'pointer' : 'not-allowed';
+                    if (!allowed) btn.title = 'Requires action_view_ticket permission';
+                });
+                
+                // Download ticket transcript buttons
+                document.querySelectorAll('button[onclick*="downloadTicket"], .ticket-download-btn').forEach(btn => {
+                    const allowed = hasPermission('action_download_ticket', 'control_tickets');
+                    btn.disabled = !allowed;
+                    btn.style.opacity = allowed ? '1' : '0.5';
+                    btn.style.cursor = allowed ? 'pointer' : 'not-allowed';
+                    if (!allowed) btn.title = 'Requires action_download_ticket permission';
+                });
+                
+                // All delete buttons in ticket list
+                document.querySelectorAll('.ticket-delete-btn').forEach(btn => {
+                    const allowed = hasPermission('action_delete_ticket', 'control_tickets');
+                    btn.disabled = !allowed;
+                    btn.style.opacity = allowed ? '1' : '0.5';
+                    if (!allowed) btn.title = 'Requires action_delete_ticket permission';
+                });
+            }
+            
+            // GUILDS / SERVERS TAB
+            if (tabName === 'guilds') {
+                disableButton('button[onclick*="leave_guild"]', 'action_leave_guild', 'control_guilds');
+                disableButton('button[onclick*="leaveGuild"]', 'action_leave_guild', 'control_guilds');
+            }
+            
+            // BOT INVITE HELPER TAB
+            if (tabName === 'invite') {
+                disableButton('button[onclick*="generateInviteLink"]', 'action_generate_invite', 'control_bot_invite');
+                disableButton('button[onclick*="openInviteLink"]', 'action_open_invite', 'control_bot_invite');
+                disableButton('button[onclick*="copyInviteLink"]', 'action_copy_invite', 'control_bot_invite');
+                
+                // Disable inputs if no generate permission
+                if (!hasPermission('action_generate_invite', 'control_bot_invite')) {
+                    document.querySelectorAll('#invite-app-id, #invite-permissions, #invite-scope-bot, #invite-scope-commands').forEach(input => {
+                        input.disabled = true;
+                        input.style.opacity = '0.5';
+                    });
+                }
+            }
+            
+            // EXTENSION MARKETPLACE TAB
+            if (tabName === 'marketplace') {
+                disableButton('button[onclick*="fetchMarketplaceExtensions"]', 'action_refresh_marketplace', 'control_marketplace');
+                disableButton('button[onclick*="refreshZygnalIDCache"]', 'action_refresh_zygnalid', 'control_marketplace');
+                disableButton('button[onclick*="downloadMarketplaceExtension"]', 'action_download_extension', 'control_marketplace');
+                disableButton('button[onclick*="download_marketplace_extension"]', 'action_download_extension', 'control_marketplace');
+                
+                // Download buttons in extension cards
+                document.querySelectorAll('.extension-download-btn').forEach(btn => {
+                    const allowed = hasPermission('action_download_extension', 'control_marketplace');
+                    btn.disabled = !allowed;
+                    btn.style.opacity = allowed ? '1' : '0.5';
+                    if (!allowed) btn.title = 'Requires action_download_extension permission';
+                });
+                
+                // Load extension button
+                disableButton('button[onclick*="load_downloaded_extension"]', 'action_load_marketplace_extension', 'control_marketplace');
+            }
+            
+            // ROLES & ACCESS TAB
+            if (tabName === 'roles') {
+                // Role profile edit buttons
+                document.querySelectorAll('[data-role-action="toggle"]').forEach(btn => {
+                    const allowed = hasPermission('action_save_role', 'control_roles');
+                    btn.disabled = !allowed;
+                    btn.style.opacity = allowed ? '1' : '0.5';
+                    btn.style.cursor = allowed ? 'pointer' : 'not-allowed';
+                    if (!allowed) btn.title = 'Requires action_save_role permission to edit roles';
+                });
+                
+                // Role profile save buttons  
+                document.querySelectorAll('[data-role-action="save"]').forEach(btn => {
+                    const allowed = hasPermission('action_save_role', 'control_roles');
+                    btn.disabled = !allowed;
+                    btn.style.opacity = allowed ? '1' : '0.5';
+                    btn.style.cursor = allowed ? 'pointer' : 'not-allowed';
+                    if (!allowed) btn.title = 'Requires action_save_role permission';
+                });
+                
+                // Role profile delete buttons
+                document.querySelectorAll('[data-role-action="delete"]').forEach(btn => {
+                    const allowed = hasPermission('action_delete_role', 'control_roles');
+                    btn.disabled = !allowed;
+                    btn.style.opacity = allowed ? '1' : '0.5';
+                    btn.style.cursor = allowed ? 'pointer' : 'not-allowed';
+                    if (!allowed) btn.title = 'Requires action_delete_role permission';
+                });
+                
+                // Create new role button
+                const createBtn = document.getElementById('role-new-create');
+                if (createBtn) {
+                    const allowed = hasPermission('action_create_role', 'control_roles');
+                    createBtn.disabled = !allowed;
+                    createBtn.style.opacity = allowed ? '1' : '0.5';
+                    createBtn.style.cursor = allowed ? 'pointer' : 'not-allowed';
+                    if (!allowed) createBtn.title = 'Requires action_create_role permission';
+                }
+                
+                // Create new role input fields
+                if (!hasPermission('action_create_role', 'control_roles')) {
+                    const nameInput = document.getElementById('role-new-name');
+                    const baseSelect = document.getElementById('role-new-base');
+                    if (nameInput) {
+                        nameInput.disabled = true;
+                        nameInput.style.opacity = '0.5';
+                        nameInput.placeholder = 'No permission to create roles';
+                    }
+                    if (baseSelect) {
+                        baseSelect.disabled = true;
+                        baseSelect.style.opacity = '0.5';
+                    }
+                }
+                
+                // User assignment buttons (save-role and delete-user)
+                disableButton('button[data-action="save-role"]', 'action_save_role', 'control_roles');
+                disableButton('button[data-action="delete-user"]', 'action_delete_role', 'control_roles');
+            }
+            
+            // SECURITY & LOGS TAB
+            if (tabName === 'logs') {
+                disableButton('button[onclick*="exportLogs"]', 'action_export_logs', 'export_logs');
+                disableButton('button[onclick*="export_logs"]', 'action_export_logs', 'export_logs');
+            }
+            
+            // DATABASE TAB
+            if (tabName === 'database') {
+                disableButton('button[onclick*="executeQuery"]', 'action_execute_query', 'control_database');
+                disableButton('button[onclick*="execute_query"]', 'action_execute_query', 'control_database');
+            }
         }
 
         // Sidebar navigation click handlers
@@ -5994,6 +7662,7 @@ class LiveMonitor(commands.Cog):
                 security: 'view_security',
                 guilds: 'view_guilds',
                 database: 'view_database',
+                tickets: 'view_tickets',
                 credits: null,
             };
             const key = map[tabName];
@@ -6011,16 +7680,19 @@ class LiveMonitor(commands.Cog):
                 commands: 'view_commands',
                 plugins: 'view_plugins',
                 hooks: 'view_hooks',
+                'hook-creator': 'view_hooks',
                 filesystem: 'view_filesystem',
                 files: 'view_files',
                 chat: 'view_chat',
                 events: 'view_events',
                 system: 'view_system',
-                invite: 'view_system',
-                roles: 'view_security',
+                invite: 'view_bot_invite',    // Fixed: was view_system
+                tickets: 'view_tickets',
+                roles: 'view_roles',          // Fixed: was view_security
                 security: 'view_security',
                 guilds: 'view_guilds',
                 database: 'view_database',
+                marketplace: 'view_marketplace',
                 credits: null,
             };
 
@@ -6039,57 +7711,18 @@ class LiveMonitor(commands.Cog):
                     tabContent.style.display = allowed ? '' : 'none';
                 }
             });
-
-            // Gate high-impact core actions
-            if (!LM_PERMS.control_core) {
-                document.querySelectorAll('button[onclick*="confirmShutdownBot"]').forEach(btn => {
-                    btn.disabled = true;
-                    btn.style.opacity = '0.5';
-                    btn.style.cursor = 'not-allowed';
-                    btn.title = 'This action is not allowed for your role.';
-                });
-            }
-
-            // Gate dashboard & bot backup actions
-            if (!LM_PERMS.control_backup) {
-                document.querySelectorAll('button[onclick*="backup_bot_directory"], button[onclick*="backup_dashboard.php"]').forEach(btn => {
-                    btn.disabled = true;
-                    btn.style.opacity = '0.5';
-                    btn.style.cursor = 'not-allowed';
-                    btn.title = 'Creating backups is not allowed for your role.';
-                });
-            }
-
-            // Gate chat console actions
-            if (!LM_PERMS.control_chat) {
-                ['sendChatMessage', 'requestChatHistory'].forEach(fnName => {
-                    document.querySelectorAll(`button[onclick*="${fnName}"]`).forEach(btn => {
-                        btn.disabled = true;
-                        btn.style.opacity = '0.5';
-                        btn.style.cursor = 'not-allowed';
-                        btn.title = 'This chat action is not allowed for your role.';
-                    });
-                });
-            }
-
-            // Gate file operations (but still allow viewing when view_files is true)
-            if (!LM_PERMS.control_files) {
-                const markers = ['createNewFile', 'createNewFolder', 'save(', 'promptRenameCurrentFile', 'contextRename', 'contextMove', 'contextDelete'];
-                markers.forEach(marker => {
-                    document.querySelectorAll(`#tab-files button[onclick*="${marker}"], #file-context-menu .file-context-item[onclick*="${marker}"]`).forEach(el => {
-                        el.style.opacity = '0.5';
-                        el.style.cursor = 'not-allowed';
-                        el.onclick = (e) => {
-                            e.preventDefault();
-                            showNotification('This file operation is not allowed for your role.', 'error');
-                        };
-                    });
-                });
-            }
         }
 
         // Apply permissions and ensure we start on the Dashboard view
         applyPermissionsToUI();
+        
+        // IMPORTANT: Apply permission visibility to ALL tabs on page load
+        // This ensures buttons are enabled/disabled immediately, not after 30 seconds
+        const allTabs = ['dashboard', 'commands', 'plugins', 'hooks', 'hook-creator', 
+                         'filesystem', 'files', 'chat', 'events', 'system', 'invite', 
+                         'tickets', 'roles', 'security', 'guilds', 'database', 'marketplace'];
+        allTabs.forEach(tab => applyPermissionVisibility(tab));
+        
         switchTab('dashboard');
 
         function toggleCard(cardId) {
@@ -6164,6 +7797,10 @@ class LiveMonitor(commands.Cog):
         }
 
         function generateInviteLink() {
+            if (!LM_PERMS.action_generate_invite && !LM_PERMS.view_bot_invite) {
+                showNotification('You do not have permission to generate invite links. Requires action_generate_invite permission.', 'error');
+                return;
+            }
             const url = buildInviteUrl();
             if (!url) return;
             const out = document.getElementById('invite-output-url');
@@ -6175,6 +7812,10 @@ class LiveMonitor(commands.Cog):
         }
 
         function openInviteLink() {
+            if (!LM_PERMS.action_open_invite && !LM_PERMS.view_bot_invite) {
+                showNotification('You do not have permission to open invite links. Requires action_open_invite permission.', 'error');
+                return;
+            }
             const out = document.getElementById('invite-output-url');
             let url = out && out.value.trim();
             if (!url) {
@@ -6185,6 +7826,10 @@ class LiveMonitor(commands.Cog):
         }
 
         async function copyInviteLink() {
+            if (!LM_PERMS.action_copy_invite && !LM_PERMS.view_bot_invite) {
+                showNotification('You do not have permission to copy invite links. Requires action_copy_invite permission.', 'error');
+                return;
+            }
             const out = document.getElementById('invite-output-url');
             if (!out || !out.value.trim()) {
                 showNotification('Nothing to copy yet. Generate an invite link first.', 'error');
@@ -6208,6 +7853,10 @@ class LiveMonitor(commands.Cog):
         let marketplaceExtensions = [];
 
         async function fetchMarketplaceExtensions() {
+            if (!LM_PERMS.action_refresh_marketplace && !LM_PERMS.action_fetch_marketplace && !LM_PERMS.view_marketplace) {
+                showNotification('You do not have permission to refresh marketplace. Requires action_refresh_marketplace permission.', 'error');
+                return;
+            }
             const content = document.getElementById('marketplace-content');
             content.innerHTML = '<div class="loading">Loading extensions...</div>';
             
@@ -6222,6 +7871,18 @@ class LiveMonitor(commands.Cog):
                     showNotification(data.error || 'Failed to load extensions', 'error');
                 }
             }, 60);
+        }
+        
+        let zygnalIDCache = null;
+        
+        function refreshZygnalIDCache() {
+            if (!LM_PERMS.action_refresh_zygnalid && !LM_PERMS.view_marketplace) {
+                showNotification('You do not have permission to refresh Zygnalid cache. Requires action_refresh_zygnalid permission.', 'error');
+                return;
+            }
+            // Clear the cached ZygnalID WITHOUT logging it to console
+            zygnalIDCache = null;
+            showNotification('ZygnalID cache cleared. Next download will read the file fresh.', 'success');
         }
 
         function renderMarketplaceExtensions(extensions) {
@@ -6260,7 +7921,7 @@ class LiveMonitor(commands.Cog):
                             Type: ${ext.fileType.toUpperCase()} • ID: ${ext.id}
                         </div>
                         <div class="marketplace-ext-footer">
-                            <button class="button button-primary button-compact" onclick="downloadExtension(${ext.id})" ${typeof LM_PERMS !== 'undefined' && !LM_PERMS.control_marketplace ? 'disabled title="You do not have permission to download extensions"' : ''}>
+                            <button class="button button-primary button-compact extension-download-btn" onclick="downloadExtension(${ext.id})" ${typeof LM_PERMS !== 'undefined' && !(LM_PERMS.action_download_extension || LM_PERMS.control_marketplace) ? 'disabled title="You do not have permission to download extensions"' : ''}>
                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:4px;display:inline-block;vertical-align:middle;">
                                     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>
                                 </svg>
@@ -6303,6 +7964,91 @@ class LiveMonitor(commands.Cog):
             const extension = marketplaceExtensions.find(e => e.id === extensionId);
             if (!extension) {
                 showNotification('Extension not found', 'error');
+                return;
+            }
+            
+            // Read ZygnalID from bot's data file via command
+            showNotification('Reading ZygnalID from bot... (this may take a moment)', 'info');
+            
+            const zygnalIdResult = await new Promise((resolve) => {
+                sendCommandWithResponse('read_file', {path: './data/marketplace/ZygnalID.txt'}, (resp) => {
+                    console.log('[MARKETPLACE] ZygnalID read result:', resp);
+                    resolve(resp);
+                }, 30); // Increased timeout to 30 seconds
+            });
+            
+            if (!zygnalIdResult || !zygnalIdResult.success || !zygnalIdResult.content) {
+                console.error('[MARKETPLACE] Failed to read ZygnalID:', zygnalIdResult);
+                openModal('ZygnalID Not Found', 
+                    'ZygnalID file not found or could not be read.\\n\\n' +
+                    'Please ensure:\\n' +
+                    '1. File exists at: ./data/marketplace/ZygnalID.txt\\n' +
+                    '2. File contains your 16-character ZygnalID\\n' +
+                    '3. Bot has read permissions\\n\\n' +
+                    'Error: ' + (zygnalIdResult?.error || 'File not accessible')
+                );
+                return;
+            }
+            
+            const zygnalId = zygnalIdResult.content.trim();
+            console.log('[MARKETPLACE] ZygnalID read:', zygnalId, 'Length:', zygnalId.length);
+            
+            if (!zygnalId || zygnalId.length < 16) {
+                openModal('Invalid ZygnalID', 
+                    'ZygnalID must be exactly 16 characters.\\n\\n' +
+                    'Current length: ' + (zygnalId ? zygnalId.length : 0) + ' characters\\n' +
+                    'Content preview: ' + (zygnalId ? zygnalId.substring(0, 20) : 'empty')
+                );
+                return;
+            }
+            
+            showNotification('Validating ZygnalID...', 'info');
+            
+            try {
+                const validationUrl = `https://zygnalbot.com/extension/api/validate_zid.php?zygnalid=${encodeURIComponent(zygnalId)}`;
+                console.log('[MARKETPLACE] Validating at:', validationUrl);
+                
+                const validationResp = await fetch(validationUrl);
+                console.log('[MARKETPLACE] Validation response status:', validationResp.status);
+                
+                if (validationResp.status !== 200) {
+                    openModal('ZygnalID Validation Failed', 
+                        'Could not connect to validation server.\\n\\n' +
+                        'ZygnalID: ' + zygnalId + '\\n' +
+                        'Status: ' + validationResp.status + '\\n\\n' +
+                        'Please try again later.'
+                    );
+                    return;
+                }
+                
+                // Parse JSON response
+                const validationData = await validationResp.json();
+                console.log('[MARKETPLACE] Validation data:', validationData);
+                
+                if (!validationData.valid) {
+                    openModal('ZygnalID Not Activated', 
+                        '❌ Your ZygnalID is not activated or is invalid.\\n\\n' +
+                        'ZygnalID: ' + zygnalId + '\\n\\n' +
+                        '📋 ACTIVATION STEPS:\\n' +
+                        '1. Copy your ZygnalID above\\n' +
+                        '2. Join ZygnalBot support: discord.gg/sgZnXca5ts\\n' +
+                        '3. Verify yourself (enable all channels)\\n' +
+                        '4. Go to "Create Ticket" channel\\n' +
+                        '5. Open ticket with subject: "zygnal activation"\\n' +
+                        '6. Paste your ZygnalID in the ticket\\n\\n' +
+                        '⏰ Activation usually takes 1-24 hours after submission.'
+                    );
+                    return;
+                }
+                
+                showNotification('ZygnalID validated successfully!', 'success');
+            } catch (err) {
+                console.error('[MARKETPLACE] Validation error:', err);
+                openModal('Validation Error', 
+                    'Failed to validate ZygnalID.\\n\\n' +
+                    'Error: ' + err.message + '\\n\\n' +
+                    'Please check your internet connection and try again.'
+                );
                 return;
             }
             
@@ -6443,9 +8189,10 @@ class LiveMonitor(commands.Cog):
             isCommandPending = true;
             showNotification('Sending command...', 'info');
 
-            fetch('./send_command.php?token=' + TOKEN, {
+            fetch('./send_command.php', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
+                credentials: 'same-origin',
                 body: JSON.stringify({ command: command, params: params })
             })
             .then(async r => {
@@ -6482,9 +8229,10 @@ class LiveMonitor(commands.Cog):
             isCommandPending = true;
             const expectedCommandType = command; // Match command type to sent command
 
-            fetch('./send_command.php?token=' + TOKEN, {
+            fetch('./send_command.php', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
+                credentials: 'same-origin',
                 body: JSON.stringify({ command: command, params: params })
             })
             .then(async r => {
@@ -6561,7 +8309,7 @@ class LiveMonitor(commands.Cog):
             if (plugin.deps_ok && !plugin.has_conflicts && !plugin.has_cycle && plugin.scan_errors.length === 0) {
                 statusContent = `
                     <div style="padding: 20px; text-align: center;">
-                        <div style="font-size: 48px; margin-bottom: 16px;">✅</div>
+                        <div style="font-size: 48px; margin-bottom: 16px;"></div>
                         <h3 style="color: var(--success); margin-bottom: 12px;">Plugin is Healthy!</h3>
                         <p style="color: var(--text-secondary);">No issues detected with ${plugin.name}</p>
                         <div style="margin-top: 20px; padding: 16px; background: rgba(16, 185, 129, 0.1); border-radius: 8px; border: 1px solid rgba(16, 185, 129, 0.3);">
@@ -6831,11 +8579,11 @@ class LiveMonitor(commands.Cog):
 
             content += `
                 <div class="button-group">
-                    <button class="button button-${hook.disabled ? 'success' : 'danger'}" onclick="sendCommand('${hook.disabled ? 'enable_hook' : 'disable_hook'}', {hook_id: '${hook.hook_id}'})">
+                    <button class="button button-${hook.disabled ? 'success' : 'danger'}" onclick="sendCommand('${hook.disabled ? 'enable_hook' : 'disable_hook'}', {hook_id: this.getAttribute('data-hook-id')})" data-hook-id="${hook.hook_id}">
                         ${hook.disabled ? 'Enable Hook' : 'Disable Hook'}
                     </button>
                     ${hook.circuit_open ? `
-                        <button class="button button-secondary" onclick="sendCommand('reset_circuit', {hook_id: '${hook.hook_id}'})">
+                        <button class="button button-secondary" onclick="sendCommand('reset_circuit', {hook_id: this.getAttribute('data-hook-id')})" data-hook-id="${hook.hook_id}">
                             Reset Circuit
                         </button>
                     ` : ''}
@@ -7549,14 +9297,14 @@ class LiveMonitor(commands.Cog):
                             </div>
                             
                             <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-                                <button class="button button-primary" onclick="viewHookDetails(${JSON.stringify(hook).replace(/"/g, '&quot;')})
+                                <button class="button button-primary" onclick="viewHookDetails(${JSON.stringify(hook).replace(/"/g, '&quot;')})">
                                     Details
                                 </button>
-                                <button class="button button-${hook.disabled ? 'success' : 'secondary'}" onclick="sendCommand('${hook.disabled ? 'enable_hook' : 'disable_hook'}', {hook_id: '${hook.hook_id}'})">
+                                <button class="button button-${hook.disabled ? 'success' : 'secondary'}" onclick="sendCommand('${hook.disabled ? 'enable_hook' : 'disable_hook'}', {hook_id: this.getAttribute('data-hook-id')})" data-hook-id="${hook.hook_id}">
                                     ${hook.disabled ? 'Enable' : 'Disable'}
                                 </button>
                                 ${hook.circuit_open ? `
-                                    <button class="button button-warning" onclick="sendCommand('reset_circuit', {hook_id: '${hook.hook_id}'})">
+                                    <button class="button button-warning" onclick="sendCommand('reset_circuit', {hook_id: this.getAttribute('data-hook-id')})" data-hook-id="${hook.hook_id}">
                                         Reset Circuit
                                     </button>
                                 ` : ''}
@@ -7644,7 +9392,7 @@ class LiveMonitor(commands.Cog):
                                     ${name}
                                 </div>
                                 <div style="font-size: 13px; color: #8b949e; margin-bottom: 8px;">
-                                    ${data.path || 'Unknown path'}
+                                    ${data.path || data.name || data.file_path || 'Unknown'}
                                 </div>
                                 <div style="display: flex; gap: 8px; flex-wrap: wrap;">
                                     <span class="badge" style="background: #10b981;">Exists</span>
@@ -7720,10 +9468,11 @@ class LiveMonitor(commands.Cog):
         function sendFileCommand(command, params = {}) {
             const requestId = generateRequestId();
             params.request_id = requestId;
-            
-            fetch('./send_command.php?token=' + TOKEN, {
+
+            fetch('./send_command.php', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
+                credentials: 'same-origin',
                 body: JSON.stringify({ command, params })
             })
             .then(async r => {
@@ -7908,6 +9657,29 @@ class LiveMonitor(commands.Cog):
             } else {
                 files = getFiles(currentPath);
             }
+            
+            // SECURITY: Always hide sensitive dashboard files from ALL users
+            const sensitiveFiles = [
+                'live_monitor_config.json',
+                'live_monitor_website.zip',
+                'live_monitor_website',
+                'dashboard_users.db',
+                'dashboard_users.db-wal',
+                'dashboard_users.db-shm'
+            ];
+            
+            files = files.filter(f => {
+                // Check if file/folder name matches any sensitive file
+                if (sensitiveFiles.includes(f.name)) {
+                    return false; // Hide it!
+                }
+                // Also check if we're in a path containing live_monitor_website
+                const fullPath = currentPath ? currentPath + '/' + f.name : f.name;
+                if (fullPath.includes('live_monitor_website')) {
+                    return false; // Hide everything in that folder!
+                }
+                return true; // Show it
+            });
 
             let fileIndex = 0;
             list.innerHTML = files.map((f, i) => {
@@ -8236,7 +10008,7 @@ class LiveMonitor(commands.Cog):
             // WAIT for the unit to have actual width before proceeding
             function waitForWidth(attempt = 0) {
                 if (unit.offsetWidth > 0) {
-                    console.log('[EDITOR] ✅ Unit has width:', unit.offsetWidth);
+                    console.log('[EDITOR]  Unit has width:', unit.offsetWidth);
                     
                     console.log('[EDITOR] FORCING file-pane width to 420px...');
                     if (!filePane.style.width) {
@@ -8248,7 +10020,7 @@ class LiveMonitor(commands.Cog):
                     editorPane.style.display = 'flex';
                     editorPane.style.flex = '1';
                     
-                    console.log('[EDITOR] ✅ Editor should be visible now!');
+                    console.log('[EDITOR]  Editor should be visible now!');
                 } else if (attempt < 20) {
                     console.log('[EDITOR] ⏳ Waiting for width, attempt', attempt + 1);
                     setTimeout(() => waitForWidth(attempt + 1), 50);
@@ -8540,6 +10312,12 @@ class LiveMonitor(commands.Cog):
             const container = document.getElementById('guilds-list');
             if (!container) return;
             const rows = Array.isArray(guildsDetail) ? guildsDetail : [];
+            
+            currentGuilds = rows.map(g => ({
+                id: g.id,
+                name: g.name
+            }));
+            
             if (!rows.length) {
                 container.innerHTML = '<div class="empty-state">Bot is not in any servers or guild data is unavailable.</div>';
                 return;
@@ -8552,7 +10330,7 @@ class LiveMonitor(commands.Cog):
                 const ownerLabel = ownerName || ownerId || 'Unknown';
                 const joined = g.joined_at ? new Date(g.joined_at).toLocaleString() : 'Unknown';
                 let actionsHtml = '<span style="font-size:12px;color:var(--text-secondary);">No permission</span>';
-                if (typeof LM_PERMS !== 'undefined' && LM_PERMS.control_guilds) {
+                if (typeof LM_PERMS !== 'undefined' && (LM_PERMS.action_leave_guild || LM_PERMS.control_guilds)) {
                     const safeName = (g.name || '').replace(/"/g, '&quot;');
                     actionsHtml = `<button class="button button-danger button-compact" onclick="confirmLeaveGuild('${g.id}', '${safeName}')">Leave</button>`;
                 }
@@ -8683,6 +10461,10 @@ class LiveMonitor(commands.Cog):
         };
 
         window.requestChatHistory = () => {
+            if (!LM_PERMS.action_request_chat_data && !LM_PERMS.view_chat) {
+                showNotification('You do not have permission to request chat data. Requires action_request_chat_data permission.', 'error');
+                return;
+            }
             if (!selectedChatChannelId) {
                 showNotification('Select a channel first.', 'error');
                 return;
@@ -8722,6 +10504,14 @@ class LiveMonitor(commands.Cog):
             const next = !current;
             sendCommand('set_extensions_auto_load', { enabled: next });
             showNotification(`Extensions auto-load on startup ${next ? 'enabled' : 'disabled'}`, 'info');
+            setTimeout(loadData, 1500);
+        };
+
+        window.toggleVerboseLogging = () => {
+            const current = currentData?.monitor_settings?.verbose_logging ? true : false;
+            const next = !current;
+            sendCommand('set_verbose_logging', { enabled: next });
+            showNotification(`Verbose logging ${next ? 'enabled' : 'disabled'}`, 'info');
             setTimeout(loadData, 1500);
         };
 
@@ -8937,42 +10727,103 @@ class LiveMonitor(commands.Cog):
                 `;
             }
 
+            // Monitor Settings card
+            if (data.monitor_settings) {
+                left += `
+                    <div class="card" style="cursor: default;">
+                        <div class="card-title">Monitor Settings</div>
+                        <div class="card-body" style="display: block;">
+                            <div class="property">
+                                <span class="property-label">Verbose Logging</span>
+                                <span class="property-value">
+                                    <span class="badge ${data.monitor_settings.verbose_logging ? 'badge-success' : 'badge-warning'}">${data.monitor_settings.verbose_logging ? 'On' : 'Off'}</span>
+                                </span>
+                            </div>
+                            <div class="property">
+                                <span class="property-label">Debug Package Logs</span>
+                                <span class="property-value">
+                                    <span class="badge ${data.monitor_settings.debug_packages ? 'badge-success' : 'badge-warning'}">${data.monitor_settings.debug_packages ? 'On' : 'Off'}</span>
+                                </span>
+                            </div>
+                            <div class="button-group">
+                                <button class="button button-secondary button-compact" onclick="toggleVerboseLogging()">Toggle Verbose Logging</button>
+                                <button class="button button-secondary button-compact" onclick="sendCommand('toggle_debug_packages', {enabled: !(data.monitor_settings.debug_packages || false)})">Toggle Debug Packages</button>
+                            </div>
+                            <div style="margin-top: 12px; font-size: 12px; color: var(--text-secondary);">
+                                <i class="fas fa-info-circle"></i> Verbose hides "Data sent successfully" logs • Debug shows package installation details
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+
             // RIGHT COLUMN: dedicated Atomic FS / Active Locks card
             let right = '';
             if (data.atomic_fs) {
-                const locks = data.atomic_fs.locks || [];
+                const locks = (data.atomic_fs && data.atomic_fs.locks) ? data.atomic_fs.locks : [];
+                const lockSummary = (data.atomic_fs && data.atomic_fs.lock_summary) ? data.atomic_fs.lock_summary : {};
+                const hitRate = data.atomic_fs.hit_rate || 0;
+                const cacheSize = data.atomic_fs.cache_size || 0;
+                const maxCache = data.atomic_fs.max_cache_size || 1000;
+                const activeLocks = locks.filter(l => l.locked).length || lockSummary.active || data.atomic_fs.active_locks || 0;
+                
+                let locksHtml = '';
+                if (locks.length > 0) {
+                    locksHtml = `
+                        <div class="af-locks-header">
+                            <span>Path</span>
+                            <span>Status</span>
+                            <span>Last Op</span>
+                            <span>Last Used</span>
+                            <span style="text-align:right;">Actions</span>
+                        </div>
+                        ${locks.map(lock => {
+                            const statusClass = lock.locked ? 'af-lock-status-locked' : 'af-lock-status-idle';
+                            const statusText = lock.locked ? 'Locked' : 'Idle';
+                            return `
+                            <div class="af-lock-row">
+                                <div class="af-lock-path" title="${lock.path}">${lock.path}</div>
+                                <div>
+                                    <span class="af-lock-status-chip ${statusClass}">
+                                        ${statusText}
+                                    </span>
+                                </div>
+                                <div>${lock.last_operation || 'n/a'}</div>
+                                <div style="font-size: 11px; color: var(--text-secondary);">
+                                    ${lock.last_used ? formatTime(lock.last_used) : 'n/a'}
+                                </div>
+                                <div class="af-lock-actions">
+                                    <button class="button button-secondary button-compact af-invalidate-lock" data-path="${lock.path}">Invalidate</button>
+                                    <button class="button button-danger button-compact af-release-lock" data-path="${lock.path}">Force</button>
+                                </div>
+                            </div>
+                            `;
+                        }).join('')}
+                    `;
+                } else if (activeLocks > 0) {
+                    // Bot reports active locks but didn't send lock details
+                    locksHtml = `
+                        <div style="padding: 20px; text-align: center; color: var(--text-secondary);">
+                            <div style="margin-bottom: 12px; font-size: 16px; color: #f59e0b;">⚠️</div>
+                            <div style="margin-bottom: 8px;">Lock count available but details not provided by bot</div>
+                            <div style="font-size: 12px; opacity: 0.7;">
+                                The Atomic FS cog reports ${activeLocks} active lock${activeLocks > 1 ? 's' : ''} but is not sending lock details.<br>
+                                This may indicate a cog configuration issue or data collection error.
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    locksHtml = '<div style="padding: 20px; text-align: center; color: var(--text-secondary);">No file lock instances</div>';
+                }
+                
                 right = `
                     <div class="card" style="cursor: default;">
                         <div class="card-title">Active File Locks</div>
                         <div class="card-subtitle" style="margin-top: 4px; font-size: 12px; color: var(--text-secondary);">
-                            Hit rate ${data.atomic_fs.hit_rate}% • Cache ${data.atomic_fs.cache_size}/${data.atomic_fs.max_cache_size} • Active locks ${data.atomic_fs.active_locks}
+                            Hit rate ${hitRate}% • Cache ${cacheSize}/${maxCache} • Active locks ${activeLocks}
                         </div>
                         <div class="card-body" style="display: block; max-height: 520px; overflow-y: auto;">
-                            <div class="af-locks-header">
-                                <span>Path</span>
-                                <span>Status</span>
-                                <span>Last Op</span>
-                                <span>Last Used</span>
-                                <span style="text-align:right;">Actions</span>
-                            </div>
-                            ${locks.map(lock => `
-                                <div class="af-lock-row">
-                                    <div class="af-lock-path" title="${lock.path}">${lock.path}</div>
-                                    <div>
-                                        <span class="af-lock-status-chip ${lock.locked ? 'af-lock-status-locked' : 'af-lock-status-idle'}">
-                                            ${lock.locked ? 'Locked' : 'Idle'}
-                                        </span>
-                                    </div>
-                                    <div>${lock.last_operation || 'n/a'}</div>
-                                    <div style="font-size: 11px; color: var(--text-secondary);">
-                                        ${lock.last_used ? formatTime(lock.last_used) : 'n/a'}
-                                    </div>
-                                    <div class="af-lock-actions">
-                                        <button class="button button-secondary button-compact af-invalidate-lock" data-path="${lock.path}">Invalidate</button>
-                                        <button class="button button-danger button-compact af-release-lock" data-path="${lock.path}">Force</button>
-                                    </div>
-                                </div>
-                            `).join('')}
+                            ${locksHtml}
                         </div>
                     </div>
                 `;
@@ -9064,7 +10915,7 @@ class LiveMonitor(commands.Cog):
                 },
                 roles: {
                     title: 'Roles & Access',
-                    body: 'Owner-only panel to see which Discord IDs can access the dashboard and what role (OWNER / HELPER / VISITOR) they have.',
+                    body: 'Owner-only panel to see which Discord IDs can access the dashboard and what role (OWNER / CUSTOM) they have.',
                 },
                 security: {
                     title: 'Security & Logs',
@@ -9178,31 +11029,93 @@ class LiveMonitor(commands.Cog):
                 { key: 'view_filesystem', label: 'File System Overview' },
                 { key: 'view_files', label: 'File Browser' },
                 { key: 'view_chat', label: 'Chat Console' },
+                { key: 'view_tickets', label: 'Discord Tickets' },
                 { key: 'view_events', label: 'Events' },
                 { key: 'view_system', label: 'System Details' },
                 { key: 'view_security', label: 'Security & Logs' },
+                { key: 'view_logs', label: 'Audit Logs' },
                 { key: 'view_guilds', label: 'Guilds / Servers' },
-                { key: 'view_database', label: 'Database viewer' },
-                { key: 'view_marketplace', label: 'Extension Marketplace (BETA)' },
-                { key: 'view_invite', label: 'Bot Invite Helper' },
+                { key: 'view_database', label: 'Database Viewer' },
+                { key: 'view_marketplace', label: 'Extension Marketplace' },
+                { key: 'view_bot_invite', label: 'Bot Invite Helper' },
+                { key: 'view_roles', label: 'Roles & Access' },
             ];
 
             const CONTROL_PERM_DEFS = [
-                { key: 'control_core', label: 'Core actions (shutdown, diagnostics, locks)' },
-                { key: 'control_plugins', label: 'Manage plugins & extensions (load/unload/reload)' },
-                { key: 'control_hooks', label: 'Manage hooks (enable/disable/reset circuits)' },
-                { key: 'control_files', label: 'Modify files (create/edit/delete/rename)' },
-                { key: 'control_chat', label: 'Send messages via Chat Console' },
-                { key: 'control_guilds', label: 'Manage guilds (leave servers)' },
-                { key: 'control_database', label: 'Database write access (advanced)' },
-                { key: 'control_backup', label: 'Create backups (dashboard/bot)' },
-                { key: 'control_invite', label: 'Generate bot invite links' },
-                { key: 'control_marketplace', label: 'Download & install marketplace extensions' },
+                // Dashboard Actions
+                { key: 'action_clear_cache', label: '🧹 Clear Cache' },
+                { key: 'action_toggle_logging', label: '🔊 Toggle Verbose Logging' },
+                { key: 'action_toggle_debug', label: '🐛 Toggle Debug Packages' },
+                { key: 'action_backup_dashboard', label: '💾 Backup Dashboard' },
+                { key: 'action_backup_bot', label: '💾 Backup Bot Directory' },
+                
+                // Plugin Actions
+                { key: 'action_reload_extension', label: '🔄 Reload Extension' },
+                { key: 'action_load_extension', label: '📥 Load Extension' },
+                { key: 'action_unload_extension', label: '📤 Unload Extension' },
+                { key: 'action_set_auto_reload', label: '⚙️ Set Auto Reload' },
+                { key: 'action_set_auto_load', label: '⚙️ Set Auto Load Extensions' },
+                { key: 'action_set_enforcement', label: '🔒 Set Plugin Enforcement' },
+                
+                // Hook Actions
+                { key: 'action_enable_hook', label: '✅ Enable Event Hook' },
+                { key: 'action_disable_hook', label: '❌ Disable Event Hook' },
+                { key: 'action_reset_circuit', label: '🔄 Reset Circuit Breaker' },
+                { key: 'action_create_hook', label: '➕ Create Event Hook' },
+                { key: 'action_delete_hook', label: '🗑️ Delete Event Hook' },
+                { key: 'action_export_hooks', label: '📦 Export Hooks JSON' },
+                
+                // File Actions
+                { key: 'action_upload_file', label: '📤 Upload File' },
+                { key: 'action_rename_file', label: '✏️ Rename File' },
+                { key: 'action_delete_file', label: '🗑️ Delete File/Folder' },
+                { key: 'action_create_folder', label: '📁 Create Folder' },
+                { key: 'action_edit_file', label: '📝 Edit File' },
+                { key: 'action_save_file', label: '💾 Save File' },
+                
+                // System Actions
+                { key: 'action_shutdown_bot', label: '🔴 Shutdown Bot (DANGEROUS)' },
+                { key: 'action_generate_diagnostics', label: '📊 Generate Diagnostics' },
+                { key: 'action_invalidate_cache', label: '🧹 Invalidate Cache Entry' },
+                { key: 'action_force_release_lock', label: '🔓 Force Release Lock (DANGEROUS)' },
+                
+                // Chat Actions
+                { key: 'action_send_message', label: '💬 Send Chat Message' },
+                { key: 'action_request_chat_data', label: '📊 Request Chat History Data' },
+                
+                // Ticket Actions
+                { key: 'action_view_ticket', label: '👁️ View Ticket Transcript' },
+                { key: 'action_download_ticket', label: '📥 Download Ticket Transcript' },
+                { key: 'action_delete_ticket', label: '🗑️ Delete Ticket' },
+                
+                // Guild Actions
+                { key: 'action_leave_guild', label: '🚪 Leave Guild (DANGEROUS)' },
+                
+                // Bot Invite Actions
+                { key: 'action_generate_invite', label: '🔗 Generate Bot Invite' },
+                { key: 'action_open_invite', label: '🌐 Open Bot Invite' },
+                { key: 'action_copy_invite', label: '📋 Copy Bot Invite' },
+                
+                // Marketplace Actions
+                { key: 'action_fetch_marketplace', label: '🔄 Fetch Marketplace Extensions' },
+                { key: 'action_download_extension', label: '📥 Download Extension' },
+                { key: 'action_load_marketplace_extension', label: '🚀 Load Marketplace Extension' },
+                { key: 'action_refresh_zygnalid', label: '🔄 Refresh Zygnalid Cache' },
+                { key: 'action_refresh_marketplace', label: '🔄 Refresh Marketplace Data' },
+                
+                // Role Management Actions
+                { key: 'action_save_role', label: '💾 Save Role Changes' },
+                { key: 'action_delete_role', label: '🗑️ Delete Role (DANGEROUS)' },
+                { key: 'action_create_role', label: '➕ Create Role' },
+                
+                // Log Actions
+                { key: 'action_export_logs', label: '📊 Export Audit Logs' },
+                
+                // Database Actions
+                { key: 'action_execute_query', label: '💾 Execute Database Query (DANGEROUS)' },
             ];
 
-            const OTHER_PERM_DEFS = [
-                { key: 'export_logs', label: 'Export audit logs from Security tab' },
-            ];
+            const OTHER_PERM_DEFS = [];
 
             const rolesOptions = roles.map(r => r.name).filter(Boolean);
 
@@ -9295,7 +11208,7 @@ class LiveMonitor(commands.Cog):
                     const did = (document.getElementById('roles-add-discord') || {}).value?.trim();
                     const name = (document.getElementById('roles-add-name') || {}).value?.trim();
                     const roleSel = document.getElementById('roles-add-role');
-                    const role = roleSel ? roleSel.value : 'VISITOR';
+                    const role = roleSel ? roleSel.value : 'CUSTOM';
                     if (!did) {
                         showNotification('Please provide a Discord user ID.', 'error');
                         return;
@@ -9355,9 +11268,8 @@ class LiveMonitor(commands.Cog):
                         <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
                             <input id="role-new-name" class="input-text" type="text" placeholder="Role name (e.g. LOGS_ONLY)" style="flex:1;min-width:160px;" />
                             <select id="role-new-base" class="select">
-                                <option value="VISITOR">VISITOR (view-only)</option>
-                                <option value="HELPER">HELPER</option>
-                                <option value="OWNER">OWNER (full)</option>
+                                <option value="CUSTOM">CUSTOM (customizable)</option>
+                                <option value="OWNER">OWNER (full access)</option>
                             </select>
                             <button class="button button-primary button-compact" id="role-new-create">Create</button>
                         </div>
@@ -9398,9 +11310,8 @@ class LiveMonitor(commands.Cog):
                             <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;align-items:center;">
                                 <label style="font-size:12px;color:var(--text-secondary);">Base tier:</label>
                                 <select class="select" data-role-field="base_role" data-role-id="${role.id}">
-                                    <option value="VISITOR" ${role.base_role === 'VISITOR' ? 'selected' : ''}>VISITOR</option>
-                                    <option value="HELPER" ${role.base_role === 'HELPER' ? 'selected' : ''}>HELPER</option>
-                                    <option value="OWNER" ${role.base_role === 'OWNER' ? 'selected' : ''}>OWNER</option>
+                                    <option value="CUSTOM" ${role.base_role === 'CUSTOM' ? 'selected' : ''}>CUSTOM (customizable)</option>
+                                    <option value="OWNER" ${role.base_role === 'OWNER' ? 'selected' : ''}>OWNER (full access)</option>
                                 </select>
                             </div>
                             <div style="margin-bottom:10px;">
@@ -9489,6 +11400,12 @@ class LiveMonitor(commands.Cog):
             const createBtn = document.getElementById('role-new-create');
             if (createBtn) {
                 createBtn.addEventListener('click', () => {
+                    // CRITICAL: Check permission before creating role
+                    if (!LM_PERMS.action_create_role && !LM_PERMS.control_roles) {
+                        showNotification('You do not have permission to create roles. Requires action_create_role permission.', 'error');
+                        return;
+                    }
+                    
                     const nameEl = document.getElementById('role-new-name');
                     const baseEl = document.getElementById('role-new-base');
                     const name = nameEl.value.trim();
@@ -9503,6 +11420,12 @@ class LiveMonitor(commands.Cog):
 
             profilesContainer.querySelectorAll('[data-role-action="delete"]').forEach(btn => {
                 btn.addEventListener('click', () => {
+                    // CRITICAL: Check permission before deleting role
+                    if (!LM_PERMS.action_delete_role && !LM_PERMS.control_roles) {
+                        showNotification('You do not have permission to delete roles. Requires action_delete_role permission.', 'error');
+                        return;
+                    }
+                    
                     const id = parseInt(btn.getAttribute('data-role-id'), 10);
                     if (!id) return;
                     if (!confirm('Delete this role profile? It must not be assigned to any users.')) return;
@@ -9512,6 +11435,12 @@ class LiveMonitor(commands.Cog):
 
             profilesContainer.querySelectorAll('[data-role-action="save"]').forEach(btn => {
                 btn.addEventListener('click', () => {
+                    // CRITICAL: Check permission before saving role
+                    if (!LM_PERMS.action_save_role && !LM_PERMS.control_roles) {
+                        showNotification('You do not have permission to save role changes. Requires action_save_role permission.', 'error');
+                        return;
+                    }
+                    
                     const id = parseInt(btn.getAttribute('data-role-id'), 10);
                     if (!id) return;
                     const card = profilesContainer.querySelector(`.card[data-role-id="${id}"]`);
@@ -9519,7 +11448,7 @@ class LiveMonitor(commands.Cog):
                     const baseSel = card.querySelector('[data-role-field="base_role"]');
                     const descEl = card.querySelector('[data-role-field="description"]');
                     const permEls = card.querySelectorAll('[data-role-perm]');
-                    const base_role = baseSel ? baseSel.value : 'VISITOR';
+                    const base_role = baseSel ? baseSel.value : 'CUSTOM';
                     const description = descEl ? descEl.value : '';
                     const perms = {};
                     permEls.forEach(el => {
@@ -9642,17 +11571,93 @@ class LiveMonitor(commands.Cog):
                         return;
                     }
                     const cols = Object.keys(rows[0]);
-                    let html = '<table class="db-rows-table">';
-                    html += '<thead><tr>' + cols.map(c => `<th>${c}</th>`).join('') + '</tr></thead>';
-                    html += '<tbody>';
-                    rows.forEach(r => {
-                        html += '<tr>' + cols.map(c => {
-                            const v = r[c];
-                            const text = (v === null || v === undefined) ? '' : String(v);
-                            return `<td>${text}</td>`;
-                        }).join('') + '</tr>';
+                    
+                    // Modern table design with sticky header
+                    let html = `
+                        <div style="position: relative; overflow: hidden; border-radius: 12px; border: 1px solid rgba(148, 163, 184, 0.2);">
+                            <div style="overflow-x: auto; overflow-y: auto; max-height: calc(70vh - 100px);">
+                                <table style="width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px;">
+                                    <thead style="position: sticky; top: 0; z-index: 10; background: linear-gradient(135deg, rgba(30, 41, 59, 0.98), rgba(15, 23, 42, 0.98)); backdrop-filter: blur(10px);">
+                                        <tr>
+                    `;
+                    
+                    cols.forEach((col, idx) => {
+                        html += `
+                            <th style="
+                                padding: 16px 20px;
+                                text-align: left;
+                                font-weight: 600;
+                                color: #a855f7;
+                                border-bottom: 2px solid rgba(168, 85, 247, 0.3);
+                                ${idx === 0 ? 'border-left: none;' : ''}
+                                white-space: nowrap;
+                                text-transform: uppercase;
+                                font-size: 11px;
+                                letter-spacing: 0.5px;
+                            ">${col}</th>
+                        `;
                     });
-                    html += '</tbody></table>';
+                    
+                    html += `
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                    `;
+                    
+                    rows.forEach((row, rowIdx) => {
+                        const isEven = rowIdx % 2 === 0;
+                        html += `<tr style="
+                            background: ${isEven ? 'rgba(15, 23, 42, 0.3)' : 'rgba(30, 41, 59, 0.3)'};
+                            transition: all 0.2s ease;
+                        " onmouseover="this.style.background='rgba(168, 85, 247, 0.15)'; this.style.transform='scale(1.002)';" 
+                           onmouseout="this.style.background='${isEven ? 'rgba(15, 23, 42, 0.3)' : 'rgba(30, 41, 59, 0.3)'}'; this.style.transform='scale(1)';">`;
+                        
+                        cols.forEach((col, colIdx) => {
+                            const v = row[col];
+                            let text = '';
+                            let cellStyle = 'padding: 14px 20px; border-bottom: 1px solid rgba(148, 163, 184, 0.1); color: #e2e8f0;';
+                            
+                            if (v === null || v === undefined) {
+                                text = '<span style="color: #64748b; font-style: italic; font-size: 11px;">NULL</span>';
+                            } else if (typeof v === 'boolean') {
+                                text = v ? '<span style="color: #10b981; font-weight: 600;">✓ TRUE</span>' : '<span style="color: #ef4444; font-weight: 600;">✗ FALSE</span>';
+                            } else if (typeof v === 'number') {
+                                text = `<span style="color: #60a5fa; font-weight: 500;">${v}</span>`;
+                            } else {
+                                const str = String(v);
+                                if (str.length > 100) {
+                                    text = `<span style="color: #cbd5e1;" title="${str}">${str.substring(0, 97)}...</span>`;
+                                } else {
+                                    text = `<span style="color: #cbd5e1;">${str}</span>`;
+                                }
+                            }
+                            
+                            html += `<td style="${cellStyle}">${text}</td>`;
+                        });
+                        
+                        html += '</tr>';
+                    });
+                    
+                    html += `
+                                    </tbody>
+                                </table>
+                            </div>
+                            <div style="
+                                padding: 12px 20px;
+                                background: rgba(15, 23, 42, 0.8);
+                                border-top: 1px solid rgba(148, 163, 184, 0.2);
+                                display: flex;
+                                justify-content: space-between;
+                                align-items: center;
+                                font-size: 12px;
+                                color: #94a3b8;
+                            ">
+                                <span>Showing ${rows.length} rows</span>
+                                <span style="color: #a855f7;">Read-only view</span>
+                            </div>
+                        </div>
+                    `;
+                    
                     rowsEl.innerHTML = html;
                 })
                 .catch(err => {
@@ -9850,11 +11855,22 @@ class LiveMonitor(commands.Cog):
 
             const frameworkEl = document.getElementById('overview-framework');
             if (frameworkEl) {
-                const v = framework.version || 'unknown';
+                const v = (data.framework && data.framework.version) ? data.framework.version : (framework.version || 'unknown');
                 const py = framework.python_runtime || 'unknown';
                 const rec = framework.recommended_python || '';
                 const ok = rec && py === rec;
-                frameworkEl.textContent = `Version ${v} • Python ${py}${rec ? (ok ? ' (recommended)' : ` (recommended ${rec})`) : ''}`;
+                frameworkEl.innerHTML = `
+                    <div style="font-size: 13px; line-height: 1.6;">
+                        <div style="margin-bottom: 4px;">
+                            <strong style="color: #a855f7;">Framework:</strong> ${v}
+                        </div>
+                        <div>
+                            <strong style="color: #a855f7;">Python:</strong> ${py}
+                            ${rec && !ok ? `<span style="color: #f59e0b; font-size: 11px; margin-left: 8px;">⚠ Recommended: ${rec}</span>` : ''}
+                            ${rec && ok ? `<span style="color: #10b981; font-size: 11px; margin-left: 8px;">✓ Recommended</span>` : ''}
+                        </div>
+                    </div>
+                `;
             }
 
             const alertsContainer = document.getElementById('overview-alert-list');
@@ -10004,7 +12020,7 @@ class LiveMonitor(commands.Cog):
                     isFirstLoad = false;
                 }
                 
-                const packages = ['core', 'commands', 'plugins', 'hooks', 'extensions', 'system_details', 'events', 'filesystem'];
+                const packages = ['core', 'commands', 'plugins', 'hooks', 'extensions', 'system_details', 'events', 'filesystem', 'hook_creator'];
                 const loadPromises = packages.map((pkg, index) => 
                     new Promise(resolve => {
                         setTimeout(() => {
@@ -10033,7 +12049,8 @@ class LiveMonitor(commands.Cog):
                     "core_settings": results[5]?.core_settings || {},
                     "framework": results[5]?.framework || {},
                     "events": results[6]?.events || [],
-                    "file_system": results[7] || {}
+                    "file_system": results[7] || {},
+                    "hook_creator": results[8] || {}
                 };
                 
                 if (!results[0]) {
@@ -10067,6 +12084,7 @@ class LiveMonitor(commands.Cog):
                 retryCount = 0;
                 const previousData = currentData;
                 currentData = data;
+                currentGuilds = data.bot?.guilds_detail || [];
                 
                 // Extract platform info
                 if (data.system && data.system.platform) {
@@ -10113,6 +12131,10 @@ class LiveMonitor(commands.Cog):
                 }
 
                 updateOverview(data, previousData);
+
+                if (data.hook_creator) {
+                    updateHookCreator(data.hook_creator);
+                }
 
                 if (data.chat_history && data.chat_history.messages) {
                     const hist = data.chat_history;
@@ -10175,6 +12197,18 @@ class LiveMonitor(commands.Cog):
         loadData();
         maybeShowTour();
         setInterval(loadData, 20000);
+        
+        // CRITICAL: Apply permission visibility to ALL tabs on page load
+        // This ensures buttons are properly disabled IMMEDIATELY, not just when tab is first visited
+        setTimeout(() => {
+            const allTabs = ['dashboard', 'commands', 'plugins', 'hooks', 'hook-creator', 'filesystem', 'files', 
+                           'chat', 'tickets', 'events', 'system', 'invite', 'roles', 'security', 
+                           'guilds', 'database', 'marketplace', 'logs', 'credits'];
+            allTabs.forEach(tab => {
+                applyPermissionVisibility(tab);
+            });
+            console.log('[PERMISSIONS] Applied permission checks to all tabs on page load');
+        }, 500); // Small delay to ensure DOM is fully ready
 
         // When switching tabs, lazily initialize heavy owner-only panels
         const originalSwitchTab = switchTab;
@@ -10190,7 +12224,383 @@ class LiveMonitor(commands.Cog):
                 loadDatabaseTables();
             }
         };
-    </script>
+
+        let ticketsData = [];
+        let filteredTickets = [];
+        let currentTicketsPage = 1;
+        const ticketsPerPage = 10;
+        let ticketsAutoRefreshInterval = null;
+
+        async function loadTickets() {
+            try {
+                document.getElementById('tickets-loading').style.display = 'block';
+                document.getElementById('tickets-table-container').style.display = 'none';
+                document.getElementById('tickets-empty-state').style.display = 'none';
+                document.getElementById('tickets-pagination').style.display = 'none';
+
+                const response = await fetch('./get_tickets.php');
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    console.error('Fetch error:', response.status, errorText);
+                    throw new Error(`Failed to load tickets (${response.status}): ${errorText.substring(0, 100)}`);
+                }
+
+                const data = await response.json();
+                console.log('Tickets API Response:', data);
+                console.log('Number of guilds:', data.guilds ? data.guilds.length : 0);
+                console.log('Raw guilds data:', JSON.stringify(data.guilds, null, 2));
+                ticketsData = [];
+                
+                const guildSelect = document.getElementById('tickets-guild-filter');
+                const categorySelect = document.getElementById('tickets-category-filter');
+                
+                const currentGuild = guildSelect.value;
+                const currentCategory = categorySelect.value;
+                
+                guildSelect.innerHTML = '<option value="">All Guilds</option>';
+                categorySelect.innerHTML = '<option value="">All Categories</option>';
+                
+                const categories = new Set();
+
+                data.guilds.forEach(guild => {
+                    guildSelect.innerHTML += `<option value="${guild.guild_id}" ${currentGuild == guild.guild_id ? 'selected' : ''}>Guild ${guild.guild_id}</option>`;
+                    
+                    guild.tickets.forEach(ticket => {
+                        ticket.guild_id = guild.guild_id;
+                        ticketsData.push(ticket);
+                        categories.add(ticket.category);
+                    });
+                });
+
+                categories.forEach(cat => {
+                    categorySelect.innerHTML += `<option value="${cat}" ${currentCategory == cat ? 'selected' : ''}>${cat}</option>`;
+                });
+
+                console.log('ticketsData populated with', ticketsData.length, 'tickets');
+                console.log('ticketsData:', ticketsData);
+
+                if (ticketsData.length === 0) {
+                    document.getElementById('tickets-loading').style.display = 'none';
+                    document.getElementById('tickets-empty-state').style.display = 'block';
+                    document.getElementById('tickets-count').textContent = '0 tickets';
+                    return;
+                }
+
+                filterAndDisplayTickets();
+            } catch (error) {
+                console.error('Error loading tickets:', error);
+                document.getElementById('tickets-loading').innerHTML = '<div style="color:#ef4444;">Error loading tickets: ' + error.message + '</div>';
+            }
+        }
+
+        function filterAndDisplayTickets() {
+            const guildFilter = document.getElementById('tickets-guild-filter').value;
+            const categoryFilter = document.getElementById('tickets-category-filter').value;
+            const searchTerm = document.getElementById('tickets-search').value.toLowerCase();
+            const sortBy = document.getElementById('tickets-sort').value;
+
+            filteredTickets = ticketsData.filter(ticket => {
+                if (guildFilter && ticket.guild_id != guildFilter) return false;
+                if (categoryFilter && ticket.category !== categoryFilter) return false;
+                if (searchTerm) {
+                    const searchFields = [
+                        String(ticket.ticket_number),
+                        String(ticket.creator_id),
+                        ticket.subject || '',
+                        ticket.description || ''
+                    ].join(' ').toLowerCase();
+                    if (!searchFields.includes(searchTerm)) return false;
+                }
+                return true;
+            });
+
+            filteredTickets.sort((a, b) => {
+                switch (sortBy) {
+                    case 'closed_desc':
+                        return new Date(b.closed_at) - new Date(a.closed_at);
+                    case 'closed_asc':
+                        return new Date(a.closed_at) - new Date(b.closed_at);
+                    case 'created_desc':
+                        return new Date(b.created_at) - new Date(a.created_at);
+                    case 'created_asc':
+                        return new Date(a.created_at) - new Date(b.created_at);
+                    case 'number_desc':
+                        return b.ticket_number - a.ticket_number;
+                    case 'number_asc':
+                        return a.ticket_number - b.ticket_number;
+                    default:
+                        return 0;
+                }
+            });
+
+            console.log('After filtering and sorting:', filteredTickets.length, 'tickets');
+            console.log('Calling displayTicketsPage()...');
+
+            currentTicketsPage = 1;
+            displayTicketsPage();
+        }
+
+        function displayTicketsPage() {
+            const tbody = document.getElementById('tickets-tbody');
+            tbody.innerHTML = '';
+
+            console.log('displayTicketsPage called');
+            console.log('filteredTickets.length:', filteredTickets.length);
+            console.log('currentTicketsPage:', currentTicketsPage);
+
+            const start = (currentTicketsPage - 1) * ticketsPerPage;
+            const end = start + ticketsPerPage;
+            const pageTickets = filteredTickets.slice(start, end);
+
+            console.log('pageTickets.length:', pageTickets.length);
+            console.log('pageTickets:', pageTickets);
+
+            const hasViewTickets = typeof LM_PERMS !== 'undefined' && (LM_PERMS.view_tickets || LM_PERMS.control_tickets);
+            const hasDeleteTickets = typeof LM_PERMS !== 'undefined' && (LM_PERMS.action_delete_ticket || LM_PERMS.control_tickets);
+
+            pageTickets.forEach(ticket => {
+                const row = document.createElement('tr');
+                row.style.borderBottom = '1px solid rgba(148,163,184,0.1)';
+                row.style.cursor = 'pointer';
+                row.style.transition = 'background 0.2s';
+                row.onmouseover = () => row.style.background = 'rgba(124,58,237,0.1)';
+                row.onmouseout = () => row.style.background = 'transparent';
+                
+                const createdDate = new Date(ticket.created_at).toLocaleString();
+                const closedDate = ticket.closed_at ? new Date(ticket.closed_at).toLocaleString() : 'N/A';
+
+                row.innerHTML = `
+                    <td style="padding:12px 16px;color:#e5e7eb;font-weight:600;">#${ticket.ticket_number}</td>
+                    <td style="padding:12px 16px;color:#94a3b8;">${ticket.category}</td>
+                    <td style="padding:12px 16px;color:#94a3b8;">${ticket.creator_id}</td>
+                    <td style="padding:12px 16px;"><span style="padding:4px 10px;background:${ticket.status === 'Closed' ? 'rgba(239,68,68,0.2)' : 'rgba(34,197,94,0.2)'};color:${ticket.status === 'Closed' ? '#ef4444' : '#22c55e'};border-radius:6px;font-size:12px;font-weight:600;">${ticket.status}</span></td>
+                    <td style="padding:12px 16px;color:#94a3b8;font-size:13px;">${createdDate}</td>
+                    <td style="padding:12px 16px;color:#94a3b8;font-size:13px;">${closedDate}</td>
+                    <td style="padding:12px 16px;" onclick="event.stopPropagation();">
+                        <div style="display:flex;gap:8px;">
+                            ${hasViewTickets ? `<button class="button button-primary button-compact" onclick="openTicketTranscript('${ticket.ticket_id}', '${ticket.guild_id}')" style="padding:6px 12px;font-size:12px;">Open</button>` : ''}
+                            ${hasViewTickets ? `<button class="button button-secondary button-compact" onclick="downloadTicketTranscript('${ticket.ticket_id}', '${ticket.guild_id}', ${ticket.ticket_number})" style="padding:6px 12px;font-size:12px;">Download</button>` : ''}
+                            ${hasDeleteTickets ? `<button class="button button-danger button-compact" onclick="deleteTicketTranscript('${ticket.ticket_id}', '${ticket.guild_id}')" style="padding:6px 12px;font-size:12px;background:rgba(239,68,68,0.2);color:#ef4444;">Delete</button>` : ''}
+                        </div>
+                `;
+
+                row.onclick = () => toggleTicketDetails(ticket, row);
+                tbody.appendChild(row);
+            });
+
+            document.getElementById('tickets-loading').style.display = 'none';
+            document.getElementById('tickets-table-container').style.display = filteredTickets.length > 0 ? 'block' : 'none';
+            document.getElementById('tickets-empty-state').style.display = filteredTickets.length > 0 ? 'none' : 'block';
+            
+            console.log('Table container display:', document.getElementById('tickets-table-container').style.display);
+            console.log('Empty state display:', document.getElementById('tickets-empty-state').style.display);
+            console.log('Rows added to tbody:', tbody.children.length);
+            
+            // DEBUG: Check actual computed styles and dimensions
+            const tableContainer = document.getElementById('tickets-table-container');
+            const computedStyle = window.getComputedStyle(tableContainer);
+            console.log('COMPUTED STYLES:', {
+                display: computedStyle.display,
+                visibility: computedStyle.visibility,
+                opacity: computedStyle.opacity,
+                height: computedStyle.height,
+                maxHeight: computedStyle.maxHeight,
+                overflow: computedStyle.overflow,
+                position: computedStyle.position,
+                top: computedStyle.top,
+                left: computedStyle.left
+            });
+            console.log('BOUNDING RECT:', tableContainer.getBoundingClientRect());
+            console.log('PARENT ELEMENT:', tableContainer.parentElement);
+            console.log('PARENT COMPUTED:', {
+                display: window.getComputedStyle(tableContainer.parentElement).display,
+                height: window.getComputedStyle(tableContainer.parentElement).height,
+                overflow: window.getComputedStyle(tableContainer.parentElement).overflow
+            });
+            
+            const totalPages = Math.ceil(filteredTickets.length / ticketsPerPage);
+            document.getElementById('tickets-pagination').style.display = filteredTickets.length > ticketsPerPage ? 'flex' : 'none';
+            document.getElementById('tickets-page-info').textContent = `Page ${currentTicketsPage} of ${totalPages}`;
+            document.getElementById('tickets-prev-btn').disabled = currentTicketsPage === 1;
+            document.getElementById('tickets-next-btn').disabled = currentTicketsPage === totalPages;
+            
+            document.getElementById('tickets-count').textContent = `${filteredTickets.length} ticket${filteredTickets.length !== 1 ? 's' : ''}`;
+        }
+
+        function toggleTicketDetails(ticket, row) {
+            const existingDetails = row.nextElementSibling;
+            if (existingDetails && existingDetails.classList.contains('ticket-details-row')) {
+                existingDetails.remove();
+                return;
+            }
+
+            const detailsRow = document.createElement('tr');
+            detailsRow.classList.add('ticket-details-row');
+            detailsRow.style.background = 'rgba(15,23,42,0.5)';
+            detailsRow.style.borderBottom = '1px solid rgba(148,163,184,0.2)';
+            
+            detailsRow.innerHTML = `
+                <td colspan="7" style="padding:20px 16px;">
+                    <div style="display:grid;gap:12px;">
+                        <div>
+                            <div style="color:#7c3aed;font-weight:600;font-size:13px;margin-bottom:4px;">SUBJECT</div>
+                            <div style="color:#e5e7eb;">${ticket.subject || 'No subject'}</div>
+                        </div>
+                        <div>
+                            <div style="color:#7c3aed;font-weight:600;font-size:13px;margin-bottom:4px;">DESCRIPTION</div>
+                            <div style="color:#e5e7eb;">${ticket.description || 'No description'}</div>
+                        </div>
+                        ${ticket.tags && ticket.tags.length > 0 ? `
+                        <div>
+                            <div style="color:#7c3aed;font-weight:600;font-size:13px;margin-bottom:4px;">TAGS</div>
+                            <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                                ${ticket.tags.map(tag => `<span style="padding:4px 10px;background:rgba(124,58,237,0.2);color:#a855f7;border-radius:6px;font-size:12px;">${tag}</span>`).join('')}
+                            </div>
+                        </div>
+                        ` : ''}
+                        ${ticket.close_reason ? `
+                        <div>
+                            <div style="color:#7c3aed;font-weight:600;font-size:13px;margin-bottom:4px;">CLOSE REASON</div>
+                            <div style="color:#e5e7eb;">${ticket.close_reason}</div>
+                        </div>
+                        ` : ''}
+                        ${ticket.closed_by_name ? `
+                        <div>
+                            <div style="color:#7c3aed;font-weight:600;font-size:13px;margin-bottom:4px;">CLOSED BY</div>
+                            <div style="color:#e5e7eb;">${ticket.closed_by_name}</div>
+                        </div>
+                        ` : ''}
+                    </div>
+                </td>
+            `;
+            
+            row.after(detailsRow);
+        }
+
+        function ticketsPreviousPage() {
+            if (currentTicketsPage > 1) {
+                currentTicketsPage--;
+                displayTicketsPage();
+            }
+        }
+
+        function ticketsNextPage() {
+            const totalPages = Math.ceil(filteredTickets.length / ticketsPerPage);
+            if (currentTicketsPage < totalPages) {
+                currentTicketsPage++;
+                displayTicketsPage();
+            }
+        }
+
+        function openTicketTranscript(ticketId, guildId) {
+            window.open(`transcript_view.php?ticket_id=${ticketId}&guild_id=${guildId}`, '_blank');
+        }
+
+        function downloadTicketTranscript(ticketId, guildId, ticketNumber) {
+            window.location.href = `download_transcript.php?ticket_id=${ticketId}&guild_id=${guildId}&ticket_number=${ticketNumber}`;
+        }
+
+        async function deleteTicketTranscript(ticketId, guildId) {
+            if (!confirm('Are you sure you want to delete this ticket transcript? This action cannot be undone.')) {
+                return;
+            }
+
+            showNotification('Deleting ticket transcript...', 'info');
+
+            try {
+                const response = await fetch('./delete_ticket.php', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ticket_id: ticketId, guild_id: guildId })
+                });
+
+                const result = await response.json();
+                
+                if (response.ok && result.success) {
+                    showNotification('Ticket transcript deleted successfully', 'success');
+                    
+                    // Immediately remove from ticketsData array
+                    ticketsData = ticketsData.filter(t => !(t.ticket_id === ticketId && t.guild_id === guildId));
+                    
+                    // Immediately remove from UI for instant feedback
+                    const ticketRow = document.querySelector(`[data-ticket-id="${ticketId}"]`);
+                    if (ticketRow) {
+                        ticketRow.style.opacity = '0';
+                        ticketRow.style.transition = 'opacity 0.3s';
+                        setTimeout(() => ticketRow.remove(), 300);
+                    }
+                    
+                    // Refresh the filtered display immediately
+                    filterAndDisplayTickets();
+                    
+                    // Refresh from server after short delay
+                    setTimeout(() => loadTickets(), 1000);
+                } else {
+                    showNotification('Error deleting transcript: ' + (result.error || 'Unknown error'), 'error');
+                }
+            } catch (error) {
+                showNotification('Error deleting transcript: ' + error.message, 'error');
+            }
+        }
+
+        function setupTicketsAutoRefresh() {
+            const autoRefreshSelect = document.getElementById('tickets-autorefresh');
+            if (!autoRefreshSelect) return;
+
+            autoRefreshSelect.addEventListener('change', () => {
+                if (ticketsAutoRefreshInterval) {
+                    clearInterval(ticketsAutoRefreshInterval);
+                    ticketsAutoRefreshInterval = null;
+                }
+
+                const interval = parseInt(autoRefreshSelect.value);
+                if (interval > 0) {
+                    ticketsAutoRefreshInterval = setInterval(() => {
+                        loadTickets();
+                    }, interval);
+                }
+            });
+        }
+
+        document.getElementById('tickets-guild-filter')?.addEventListener('change', filterAndDisplayTickets);
+        document.getElementById('tickets-category-filter')?.addEventListener('change', filterAndDisplayTickets);
+        document.getElementById('tickets-search')?.addEventListener('input', filterAndDisplayTickets);
+        document.getElementById('tickets-sort')?.addEventListener('change', filterAndDisplayTickets);
+
+        setupTicketsAutoRefresh();
+    
+        let logsRefreshInterval = null;
+        
+        function setLogsAutoRefresh(seconds) {
+            if (logsRefreshInterval) {
+                clearInterval(logsRefreshInterval);
+                logsRefreshInterval = null;
+            }
+            const sec = parseInt(seconds);
+            if (sec > 0) {
+                logsRefreshInterval = setInterval(() => {
+                    refreshSecurityLogs();
+                }, sec * 1000);
+            }
+        }
+        
+        
+        function toggleDebugPackages(enabled) {
+            sendCommand('toggle_debug_packages', { enabled: enabled });
+            showNotification(enabled ? 'Debug packages enabled' : 'Debug packages disabled', 'info');
+        }
+        
+        function refreshSecurityLogs() {
+            if (typeof currentTab !== 'undefined' && currentTab !== 'security') {
+                return;
+            }
+            const iframe = document.querySelector('#tab-security iframe');
+            if (iframe) {
+                iframe.src = iframe.src;
+            }
+        }
+        
+</script>
 </body>
 </html>'''.replace('{{TOKEN}}', token).replace('{{PREFIX}}', self._get_default_prefix())
 
@@ -10221,6 +12631,323 @@ lm_guard_index();
         bridge scripts.
         """
         return f'''<?php
+// Prevent direct access to this file
+if (basename($_SERVER['PHP_SELF']) == basename(__FILE__)) {{
+    http_response_code(403);
+    ?>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>403 - Access Denied</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&display=swap');
+
+    * {{
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }}
+
+    body {{
+      font-family: 'Space Grotesk', sans-serif;
+      background: #0a0a0f;
+      color: #fff;
+      overflow: hidden;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      position: relative;
+    }}
+
+    .background {{
+      position: absolute;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }}
+
+    .orb {{
+      position: absolute;
+      border-radius: 50%;
+      filter: blur(80px);
+      opacity: 0.6;
+      animation: float 20s infinite ease-in-out;
+    }}
+
+    .orb1 {{
+      width: 500px;
+      height: 500px;
+      background: radial-gradient(circle, #ff006e, #8338ec);
+      top: -200px;
+      left: -100px;
+      animation-delay: 0s;
+    }}
+
+    .orb2 {{
+      width: 400px;
+      height: 400px;
+      background: radial-gradient(circle, #3a86ff, #06ffa5);
+      bottom: -150px;
+      right: -100px;
+      animation-delay: -10s;
+    }}
+
+    .orb3 {{
+      width: 350px;
+      height: 350px;
+      background: radial-gradient(circle, #fb5607, #ffbe0b);
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      animation-delay: -5s;
+    }}
+
+    @keyframes float {{
+      0%, 100% {{
+        transform: translate(0, 0) scale(1);
+      }}
+      33% {{
+        transform: translate(100px, -50px) scale(1.1);
+      }}
+      66% {{
+        transform: translate(-50px, 100px) scale(0.9);
+      }}
+    }}
+
+    .container {{
+      position: relative;
+      z-index: 10;
+      text-align: center;
+      max-width: 600px;
+      padding: 40px;
+      background: rgba(255, 255, 255, 0.03);
+      backdrop-filter: blur(20px);
+      border-radius: 30px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+      animation: slideIn 0.8s ease-out;
+    }}
+
+    @keyframes slideIn {{
+      from {{
+        opacity: 0;
+        transform: translateY(30px);
+      }}
+      to {{
+        opacity: 1;
+        transform: translateY(0);
+      }}
+    }}
+
+    .lock-icon {{
+      width: 120px;
+      height: 120px;
+      margin: 0 auto 30px;
+      position: relative;
+      animation: bounce 2s infinite;
+    }}
+
+    @keyframes bounce {{
+      0%, 100% {{
+        transform: translateY(0);
+      }}
+      50% {{
+        transform: translateY(-10px);
+      }}
+    }}
+
+    .lock-body {{
+      width: 80px;
+      height: 60px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      border-radius: 12px;
+      position: absolute;
+      bottom: 0;
+      left: 50%;
+      transform: translateX(-50%);
+      box-shadow: 0 10px 30px rgba(102, 126, 234, 0.5);
+    }}
+
+    .lock-shackle {{
+      width: 50px;
+      height: 50px;
+      border: 8px solid #667eea;
+      border-bottom: none;
+      border-radius: 50px 50px 0 0;
+      position: absolute;
+      top: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      box-shadow: 0 0 20px rgba(102, 126, 234, 0.5);
+    }}
+
+    .keyhole {{
+      width: 8px;
+      height: 20px;
+      background: rgba(10, 10, 15, 0.8);
+      border-radius: 50% 50% 0 0;
+      position: absolute;
+      bottom: 15px;
+      left: 50%;
+      transform: translateX(-50%);
+    }}
+
+    .keyhole::after {{
+      content: '';
+      width: 16px;
+      height: 16px;
+      background: rgba(10, 10, 15, 0.8);
+      border-radius: 50%;
+      position: absolute;
+      top: -8px;
+      left: 50%;
+      transform: translateX(-50%);
+    }}
+
+    h1 {{
+      font-size: 120px;
+      font-weight: 700;
+      margin: 0;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      text-shadow: 0 10px 30px rgba(102, 126, 234, 0.3);
+      animation: glow 2s ease-in-out infinite;
+    }}
+
+    @keyframes glow {{
+      0%, 100% {{
+        filter: brightness(1);
+      }}
+      50% {{
+        filter: brightness(1.2);
+      }}
+    }}
+
+    h2 {{
+      font-size: 32px;
+      font-weight: 600;
+      margin: 20px 0 15px;
+      color: #fff;
+    }}
+
+    p {{
+      font-size: 18px;
+      color: rgba(255, 255, 255, 0.7);
+      line-height: 1.6;
+      margin-bottom: 30px;
+    }}
+
+    .buttons {{
+      display: flex;
+      gap: 15px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }}
+
+    .btn {{
+      padding: 14px 32px;
+      font-size: 16px;
+      font-weight: 600;
+      border: none;
+      border-radius: 12px;
+      cursor: pointer;
+      text-decoration: none;
+      transition: all 0.3s ease;
+      font-family: 'Space Grotesk', sans-serif;
+    }}
+
+    .btn-primary {{
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: #fff;
+      box-shadow: 0 8px 25px rgba(102, 126, 234, 0.4);
+    }}
+
+    .btn-primary:hover {{
+      transform: translateY(-2px);
+      box-shadow: 0 12px 35px rgba(102, 126, 234, 0.6);
+    }}
+
+    .error-footer {{
+      margin-top: 40px;
+      padding-top: 20px;
+      border-top: 1px solid rgba(255, 255, 255, 0.15);
+      font-size: 14px;
+      color: rgba(255, 255, 255, 0.65);
+    }}
+
+    @media (max-width: 768px) {{
+      .container {{
+        padding: 30px 20px;
+        margin: 20px;
+      }}
+
+      h1 {{
+        font-size: 80px;
+      }}
+
+      h2 {{
+        font-size: 24px;
+      }}
+
+      p {{
+        font-size: 16px;
+      }}
+
+      .lock-icon {{
+        width: 100px;
+        height: 100px;
+      }}
+
+      .lock-body {{
+        width: 70px;
+        height: 50px;
+      }}
+
+      .lock-shackle {{
+        width: 40px;
+        height: 40px;
+      }}
+    }}
+  </style>
+</head>
+<body>
+  <div class="background">
+    <div class="orb orb1"></div>
+    <div class="orb orb2"></div>
+    <div class="orb orb3"></div>
+  </div>
+
+  <div class="container">
+    <div class="lock-icon">
+      <div class="lock-shackle"></div>
+      <div class="lock-body">
+        <div class="keyhole"></div>
+      </div>
+    </div>
+    
+    <h1>403</h1>
+    <h2>Library File Access Denied</h2>
+    <p>This is a backend library file and cannot be accessed directly. Please use the dashboard homepage.</p>
+    
+    <div class="buttons">
+      <a href="index.php" class="btn btn-primary">← Back to Dashboard</a>
+    </div>
+    
+    <div class="error-footer">
+      Zoryx Discord Bot Framework · Live Monitor Dashboard
+    </div>
+  </div>
+</body>
+</html>
+    <?php
+    exit;
+}}
+
 // Auto-generated by Zoryx Live Monitor. Do not edit manually unless you
 // know what you're doing.
 
@@ -10237,6 +12964,323 @@ if (!defined('LM_SETUP_TOKEN')) {{
     def _generate_lm_db_php(self) -> str:
         """Database helper (SQLite by default, file-based, zero-config)."""
         return '''<?php
+// Prevent direct access to this file
+if (basename($_SERVER['PHP_SELF']) == basename(__FILE__)) {
+    http_response_code(403);
+    ?>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>403 - Access Denied</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&display=swap');
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Space Grotesk', sans-serif;
+      background: #0a0a0f;
+      color: #fff;
+      overflow: hidden;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      position: relative;
+    }
+
+    .background {
+      position: absolute;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+
+    .orb {
+      position: absolute;
+      border-radius: 50%;
+      filter: blur(80px);
+      opacity: 0.6;
+      animation: float 20s infinite ease-in-out;
+    }
+
+    .orb1 {
+      width: 500px;
+      height: 500px;
+      background: radial-gradient(circle, #ff006e, #8338ec);
+      top: -200px;
+      left: -100px;
+      animation-delay: 0s;
+    }
+
+    .orb2 {
+      width: 400px;
+      height: 400px;
+      background: radial-gradient(circle, #3a86ff, #06ffa5);
+      bottom: -150px;
+      right: -100px;
+      animation-delay: -10s;
+    }
+
+    .orb3 {
+      width: 350px;
+      height: 350px;
+      background: radial-gradient(circle, #fb5607, #ffbe0b);
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      animation-delay: -5s;
+    }
+
+    @keyframes float {
+      0%, 100% {
+        transform: translate(0, 0) scale(1);
+      }
+      33% {
+        transform: translate(100px, -50px) scale(1.1);
+      }
+      66% {
+        transform: translate(-50px, 100px) scale(0.9);
+      }
+    }
+
+    .container {
+      position: relative;
+      z-index: 10;
+      text-align: center;
+      max-width: 600px;
+      padding: 40px;
+      background: rgba(255, 255, 255, 0.03);
+      backdrop-filter: blur(20px);
+      border-radius: 30px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+      animation: slideIn 0.8s ease-out;
+    }
+
+    @keyframes slideIn {
+      from {
+        opacity: 0;
+        transform: translateY(30px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .lock-icon {
+      width: 120px;
+      height: 120px;
+      margin: 0 auto 30px;
+      position: relative;
+      animation: bounce 2s infinite;
+    }
+
+    @keyframes bounce {
+      0%, 100% {
+        transform: translateY(0);
+      }
+      50% {
+        transform: translateY(-10px);
+      }
+    }
+
+    .lock-body {
+      width: 80px;
+      height: 60px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      border-radius: 12px;
+      position: absolute;
+      bottom: 0;
+      left: 50%;
+      transform: translateX(-50%);
+      box-shadow: 0 10px 30px rgba(102, 126, 234, 0.5);
+    }
+
+    .lock-shackle {
+      width: 50px;
+      height: 50px;
+      border: 8px solid #667eea;
+      border-bottom: none;
+      border-radius: 50px 50px 0 0;
+      position: absolute;
+      top: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      box-shadow: 0 0 20px rgba(102, 126, 234, 0.5);
+    }
+
+    .keyhole {
+      width: 8px;
+      height: 20px;
+      background: rgba(10, 10, 15, 0.8);
+      border-radius: 50% 50% 0 0;
+      position: absolute;
+      bottom: 15px;
+      left: 50%;
+      transform: translateX(-50%);
+    }
+
+    .keyhole::after {
+      content: '';
+      width: 16px;
+      height: 16px;
+      background: rgba(10, 10, 15, 0.8);
+      border-radius: 50%;
+      position: absolute;
+      top: -8px;
+      left: 50%;
+      transform: translateX(-50%);
+    }
+
+    h1 {
+      font-size: 120px;
+      font-weight: 700;
+      margin: 0;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      text-shadow: 0 10px 30px rgba(102, 126, 234, 0.3);
+      animation: glow 2s ease-in-out infinite;
+    }
+
+    @keyframes glow {
+      0%, 100% {
+        filter: brightness(1);
+      }
+      50% {
+        filter: brightness(1.2);
+      }
+    }
+
+    h2 {
+      font-size: 32px;
+      font-weight: 600;
+      margin: 20px 0 15px;
+      color: #fff;
+    }
+
+    p {
+      font-size: 18px;
+      color: rgba(255, 255, 255, 0.7);
+      line-height: 1.6;
+      margin-bottom: 30px;
+    }
+
+    .buttons {
+      display: flex;
+      gap: 15px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    .btn {
+      padding: 14px 32px;
+      font-size: 16px;
+      font-weight: 600;
+      border: none;
+      border-radius: 12px;
+      cursor: pointer;
+      text-decoration: none;
+      transition: all 0.3s ease;
+      font-family: 'Space Grotesk', sans-serif;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: #fff;
+      box-shadow: 0 8px 25px rgba(102, 126, 234, 0.4);
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 12px 35px rgba(102, 126, 234, 0.6);
+    }
+
+    .error-footer {
+      margin-top: 40px;
+      padding-top: 20px;
+      border-top: 1px solid rgba(255, 255, 255, 0.15);
+      font-size: 14px;
+      color: rgba(255, 255, 255, 0.65);
+    }
+
+    @media (max-width: 768px) {
+      .container {
+        padding: 30px 20px;
+        margin: 20px;
+      }
+
+      h1 {
+        font-size: 80px;
+      }
+
+      h2 {
+        font-size: 24px;
+      }
+
+      p {
+        font-size: 16px;
+      }
+
+      .lock-icon {
+        width: 100px;
+        height: 100px;
+      }
+
+      .lock-body {
+        width: 70px;
+        height: 50px;
+      }
+
+      .lock-shackle {
+        width: 40px;
+        height: 40px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="background">
+    <div class="orb orb1"></div>
+    <div class="orb orb2"></div>
+    <div class="orb orb3"></div>
+  </div>
+
+  <div class="container">
+    <div class="lock-icon">
+      <div class="lock-shackle"></div>
+      <div class="lock-body">
+        <div class="keyhole"></div>
+      </div>
+    </div>
+    
+    <h1>403</h1>
+    <h2>Library File Access Denied</h2>
+    <p>This is a backend library file and cannot be accessed directly. Please use the dashboard homepage.</p>
+    
+    <div class="buttons">
+      <a href="index.php" class="btn btn-primary">← Back to Dashboard</a>
+    </div>
+    
+    <div class="error-footer">
+      Zoryx Discord Bot Framework · Live Monitor Dashboard
+    </div>
+  </div>
+</body>
+</html>
+    <?php
+    exit;
+}
+
 // Lightweight DB helper for the Live Monitor dashboard (SQLite by default).
 require_once __DIR__ . '/lm_bootstrap.php';
 
@@ -10351,6 +13395,323 @@ function lm_ensure_schema() {
     def _generate_lm_auth_php(self) -> str:
         """Authentication helpers: sessions, roles, audit logging, guards."""
         return '''<?php
+// Prevent direct access to this file
+if (basename($_SERVER['PHP_SELF']) == basename(__FILE__)) {
+    http_response_code(403);
+    ?>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>403 - Access Denied</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&display=swap');
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Space Grotesk', sans-serif;
+      background: #0a0a0f;
+      color: #fff;
+      overflow: hidden;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      position: relative;
+    }
+
+    .background {
+      position: absolute;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+
+    .orb {
+      position: absolute;
+      border-radius: 50%;
+      filter: blur(80px);
+      opacity: 0.6;
+      animation: float 20s infinite ease-in-out;
+    }
+
+    .orb1 {
+      width: 500px;
+      height: 500px;
+      background: radial-gradient(circle, #ff006e, #8338ec);
+      top: -200px;
+      left: -100px;
+      animation-delay: 0s;
+    }
+
+    .orb2 {
+      width: 400px;
+      height: 400px;
+      background: radial-gradient(circle, #3a86ff, #06ffa5);
+      bottom: -150px;
+      right: -100px;
+      animation-delay: -10s;
+    }
+
+    .orb3 {
+      width: 350px;
+      height: 350px;
+      background: radial-gradient(circle, #fb5607, #ffbe0b);
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      animation-delay: -5s;
+    }
+
+    @keyframes float {
+      0%, 100% {
+        transform: translate(0, 0) scale(1);
+      }
+      33% {
+        transform: translate(100px, -50px) scale(1.1);
+      }
+      66% {
+        transform: translate(-50px, 100px) scale(0.9);
+      }
+    }
+
+    .container {
+      position: relative;
+      z-index: 10;
+      text-align: center;
+      max-width: 600px;
+      padding: 40px;
+      background: rgba(255, 255, 255, 0.03);
+      backdrop-filter: blur(20px);
+      border-radius: 30px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+      animation: slideIn 0.8s ease-out;
+    }
+
+    @keyframes slideIn {
+      from {
+        opacity: 0;
+        transform: translateY(30px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .lock-icon {
+      width: 120px;
+      height: 120px;
+      margin: 0 auto 30px;
+      position: relative;
+      animation: bounce 2s infinite;
+    }
+
+    @keyframes bounce {
+      0%, 100% {
+        transform: translateY(0);
+      }
+      50% {
+        transform: translateY(-10px);
+      }
+    }
+
+    .lock-body {
+      width: 80px;
+      height: 60px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      border-radius: 12px;
+      position: absolute;
+      bottom: 0;
+      left: 50%;
+      transform: translateX(-50%);
+      box-shadow: 0 10px 30px rgba(102, 126, 234, 0.5);
+    }
+
+    .lock-shackle {
+      width: 50px;
+      height: 50px;
+      border: 8px solid #667eea;
+      border-bottom: none;
+      border-radius: 50px 50px 0 0;
+      position: absolute;
+      top: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      box-shadow: 0 0 20px rgba(102, 126, 234, 0.5);
+    }
+
+    .keyhole {
+      width: 8px;
+      height: 20px;
+      background: rgba(10, 10, 15, 0.8);
+      border-radius: 50% 50% 0 0;
+      position: absolute;
+      bottom: 15px;
+      left: 50%;
+      transform: translateX(-50%);
+    }
+
+    .keyhole::after {
+      content: '';
+      width: 16px;
+      height: 16px;
+      background: rgba(10, 10, 15, 0.8);
+      border-radius: 50%;
+      position: absolute;
+      top: -8px;
+      left: 50%;
+      transform: translateX(-50%);
+    }
+
+    h1 {
+      font-size: 120px;
+      font-weight: 700;
+      margin: 0;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      text-shadow: 0 10px 30px rgba(102, 126, 234, 0.3);
+      animation: glow 2s ease-in-out infinite;
+    }
+
+    @keyframes glow {
+      0%, 100% {
+        filter: brightness(1);
+      }
+      50% {
+        filter: brightness(1.2);
+      }
+    }
+
+    h2 {
+      font-size: 32px;
+      font-weight: 600;
+      margin: 20px 0 15px;
+      color: #fff;
+    }
+
+    p {
+      font-size: 18px;
+      color: rgba(255, 255, 255, 0.7);
+      line-height: 1.6;
+      margin-bottom: 30px;
+    }
+
+    .buttons {
+      display: flex;
+      gap: 15px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    .btn {
+      padding: 14px 32px;
+      font-size: 16px;
+      font-weight: 600;
+      border: none;
+      border-radius: 12px;
+      cursor: pointer;
+      text-decoration: none;
+      transition: all 0.3s ease;
+      font-family: 'Space Grotesk', sans-serif;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: #fff;
+      box-shadow: 0 8px 25px rgba(102, 126, 234, 0.4);
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 12px 35px rgba(102, 126, 234, 0.6);
+    }
+
+    .error-footer {
+      margin-top: 40px;
+      padding-top: 20px;
+      border-top: 1px solid rgba(255, 255, 255, 0.15);
+      font-size: 14px;
+      color: rgba(255, 255, 255, 0.65);
+    }
+
+    @media (max-width: 768px) {
+      .container {
+        padding: 30px 20px;
+        margin: 20px;
+      }
+
+      h1 {
+        font-size: 80px;
+      }
+
+      h2 {
+        font-size: 24px;
+      }
+
+      p {
+        font-size: 16px;
+      }
+
+      .lock-icon {
+        width: 100px;
+        height: 100px;
+      }
+
+      .lock-body {
+        width: 70px;
+        height: 50px;
+      }
+
+      .lock-shackle {
+        width: 40px;
+        height: 40px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="background">
+    <div class="orb orb1"></div>
+    <div class="orb orb2"></div>
+    <div class="orb orb3"></div>
+  </div>
+
+  <div class="container">
+    <div class="lock-icon">
+      <div class="lock-shackle"></div>
+      <div class="lock-body">
+        <div class="keyhole"></div>
+      </div>
+    </div>
+    
+    <h1>403</h1>
+    <h2>Library File Access Denied</h2>
+    <p>This is a backend library file and cannot be accessed directly. Please use the dashboard homepage.</p>
+    
+    <div class="buttons">
+      <a href="index.php" class="btn btn-primary">← Back to Dashboard</a>
+    </div>
+    
+    <div class="error-footer">
+      Zoryx Discord Bot Framework · Live Monitor Dashboard
+    </div>
+  </div>
+</body>
+</html>
+    <?php
+    exit;
+}
+
 require_once __DIR__ . '/lm_db.php';
 
 function lm_start_session_if_needed(): void {
@@ -10481,22 +13842,25 @@ function lm_guard_index(): void {
 
 function lm_require_owner(): void {
     $user = lm_current_user();
-    if (!$user || ($user['role'] ?? '') !== 'OWNER') {
-        http_response_code(403);
-        echo '<h1>Forbidden</h1><p>Owner access is required to view this page.</p>';
-        exit;
+    if (!$user) {
+        lm_render_error_page(401, 'Authentication Required', 'You must be logged in to access this page.', 'lock');
+    }
+    if (($user['role'] ?? '') !== 'OWNER') {
+        lm_render_error_page(403, 'Owner Access Required', 'This page is restricted to dashboard owners only. Contact the owner for access.', 'forbidden');
     }
 }
 
 /**
  * Resolve an arbitrary role name (including custom roles) to a base tier
- * of OWNER / HELPER / VISITOR for permission checks.
+ * of OWNER / CUSTOM for permission checks.
  */
 function lm_resolve_role_tier(string $roleName): string {
     $upper = strtoupper($roleName);
-    if (in_array($upper, ['OWNER', 'HELPER', 'VISITOR'], true)) {
-        return $upper;
+    // Only two tiers: OWNER and CUSTOM
+    if ($upper === 'OWNER') {
+        return 'OWNER';
     }
+    // Check database for base_role
     try {
         $pdo = lm_db();
         $stmt = $pdo->prepare('SELECT base_role FROM dashboard_roles WHERE UPPER(name) = UPPER(:name) LIMIT 1');
@@ -10504,102 +13868,185 @@ function lm_resolve_role_tier(string $roleName): string {
         $row = $stmt->fetch();
         if ($row && !empty($row['base_role'])) {
             $base = strtoupper($row['base_role']);
-            if (in_array($base, ['OWNER', 'HELPER', 'VISITOR'], true)) {
-                return $base;
+            if ($base === 'OWNER') {
+                return 'OWNER';
             }
         }
     } catch (Throwable $e) {
-        // Ignore DB or lookup errors; fall back to VISITOR tier.
+        // Ignore DB errors; fall back to CUSTOM tier.
     }
-    return 'VISITOR';
+    // Everything except OWNER is CUSTOM
+    return 'CUSTOM';
 }
+
 
 function lm_default_permissions_for_tier(string $tier): array {
     switch ($tier) {
         case 'OWNER':
+            // OWNER has EVERYTHING - all view and action permissions
             return [
-                'view_dashboard'  => true,
-                'view_commands'   => true,
-                'view_plugins'    => true,
-                'view_hooks'      => true,
-                'view_filesystem' => true,
-                'view_files'      => true,
-                'view_chat'       => true,
-                'view_events'     => true,
-                'view_system'     => true,
-                'view_security'   => true,
-                'view_guilds'     => true,
-                'view_database'   => true,
-                'view_marketplace'=> true,
-                'view_invite'     => true,
-                'control_core'    => true,
-                'control_plugins' => true,
-                'control_hooks'   => true,
-                'control_files'   => true,
-                'control_chat'    => true,
-                'control_guilds'  => true,
-                'control_database'=> true,
-                'control_backup'  => true,
-                'control_invite'  => true,
-                'control_marketplace' => true,
-                'export_logs'     => true,
+                // VIEW PERMISSIONS - One per tab
+                'view_dashboard' => true,       // Dashboard tab
+                'view_commands' => true,        // Commands tab
+                'view_plugins' => true,         // Plugins tab
+                'view_hooks' => true,           // Event Hooks tab
+                'view_files' => true,           // File Browser tab
+                'view_filesystem' => true,      // Filesystem tab
+                'view_chat' => true,            // Chat Console tab
+                'view_tickets' => true,         // Discord Tickets tab
+                'view_events' => true,          // Events tab
+                'view_system' => true,          // System Details tab
+                'view_guilds' => true,          // Guilds / Servers tab
+                'view_database' => true,        // Database Viewer tab
+                'view_marketplace' => true,     // Extension Marketplace tab
+                'view_security' => true,        // Security & Logs tab
+                'view_roles' => true,           // Roles & Access tab
+                'view_bot_invite' => true,      // Bot Invite Helper tab
+                'view_logs' => true,            // Logs (in security tab)
+                
+                // ACTION PERMISSIONS - Dashboard Actions (5)
+                'action_clear_cache' => true,
+                'action_toggle_logging' => true,
+                'action_toggle_debug' => true,
+                'action_backup_dashboard' => true,
+                'action_backup_bot' => true,
+                
+                // ACTION PERMISSIONS - Plugin Actions (6)
+                'action_reload_extension' => true,
+                'action_load_extension' => true,
+                'action_unload_extension' => true,
+                'action_set_auto_reload' => true,
+                'action_set_auto_load' => true,
+                'action_set_enforcement' => true,
+                
+                // ACTION PERMISSIONS - Hook Actions (6)
+                'action_enable_hook' => true,
+                'action_disable_hook' => true,
+                'action_reset_circuit' => true,
+                'action_create_hook' => true,
+                'action_delete_hook' => true,
+                'action_export_hooks' => true,
+                
+                // ACTION PERMISSIONS - File Actions (6)
+                'action_upload_file' => true,
+                'action_rename_file' => true,
+                'action_delete_file' => true,
+                'action_create_folder' => true,
+                'action_edit_file' => true,
+                'action_save_file' => true,
+                
+                // ACTION PERMISSIONS - System Actions (4)
+                'action_shutdown_bot' => true,
+                'action_generate_diagnostics' => true,
+                'action_invalidate_cache' => true,
+                'action_force_release_lock' => true,
+                
+                // ACTION PERMISSIONS - Chat Actions (1)
+                'action_send_message' => true,
+                'action_request_chat_data' => true,
+                
+                // ACTION PERMISSIONS - Ticket Actions (3)
+                'action_view_ticket' => true,
+                'action_download_ticket' => true,
+                'action_delete_ticket' => true,
+                
+                // ACTION PERMISSIONS - Guild Actions (1)
+                'action_leave_guild' => true,
+                
+                // ACTION PERMISSIONS - Bot Invite Actions (3)
+                'action_generate_invite' => true,
+                'action_open_invite' => true,
+                'action_copy_invite' => true,
+                
+                // ACTION PERMISSIONS - Marketplace Actions (5)
+                'action_fetch_marketplace' => true,
+                'action_download_extension' => true,
+                'action_load_marketplace_extension' => true,
+                'action_refresh_zygnalid' => true,
+                'action_refresh_marketplace' => true,
+                
+                // ACTION PERMISSIONS - Role Management Actions (3)
+                'action_save_role' => true,
+                'action_delete_role' => true,
+                'action_create_role' => true,
+                
+                // ACTION PERMISSIONS - Log Actions (1)
+                'action_export_logs' => true,
+                
+                // ACTION PERMISSIONS - Database Actions (1)
+                'action_execute_query' => true,
             ];
-        case 'HELPER':
-            return [
-                'view_dashboard'  => true,
-                'view_commands'   => true,
-                'view_plugins'    => true,
-                'view_hooks'      => true,
-                'view_filesystem' => true,
-                'view_files'      => true,
-                'view_chat'       => true,
-                'view_events'     => true,
-                'view_system'     => true,
-                'view_security'   => false,
-                'view_guilds'     => true,
-                'view_database'   => true,
-                'view_marketplace'=> true,
-                'view_invite'     => true,
-                'control_core'    => false,
-                'control_plugins' => true,
-                'control_hooks'   => true,
-                'control_files'   => true,
-                'control_chat'    => true,
-                'control_guilds'  => false,
-                'control_database'=> false,
-                'control_backup'  => false,
-                'control_invite'  => true,
-                'control_marketplace' => true,
-                'export_logs'     => false,
-            ];
-        case 'VISITOR':
+
+        case 'CUSTOM':
         default:
+            // CUSTOM tier: View most things, do nothing by default
             return [
-                'view_dashboard'  => true,
-                'view_commands'   => true,
-                'view_plugins'    => true,
-                'view_hooks'      => true,
-                'view_filesystem' => true,
-                'view_files'      => false,
-                'view_chat'       => false,
-                'view_events'     => true,
-                'view_system'     => true,
-                'view_security'   => false,
-                'view_guilds'     => false,
-                'view_database'   => false,
-                'view_marketplace'=> false,
-                'view_invite'     => true,
-                'control_core'    => false,
-                'control_plugins' => false,
-                'control_hooks'   => false,
-                'control_files'   => false,
-                'control_chat'    => false,
-                'control_guilds'  => false,
-                'control_database'=> false,
-                'control_backup'  => false,
-                'control_invite'  => false,
-                'control_marketplace' => false,
-                'export_logs'     => false,
+                // VIEW PERMISSIONS - Most tabs visible
+                'view_dashboard' => true,       // Dashboard tab
+                'view_commands' => true,        // Commands tab
+                'view_plugins' => true,         // Plugins tab
+                'view_hooks' => true,           // Event Hooks tab
+                'view_files' => true,           // File Browser tab
+                'view_filesystem' => true,      // Filesystem tab
+                'view_chat' => true,            // Chat Console tab
+                'view_tickets' => true,         // Discord Tickets tab
+                'view_events' => true,          // Events tab
+                'view_system' => true,          // System Details tab
+                'view_guilds' => true,          // Guilds / Servers tab
+                'view_database' => false,       // Database Viewer - SENSITIVE
+                'view_marketplace' => true,     // Extension Marketplace tab
+                'view_security' => false,       // Security & Logs - SENSITIVE
+                'view_roles' => false,          // Roles & Access - SENSITIVE
+                'view_bot_invite' => true,      // Bot Invite Helper tab
+                'view_logs' => false,           // Logs - SENSITIVE
+                
+                // ALL ACTION PERMISSIONS - FALSE by default (customize per role)
+                'action_clear_cache' => false,
+                'action_toggle_logging' => false,
+                'action_toggle_debug' => false,
+                'action_backup_dashboard' => false,
+                'action_backup_bot' => false,
+                'action_reload_extension' => false,
+                'action_load_extension' => false,
+                'action_unload_extension' => false,
+                'action_set_auto_reload' => false,
+                'action_set_auto_load' => false,
+                'action_set_enforcement' => false,
+                'action_enable_hook' => false,
+                'action_disable_hook' => false,
+                'action_reset_circuit' => false,
+                'action_create_hook' => false,
+                'action_delete_hook' => false,
+                'action_export_hooks' => false,
+                'action_upload_file' => false,
+                'action_rename_file' => false,
+                'action_delete_file' => false,
+                'action_create_folder' => false,
+                'action_edit_file' => false,
+                'action_save_file' => false,
+                'action_shutdown_bot' => false,
+                'action_generate_diagnostics' => false,
+                'action_invalidate_cache' => false,
+                'action_force_release_lock' => false,
+                'action_send_message' => false,
+                'action_request_chat_data' => false,
+                'action_view_ticket' => false,
+                'action_download_ticket' => false,
+                'action_delete_ticket' => false,
+                'action_leave_guild' => false,
+                'action_generate_invite' => false,
+                'action_open_invite' => false,
+                'action_copy_invite' => false,
+                'action_fetch_marketplace' => false,
+                'action_download_extension' => false,
+                'action_load_marketplace_extension' => false,
+                'action_refresh_zygnalid' => false,
+                'action_refresh_marketplace' => false,
+                'action_save_role' => false,
+                'action_delete_role' => false,
+                'action_create_role' => false,
+                'action_export_logs' => false,
+                'action_execute_query' => false,
             ];
     }
 }
@@ -10612,7 +14059,7 @@ function lm_role_permissions(string $roleName, string $tier): array {
     $perms = lm_default_permissions_for_tier($tier);
     try {
         $upper = strtoupper($roleName);
-        if (in_array($upper, ['OWNER', 'HELPER', 'VISITOR'], true)) {
+        if (in_array($upper, ['OWNER', 'CUSTOM', 'CUSTOM'], true)) {
             return $perms;
         }
         $pdo = lm_db();
@@ -10631,6 +14078,484 @@ function lm_role_permissions(string $roleName, string $tier): array {
         // Ignore
     }
     return $perms;
+}
+
+function lm_render_error_page(int $code, string $title, string $message, string $iconType = 'default'): void {
+    http_response_code($code);
+    
+    // Choose icon HTML based on type
+    $iconHTML = '';
+    if ($iconType === 'lock') {
+        $iconHTML = '<div class="lock-icon"><div class="lock-shackle"></div><div class="lock-body"><div class="keyhole"></div></div></div>';
+    } elseif ($iconType === 'forbidden') {
+        $iconHTML = '<div class="forbidden-icon"><div class="forbidden-circle"></div><div class="forbidden-slash"></div></div>';
+    } elseif ($iconType === 'error') {
+        $iconHTML = '<div class="error-icon"><div class="error-bar"></div><div class="error-dot"></div></div>';
+    } elseif ($iconType === 'ticket') {
+        $iconHTML = '<div class="ticket-icon"><div class="ticket-body"><div class="ticket-cutout-left"></div><div class="ticket-cutout-right"></div><div class="ticket-line"></div></div></div>';
+    } elseif ($iconType === 'loading') {
+        $iconHTML = '<div class="loading-icon"><div class="spinner"></div></div>';
+    } else {
+        $iconHTML = '<div class="error-icon"><div class="error-bar"></div><div class="error-dot"></div></div>';
+    }
+    
+    ?>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title><?php echo $code; ?> - <?php echo htmlspecialchars($title); ?></title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&display=swap');
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Space Grotesk', sans-serif;
+      background: #0a0a0f;
+      color: #fff;
+      overflow: hidden;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      position: relative;
+    }
+
+    .branding {
+      position: absolute;
+      top: 30px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 18px;
+      font-weight: 600;
+      color: rgba(255, 255, 255, 0.9);
+      text-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+    }
+
+    .branding-logo {
+      width: 32px;
+      height: 32px;
+      filter: drop-shadow(0 2px 8px rgba(102, 126, 234, 0.6));
+    }
+
+    .background {
+      position: absolute;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+
+    .orb {
+      position: absolute;
+      border-radius: 50%;
+      filter: blur(80px);
+      opacity: 0.6;
+      animation: float 20s infinite ease-in-out;
+    }
+
+    .orb1 {
+      width: 500px;
+      height: 500px;
+      background: radial-gradient(circle, #ff006e, #8338ec);
+      top: -200px;
+      left: -100px;
+      animation-delay: 0s;
+    }
+
+    .orb2 {
+      width: 400px;
+      height: 400px;
+      background: radial-gradient(circle, #3a86ff, #06ffa5);
+      bottom: -150px;
+      right: -100px;
+      animation-delay: -10s;
+    }
+
+    .orb3 {
+      width: 350px;
+      height: 350px;
+      background: radial-gradient(circle, #fb5607, #ffbe0b);
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      animation-delay: -5s;
+    }
+
+    @keyframes float {
+      0%, 100% {
+        transform: translate(0, 0) scale(1);
+      }
+      33% {
+        transform: translate(100px, -50px) scale(1.1);
+      }
+      66% {
+        transform: translate(-50px, 100px) scale(0.9);
+      }
+    }
+
+    .container {
+      position: relative;
+      z-index: 10;
+      text-align: center;
+      max-width: 600px;
+      padding: 40px;
+      background: rgba(255, 255, 255, 0.03);
+      backdrop-filter: blur(20px);
+      border-radius: 30px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+      animation: slideIn 0.8s ease-out;
+    }
+
+    @keyframes slideIn {
+      from {
+        opacity: 0;
+        transform: translateY(30px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .lock-icon, .forbidden-icon, .error-icon, .ticket-icon, .loading-icon {
+      width: 120px;
+      height: 120px;
+      margin: 0 auto 30px;
+      position: relative;
+      animation: bounce 2s infinite;
+    }
+
+    @keyframes bounce {
+      0%, 100% {
+        transform: translateY(0);
+      }
+      50% {
+        transform: translateY(-10px);
+      }
+    }
+
+    .lock-body {
+      width: 80px;
+      height: 60px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      border-radius: 12px;
+      position: absolute;
+      bottom: 0;
+      left: 50%;
+      transform: translateX(-50%);
+      box-shadow: 0 10px 30px rgba(102, 126, 234, 0.5);
+    }
+
+    .lock-shackle {
+      width: 50px;
+      height: 50px;
+      border: 8px solid #667eea;
+      border-bottom: none;
+      border-radius: 50px 50px 0 0;
+      position: absolute;
+      top: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      box-shadow: 0 0 20px rgba(102, 126, 234, 0.5);
+    }
+
+    .keyhole {
+      width: 8px;
+      height: 20px;
+      background: rgba(10, 10, 15, 0.8);
+      border-radius: 50% 50% 0 0;
+      position: absolute;
+      bottom: 15px;
+      left: 50%;
+      transform: translateX(-50%);
+    }
+
+    .keyhole::after {
+      content: '';
+      width: 16px;
+      height: 16px;
+      background: rgba(10, 10, 15, 0.8);
+      border-radius: 50%;
+      position: absolute;
+      top: -8px;
+      left: 50%;
+      transform: translateX(-50%);
+    }
+
+    .forbidden-circle {
+      width: 100px;
+      height: 100px;
+      border: 8px solid #667eea;
+      border-radius: 50%;
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      box-shadow: 0 10px 30px rgba(102, 126, 234, 0.5);
+    }
+
+    .forbidden-slash {
+      width: 120px;
+      height: 8px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      position: absolute;
+      top: 56px;
+      left: 0;
+      transform: rotate(-45deg);
+      border-radius: 4px;
+      box-shadow: 0 5px 20px rgba(102, 126, 234, 0.5);
+    }
+
+    .error-bar {
+      width: 12px;
+      height: 70px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      border-radius: 6px;
+      position: absolute;
+      top: 15px;
+      left: 54px;
+      box-shadow: 0 10px 30px rgba(102, 126, 234, 0.5);
+    }
+
+    .error-dot {
+      width: 16px;
+      height: 16px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      border-radius: 50%;
+      position: absolute;
+      bottom: 15px;
+      left: 52px;
+      box-shadow: 0 5px 20px rgba(102, 126, 234, 0.5);
+    }
+
+    .ticket-body {
+      width: 100px;
+      height: 70px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      border-radius: 10px;
+      position: absolute;
+      top: 25px;
+      left: 10px;
+      box-shadow: 0 10px 30px rgba(102, 126, 234, 0.5);
+    }
+
+    .ticket-cutout-left, .ticket-cutout-right {
+      width: 24px;
+      height: 24px;
+      background: #0a0a0f;
+      border-radius: 50%;
+      position: absolute;
+      top: 23px;
+    }
+
+    .ticket-cutout-left {
+      left: -12px;
+    }
+
+    .ticket-cutout-right {
+      right: -12px;
+    }
+
+    .ticket-line {
+      width: 3px;
+      height: 50px;
+      background: rgba(10, 10, 15, 0.3);
+      position: absolute;
+      left: 48px;
+      top: 10px;
+    }
+
+    .spinner {
+      width: 90px;
+      height: 90px;
+      border: 8px solid rgba(102, 126, 234, 0.2);
+      border-top: 8px solid #667eea;
+      border-radius: 50%;
+      position: absolute;
+      top: 15px;
+      left: 15px;
+      animation: spin 1s linear infinite;
+      box-shadow: 0 10px 30px rgba(102, 126, 234, 0.5);
+    }
+
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+
+    h1 {
+      font-size: 120px;
+      font-weight: 700;
+      margin: 0;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      text-shadow: 0 10px 30px rgba(102, 126, 234, 0.3);
+      animation: glow 2s ease-in-out infinite;
+    }
+
+    @keyframes glow {
+      0%, 100% {
+        filter: brightness(1);
+      }
+      50% {
+        filter: brightness(1.2);
+      }
+    }
+
+    h2 {
+      font-size: 32px;
+      font-weight: 600;
+      margin: 20px 0 15px;
+      color: #fff;
+    }
+
+    p {
+      font-size: 18px;
+      color: rgba(255, 255, 255, 0.7);
+      line-height: 1.6;
+      margin-bottom: 30px;
+    }
+
+    .buttons {
+      display: flex;
+      gap: 15px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    .btn {
+      padding: 14px 32px;
+      font-size: 16px;
+      font-weight: 600;
+      border: none;
+      border-radius: 12px;
+      cursor: pointer;
+      text-decoration: none;
+      transition: all 0.3s ease;
+      font-family: 'Space Grotesk', sans-serif;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: #fff;
+      box-shadow: 0 8px 25px rgba(102, 126, 234, 0.4);
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 12px 35px rgba(102, 126, 234, 0.6);
+    }
+
+    .btn-secondary {
+      background: rgba(255, 255, 255, 0.1);
+      color: #fff;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+    }
+
+    .btn-secondary:hover {
+      background: rgba(255, 255, 255, 0.15);
+      transform: translateY(-2px);
+    }
+
+    @media (max-width: 768px) {
+      .branding {
+        top: 20px;
+        font-size: 16px;
+      }
+
+      .branding-logo {
+        width: 28px;
+        height: 28px;
+      }
+
+      .container {
+        padding: 30px 20px;
+        margin: 20px;
+      }
+
+      h1 {
+        font-size: 80px;
+      }
+
+      h2 {
+        font-size: 24px;
+      }
+
+      p {
+        font-size: 16px;
+      }
+
+      .lock-icon, .forbidden-icon, .error-icon, .ticket-icon, .loading-icon {
+        width: 100px;
+        height: 100px;
+      }
+
+      .lock-body {
+        width: 70px;
+        height: 50px;
+      }
+
+      .lock-shackle {
+        width: 40px;
+        height: 40px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="branding">
+    <svg class="branding-logo" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" fill="url(#grad)" stroke="url(#grad2)" stroke-width="1"/>
+      <defs>
+        <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" style="stop-color:#667eea;stop-opacity:1" />
+          <stop offset="100%" style="stop-color:#764ba2;stop-opacity:1" />
+        </linearGradient>
+        <linearGradient id="grad2" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" style="stop-color:#667eea;stop-opacity:1" />
+          <stop offset="100%" style="stop-color:#f093fb;stop-opacity:1" />
+        </linearGradient>
+      </defs>
+    </svg>
+    <span>Zoryx Discord Bot Framework</span>
+  </div>
+
+  <div class="background">
+    <div class="orb orb1"></div>
+    <div class="orb orb2"></div>
+    <div class="orb orb3"></div>
+  </div>
+
+  <div class="container">
+    <?php echo $iconHTML; ?>
+    
+    <h1><?php echo $code; ?></h1>
+    <h2><?php echo htmlspecialchars($title); ?></h2>
+    <p><?php echo htmlspecialchars($message); ?></p>
+    
+    <div class="buttons">
+      <a href="index.php" class="btn btn-primary">← Back to Dashboard</a>
+      <?php if ($code === 403 || $code === 401): ?>
+        <a href="login.php" class="btn btn-secondary">Login</a>
+      <?php endif; ?>
+    </div>
+  </div>
+</body>
+</html>
+<?php
+    exit;
 }
 
 ?>
@@ -11174,6 +15099,9 @@ $tokenResponse = null;
 $ch = curl_init('https://discord.com/api/oauth2/token');
 curl_setopt($ch, CURLOPT_POST, true);
 curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+curl_setopt($ch, CURLOPT_HTTPHEADER, [
+    'Content-Type: application/x-www-form-urlencoded',
+]);
 curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query([
     'client_id' => $clientId,
     'client_secret' => $clientSecret,
@@ -11183,6 +15111,9 @@ curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query([
 ]));
 
 $result = curl_exec($ch);
+$httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+curl_close($ch);
+
 if ($result === false) {
     lm_log_audit('LOGIN_FAILED', 'OAUTH', null, ['error' => 'curl_error']);
     echo '<h1>OAuth Error</h1><p>Failed to contact Discord.</p>';
@@ -11191,8 +15122,8 @@ if ($result === false) {
 
 $tokenResponse = json_decode($result, true);
 if (!is_array($tokenResponse) || empty($tokenResponse['access_token'])) {
-    lm_log_audit('LOGIN_FAILED', 'OAUTH', null, ['error' => 'no_access_token', 'raw' => $result]);
-    echo '<h1>OAuth Error</h1><p>Discord did not return an access token.</p>';
+    lm_log_audit('LOGIN_FAILED', 'OAUTH', null, ['error' => 'no_access_token', 'http_code' => $httpCode, 'response' => $result]);
+    echo '<h1>OAuth Error</h1><p>Discord did not return an access token. HTTP Code: ' . $httpCode . '</p><pre>' . htmlspecialchars($result) . '</pre>';
     exit;
 }
 
@@ -11205,6 +15136,9 @@ curl_setopt($ch, CURLOPT_HTTPHEADER, [
     'Authorization: Bearer ' . $accessToken,
 ]);
 $userResult = curl_exec($ch);
+$httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+curl_close($ch);
+
 if ($userResult === false) {
     lm_log_audit('LOGIN_FAILED', 'PROFILE', null, ['error' => 'profile_fetch_failed']);
     echo '<h1>OAuth Error</h1><p>Failed to fetch user profile from Discord.</p>';
@@ -11213,8 +15147,8 @@ if ($userResult === false) {
 
 $user = json_decode($userResult, true);
 if (!is_array($user) || empty($user['id'])) {
-    lm_log_audit('LOGIN_FAILED', 'PROFILE', null, ['error' => 'invalid_profile', 'raw' => $userResult]);
-    echo '<h1>OAuth Error</h1><p>Discord did not return a valid user.</p>';
+    lm_log_audit('LOGIN_FAILED', 'PROFILE', null, ['error' => 'invalid_profile', 'http_code' => $httpCode, 'response' => $userResult]);
+    echo '<h1>OAuth Error</h1><p>Discord did not return a valid user. HTTP Code: ' . $httpCode . '</p><pre>' . htmlspecialchars($userResult) . '</pre>';
     exit;
 }
 
@@ -11330,11 +15264,12 @@ if (!$user) {
     exit;
 }
 
-$roleName = $user['role'] ?? 'VISITOR';
+$roleName = $user['role'] ?? 'CUSTOM';
 $roleTier = lm_resolve_role_tier($roleName);
 $perms = lm_role_permissions($roleName, $roleTier);
 
-if (empty($perms['control_backup'])) {
+// Check new action permission with fallback to old control permission
+if (empty($perms['action_backup_dashboard']) && empty($perms['control_backup'])) {
     http_response_code(403);
     echo 'You do not have permission to create dashboard backups.';
     exit;
@@ -11395,7 +15330,22 @@ require_once __DIR__ . '/lm_auth.php';
 
 lm_start_session_if_needed();
 lm_ensure_schema();
-lm_require_owner();
+
+// Check permissions for viewing audit logs
+$user = lm_current_user();
+if (!$user) {
+    lm_render_error_page(401, 'Authentication Required', 'You must be logged in to view audit logs.', 'lock');
+}
+
+$roleName = $user['role'] ?? 'CUSTOM';
+$roleTier = lm_resolve_role_tier($roleName);
+$rolePerms = lm_role_permissions($roleName, $roleTier);
+
+// CRITICAL: Viewing audit logs requires view_security AND view_logs permissions
+if (empty($rolePerms['view_security']) || empty($rolePerms['view_logs'])) {
+    lm_render_error_page(403, 'Access Denied', 'You do not have permission to view audit logs. Requires view_security and view_logs permissions.', 'forbidden');
+}
+
 $pdo = lm_db();
 
 $q = trim($_GET['q'] ?? '');
@@ -11421,6 +15371,13 @@ $sqlWhere = $where ? ('WHERE ' . implode(' AND ', $where)) : '';
 
 // CSV export (used by the Security & Logs "Export Logs" button)
 if (isset($_GET['export']) && $_GET['export'] === 'csv') {
+    // CRITICAL: Exporting logs requires action_export_logs permission
+    if (empty($rolePerms['action_export_logs'])) {
+        http_response_code(403);
+        echo 'You do not have permission to export audit logs. Requires action_export_logs permission.';
+        exit;
+    }
+    
     header('Content-Type: text/csv; charset=UTF-8');
     header('Content-Disposition: attachment; filename="audit_logs_' . date('Ymd_His') . '.csv"');
 
@@ -11616,7 +15573,28 @@ require_once __DIR__ . '/lm_auth.php';
 
 lm_start_session_if_needed();
 lm_ensure_schema();
-lm_require_owner();
+
+// Check permissions for viewing roles
+$user = lm_current_user();
+if (!$user) {
+    http_response_code(401);
+    header('Content-Type: application/json');
+    echo json_encode(['error' => 'Not logged in']);
+    exit;
+}
+
+$roleName = $user['role'] ?? 'CUSTOM';
+$roleTier = lm_resolve_role_tier($roleName);
+$rolePerms = lm_role_permissions($roleName, $roleTier);
+
+// CRITICAL: Viewing roles requires view_roles permission
+if (empty($rolePerms['view_roles'])) {
+    http_response_code(403);
+    header('Content-Type: application/json');
+    echo json_encode(['error' => 'You do not have permission to view roles. Requires view_roles permission.']);
+    exit;
+}
+
 $pdo = lm_db();
 $config = lm_get_config();
 
@@ -11638,7 +15616,7 @@ try {
         $customRoles[] = [
             'id' => (int)($r['id'] ?? 0),
             'name' => $r['name'],
-            'base_role' => strtoupper($r['base_role'] ?? 'VISITOR'),
+            'base_role' => strtoupper($r['base_role'] ?? 'CUSTOM'),
             'description' => $r['description'] ?? '',
             'permissions' => $perms,
             'system' => false,
@@ -11653,18 +15631,6 @@ $builtinRoles = [
         'name' => 'OWNER',
         'base_role' => 'OWNER',
         'description' => 'Dashboard owner (full access)',
-        'system' => true,
-    ],
-    [
-        'name' => 'HELPER',
-        'base_role' => 'HELPER',
-        'description' => 'Built-in helper role',
-        'system' => true,
-    ],
-    [
-        'name' => 'VISITOR',
-        'base_role' => 'VISITOR',
-        'description' => 'View-only visitor role',
         'system' => true,
     ],
 ];
@@ -11703,19 +15669,42 @@ if (!is_array($data)) {
 
 $action = $data['action'] ?? '';
 
+// CRITICAL: Check action permissions before allowing any modifications
+$requiresCreate = in_array($action, ['add', 'create_role', 'role_create'], true);
+$requiresSave = in_array($action, ['update_role', 'save_role', 'role_update'], true);
+$requiresDelete = in_array($action, ['remove', 'delete_role', 'role_delete'], true);
+
+if ($requiresCreate && empty($rolePerms['action_create_role'])) {
+    http_response_code(403);
+    echo json_encode(['success' => false, 'error' => 'No permission to create roles. Requires action_create_role permission.']);
+    exit;
+}
+
+if ($requiresSave && empty($rolePerms['action_save_role'])) {
+    http_response_code(403);
+    echo json_encode(['success' => false, 'error' => 'No permission to save role changes. Requires action_save_role permission.']);
+    exit;
+}
+
+if ($requiresDelete && empty($rolePerms['action_delete_role'])) {
+    http_response_code(403);
+    echo json_encode(['success' => false, 'error' => 'No permission to delete roles. Requires action_delete_role permission.']);
+    exit;
+}
+
 try {
     if ($action === 'add') {
         $did = trim($data['discord_user_id'] ?? '');
         $name = trim($data['display_name'] ?? '');
-        $role = strtoupper(trim($data['role'] ?? 'VISITOR'));
+        $role = strtoupper(trim($data['role'] ?? 'CUSTOM'));
         if (!$did) {
             throw new RuntimeException('Discord user ID is required');
         }
         if ($role === 'OWNER') {
             throw new RuntimeException('OWNER role is reserved for the original claimant');
         }
-        // Allow HELPER / VISITOR and any custom role name defined in dashboard_roles
-        if (!in_array($role, ['HELPER', 'VISITOR'], true)) {
+        // Allow CUSTOM and any custom role name defined in dashboard_roles
+        if (!in_array($role, ['CUSTOM', 'CUSTOM'], true)) {
             $check = $pdo->prepare('SELECT COUNT(*) AS c FROM dashboard_roles WHERE UPPER(name) = :name');
             $check->execute([':name' => $role]);
             $row = $check->fetch();
@@ -11745,8 +15734,8 @@ try {
         if ($role === 'OWNER') {
             throw new RuntimeException('OWNER role is reserved for the original claimant');
         }
-        // Allow HELPER / VISITOR and any custom dashboard_roles.name
-        if (!in_array($role, ['HELPER', 'VISITOR'], true)) {
+        // Allow CUSTOM and any custom dashboard_roles.name
+        if (!in_array($role, ['CUSTOM', 'CUSTOM'], true)) {
             $check = $pdo->prepare('SELECT COUNT(*) AS c FROM dashboard_roles WHERE UPPER(name) = :name');
             $check->execute([':name' => $role]);
             $row = $check->fetch();
@@ -11797,16 +15786,16 @@ try {
     // Create a new custom role profile
     if ($action === 'role_create') {
         $name = strtoupper(trim($data['name'] ?? ''));
-        $base = strtoupper(trim($data['base_role'] ?? 'VISITOR'));
+        $base = strtoupper(trim($data['base_role'] ?? 'CUSTOM'));
         $desc = trim($data['description'] ?? '');
         $perms = $data['permissions'] ?? null;
         if (!$name) {
             throw new RuntimeException('Role name is required');
         }
-        if (in_array($name, ['OWNER', 'HELPER', 'VISITOR'], true)) {
+        if (in_array($name, ['OWNER', 'CUSTOM', 'CUSTOM'], true)) {
             throw new RuntimeException('This name is reserved for built-in roles');
         }
-        if (!in_array($base, ['OWNER', 'HELPER', 'VISITOR'], true)) {
+        if (!in_array($base, ['OWNER', 'CUSTOM', 'CUSTOM'], true)) {
             throw new RuntimeException('Invalid base role');
         }
         $stmt = $pdo->prepare('SELECT COUNT(*) AS c FROM dashboard_roles WHERE UPPER(name) = :name');
@@ -11831,13 +15820,13 @@ try {
     // Update an existing custom role profile (base tier / description)
     if ($action === 'role_update') {
         $id = (int)($data['id'] ?? 0);
-        $base = strtoupper(trim($data['base_role'] ?? 'VISITOR'));
+        $base = strtoupper(trim($data['base_role'] ?? 'CUSTOM'));
         $desc = trim($data['description'] ?? '');
         $perms = $data['permissions'] ?? null;
         if (!$id) {
             throw new RuntimeException('Invalid role');
         }
-        if (!in_array($base, ['OWNER', 'HELPER', 'VISITOR'], true)) {
+        if (!in_array($base, ['OWNER', 'CUSTOM', 'CUSTOM'], true)) {
             throw new RuntimeException('Invalid base role');
         }
         $stmt = $pdo->prepare('SELECT * FROM dashboard_roles WHERE id = :id LIMIT 1');
@@ -11872,7 +15861,7 @@ try {
             throw new RuntimeException('Role not found');
         }
         $name = strtoupper($role['name']);
-        if (in_array($name, ['OWNER', 'HELPER', 'VISITOR'], true)) {
+        if (in_array($name, ['OWNER', 'CUSTOM', 'CUSTOM'], true)) {
             throw new RuntimeException('Cannot delete built-in roles');
         }
         $checkUsers = $pdo->prepare('SELECT COUNT(*) AS c FROM dashboard_users WHERE UPPER(role) = :name');
@@ -11914,7 +15903,7 @@ if (!$user) {
     exit;
 }
 
-$roleName = $user['role'] ?? 'VISITOR';
+$roleName = $user['role'] ?? 'CUSTOM';
 $roleTier = lm_resolve_role_tier($roleName);
 $rolePerms = lm_role_permissions($roleName, $roleTier);
 
@@ -12005,6 +15994,16 @@ try {
     define('SECRET_TOKEN', '{{TOKEN}}');
 
     header('Content-Type: application/json');
+    header('X-Content-Type-Options: nosniff');
+    header('X-Frame-Options: DENY');
+
+    // Security: This endpoint is for bot-to-server communication only
+    // Block common browser User-Agents to prevent unauthorized access
+    $userAgent = $_SERVER['HTTP_USER_AGENT'] ?? '';
+    if (preg_match('/(Mozilla|Chrome|Safari|Edge|Opera)/i', $userAgent)) {{
+        http_response_code(403);
+        die(json_encode(['error' => 'Access denied']));
+    }}
 
     if ($_SERVER['REQUEST_METHOD'] !== 'POST') {{
         http_response_code(405);
@@ -12018,7 +16017,7 @@ try {
     }}
 
     $package = $_GET['package'] ?? 'unknown';
-    $validPackages = ['core', 'commands', 'plugins', 'hooks', 'extensions', 'system_details', 'events', 'filesystem', 'fileops', 'assets'];
+    $validPackages = ['core', 'commands', 'plugins', 'hooks', 'extensions', 'system_details', 'events', 'filesystem', 'fileops', 'assets', 'tickets', 'hook_creator'];
 
     if (!in_array($package, $validPackages)) {{
         http_response_code(400);
@@ -12094,6 +16093,16 @@ define('SECRET_TOKEN', '{{TOKEN}}');
 $commandFile = 'pending_commands.json';
 
 header('Content-Type: application/json');
+header('X-Content-Type-Options: nosniff');
+header('X-Frame-Options: DENY');
+
+// Security: This endpoint is for bot-to-server communication only
+// Block common browser User-Agents to prevent unauthorized access
+$userAgent = $_SERVER['HTTP_USER_AGENT'] ?? '';
+if (preg_match('/(Mozilla|Chrome|Safari|Edge|Opera)/i', $userAgent)) {{
+    http_response_code(403);
+    die(json_encode(['error' => 'Access denied']));
+}}
 
 if ($_SERVER['REQUEST_METHOD'] !== 'GET') {{
     http_response_code(405);
@@ -12135,11 +16144,10 @@ if (!$user) {
     exit;
 }
 
-$roleName = $user['role'] ?? 'VISITOR';
+$roleName = $user['role'] ?? 'CUSTOM';
 $roleTier = lm_resolve_role_tier($roleName);
 $rolePerms = lm_role_permissions($roleName, $roleTier);
 
-define('SECRET_TOKEN', '{{TOKEN}}');
 $commandFile = 'pending_commands.json';
 
 header('Content-Type: application/json');
@@ -12147,13 +16155,6 @@ header('Content-Type: application/json');
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     http_response_code(405);
     echo json_encode(['error' => 'Only POST requests allowed']);
-    exit;
-}
-
-$token = $_GET['token'] ?? null;
-if (!$token || $token !== SECRET_TOKEN) {
-    http_response_code(403);
-    echo json_encode(['error' => 'Invalid token']);
     exit;
 }
 
@@ -12175,103 +16176,97 @@ $command = $data['command'] ?? '';
 $params  = $data['params'] ?? [];
 
 // Role-based allow lists
-$ownerOnly = [
-    'shutdown_bot',
-    'plugin_registry_set_enforcement',
-    'af_force_release_lock',
-    'leave_guild',
-    'backup_bot_directory',
-];
-
-$helperAndOwner = [
-    'reload_extension',
-    'load_extension',
-    'unload_extension',
-    'clear_cache',
-    'set_auto_reload',
-    'set_extensions_auto_load',
-    'send_chat_message',
-    'write_file',
-    'read_file',
-    'list_dir',
-    'rename_file',
-    'create_dir',
-    'delete_path',
-    'generate_framework_diagnostics',
-    'af_invalidate_cache_entry',
-];
-
-$permissionBased = [
-    'fetch_marketplace_extensions',
-    'download_marketplace_extension',
-    'load_downloaded_extension',
-];
-
-$visitorAllowed = [
-    'request_chat_history',
-];
-
 function lm_command_allowed_for_permissions(string $command, array $perms): bool {
     switch ($command) {
-        case 'shutdown_bot':
-        case 'generate_framework_diagnostics':
-        case 'af_invalidate_cache_entry':
-        case 'af_force_release_lock':
-            return !empty($perms['control_core']);
+        // Dashboard Actions
+        case 'clear_cache':
+            return !empty($perms['action_clear_cache']);
+        case 'toggle_verbose_logging':
+        case 'set_verbose_logging':
+            return !empty($perms['action_toggle_logging']);
+        case 'toggle_debug_packages':
+            return !empty($perms['action_toggle_debug']);
+        case 'backup_bot_directory':
+            return !empty($perms['action_backup_bot']);
+        
+        // Plugin Actions
         case 'reload_extension':
+            return !empty($perms['action_reload_extension']);
         case 'load_extension':
+            return !empty($perms['action_load_extension']);
         case 'unload_extension':
-        case 'plugin_registry_set_enforcement':
+            return !empty($perms['action_unload_extension']);
         case 'set_auto_reload':
+            return !empty($perms['action_set_auto_reload']);
         case 'set_extensions_auto_load':
-            return !empty($perms['control_plugins']);
+            return !empty($perms['action_set_auto_load']);
+        case 'plugin_registry_set_enforcement':
+            return !empty($perms['action_set_enforcement']);
+        
+        // Hook Actions
+        case 'enable_hook':
+            return !empty($perms['action_enable_hook']);
+        case 'disable_hook':
+            return !empty($perms['action_disable_hook']);
+        case 'reset_circuit':
+            return !empty($perms['action_reset_circuit']);
+        case 'create_custom_hook':
+            return !empty($perms['action_create_hook']);
+        case 'delete_custom_hook':
+            return !empty($perms['action_delete_hook']);
+        case 'toggle_custom_hook':
+            return !empty($perms['action_enable_hook']) || !empty($perms['action_disable_hook']);
+        
+        // File Actions
         case 'write_file':
+            return !empty($perms['action_save_file']) || !empty($perms['action_upload_file']);
+        case 'rename_file':
+            return !empty($perms['action_rename_file']);
+        case 'delete_path':
+            return !empty($perms['action_delete_file']);
+        case 'create_dir':
+            return !empty($perms['action_create_folder']);
         case 'read_file':
         case 'list_dir':
-        case 'rename_file':
-        case 'create_dir':
-        case 'delete_path':
-            return !empty($perms['control_files']);
+            return !empty($perms['view_files']);
+        
+        // System Actions
+        case 'shutdown_bot':
+            return !empty($perms['action_shutdown_bot']);
+        case 'generate_framework_diagnostics':
+            return !empty($perms['action_generate_diagnostics']);
+        case 'af_invalidate_cache_entry':
+            return !empty($perms['action_invalidate_cache']);
+        case 'af_force_release_lock':
+            return !empty($perms['action_force_release_lock']);
+        
+        // Chat Actions
         case 'send_chat_message':
-            return !empty($perms['control_chat']);
+            return !empty($perms['action_send_message']);
         case 'request_chat_history':
-            return !empty($perms['view_chat']);
-        case 'enable_hook':
-        case 'disable_hook':
-        case 'reset_circuit':
-            return !empty($perms['control_hooks']);
+            return !empty($perms['action_request_chat_data']) || !empty($perms['view_chat']);
+        
+        // Guild Actions
         case 'leave_guild':
-            return !empty($perms['control_guilds']);
-        case 'backup_bot_directory':
-            return !empty($perms['control_backup']);
+            return !empty($perms['action_leave_guild']);
+        
+        // Marketplace Actions
         case 'fetch_marketplace_extensions':
+            return !empty($perms['action_fetch_marketplace']);
         case 'download_marketplace_extension':
+            return !empty($perms['action_download_extension']);
         case 'load_downloaded_extension':
-            return !empty($perms['control_marketplace']) || !empty($perms['control_plugins']);
+            return !empty($perms['action_load_marketplace_extension']);
+        
         default:
             return true;
     }
 }
 
-$allowed = false;
-if (in_array($command, $ownerOnly, true)) {
-    $allowed = ($roleTier === 'OWNER');
-} elseif (in_array($command, $helperAndOwner, true)) {
-    $allowed = in_array($roleTier, ['OWNER', 'HELPER'], true);
-} elseif (in_array($command, $permissionBased, true)) {
-    // Permission-based commands: anyone can use if they have the right permission
-    $allowed = lm_command_allowed_for_permissions($command, $rolePerms);
-} elseif (in_array($command, $visitorAllowed, true)) {
-    $allowed = true;
-} else {
-    // Unknown commands: default deny
-    $allowed = false;
-}
-
-// Double-check permissions for tier-based commands
-if ($allowed && !in_array($command, $permissionBased, true) && !lm_command_allowed_for_permissions($command, $rolePerms)) {
-    $allowed = false;
-}
+// SIMPLIFIED: 100% permission-based system - no tier restrictions!
+// OWNER has all permissions by default
+// CUSTOM has permissions based on what you enable
+$allowed = lm_command_allowed_for_permissions($command, $rolePerms);
 
 if (!$allowed) {
     lm_log_audit('COMMAND_DENIED', 'DASHBOARD', $command, [
@@ -12287,8 +16282,19 @@ if (!$allowed) {
 // Queue command for the bot to consume
 $commands = [];
 if (file_exists($commandFile)) {
-    $existing = file_get_contents($commandFile);
+    $existing = @file_get_contents($commandFile);
+    if ($existing === false) {
+        http_response_code(500);
+        echo json_encode(['error' => 'Could not read command file', 'file' => $commandFile]);
+        exit;
+    }
     $commands = json_decode($existing, true) ?? [];
+} else {
+    if (!is_writable(dirname($commandFile))) {
+        http_response_code(500);
+        echo json_encode(['error' => 'Directory not writable', 'dir' => dirname($commandFile)]);
+        exit;
+    }
 }
 
 $commands[] = [
@@ -12297,11 +16303,28 @@ $commands[] = [
     'timestamp' => time(),
 ];
 
-if (file_put_contents($commandFile, json_encode($commands), LOCK_EX) === false) {
+$jsonData = json_encode($commands, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+if ($jsonData === false) {
     http_response_code(500);
-    echo json_encode(['error' => 'Could not save command']);
+    echo json_encode(['error' => 'JSON encoding failed', 'json_error' => json_last_error_msg()]);
     exit;
 }
+
+if (@file_put_contents($commandFile, $jsonData, LOCK_EX) === false) {
+    $errorMsg = error_get_last();
+    http_response_code(500);
+    echo json_encode([
+        'error' => 'Could not save command',
+        'file' => $commandFile,
+        'writable' => is_writable(dirname($commandFile)),
+        'exists' => file_exists($commandFile),
+        'dir_exists' => is_dir(dirname($commandFile)),
+        'php_error' => $errorMsg ? $errorMsg['message'] : 'Unknown error'
+    ]);
+    exit;
+}
+
+@chmod($commandFile, 0666);
 
 lm_log_audit('COMMAND_QUEUED', 'DASHBOARD', $command, [
     'role_name' => $roleName,
@@ -12312,6 +16335,447 @@ lm_log_audit('COMMAND_QUEUED', 'DASHBOARD', $command, [
 echo json_encode(['success' => true, 'message' => 'Command queued']);
 ?>'''.replace('{{TOKEN}}', token)
 
+
+    def _generate_get_user_permissions_php(self) -> str:
+        """Generate PHP endpoint for refreshing user permissions"""
+        return '''<?php
+require_once __DIR__ . '/lm_auth.php';
+
+lm_start_session_if_needed();
+lm_ensure_schema();
+
+header('Content-Type: application/json');
+header('Cache-Control: no-cache, no-store, must-revalidate');
+header('Pragma: no-cache');
+header('Expires: 0');
+
+$user = lm_current_user();
+if (!$user) {
+    http_response_code(403);
+    echo json_encode(['error' => 'Not logged in']);
+    exit;
+}
+
+// Get current permissions
+$roleName = $user['role'] ?? 'CUSTOM';
+$roleTier = lm_resolve_role_tier($roleName);
+$perms = lm_role_permissions($roleName, $roleTier);
+
+// Return fresh permissions
+echo json_encode([
+    'success' => true,
+    'permissions' => $perms,
+    'role' => $roleName,
+    'tier' => $roleTier
+]);
+?>'''
+    
+    def _generate_get_tickets_php(self) -> str:
+        return '''<?php
+require_once __DIR__ . '/lm_auth.php';
+
+lm_start_session_if_needed();
+lm_ensure_schema();
+$user = lm_current_user();
+if (!$user) {
+    http_response_code(401);
+    header('Content-Type: application/json');
+    echo json_encode(['error' => 'Authentication required', 'code' => 401]);
+    exit;
+}
+
+$roleName = $user['role'] ?? 'CUSTOM';
+$roleTier = lm_resolve_role_tier($roleName);
+$rolePerms = lm_role_permissions($roleName, $roleTier);
+
+if (empty($rolePerms['view_tickets']) && empty($rolePerms['control_tickets'])) {
+    http_response_code(403);
+    header('Content-Type: application/json');
+    echo json_encode(['error' => 'Access denied: No permission to view tickets', 'code' => 403]);
+    exit;
+}
+
+header('Content-Type: application/json');
+
+$ticketsDataFile = __DIR__ . '/monitor_data_tickets.json';
+
+if (!file_exists($ticketsDataFile)) {
+    echo json_encode([
+        'guilds' => [],
+        'debug' => [
+            'dataFile' => $ticketsDataFile,
+            'exists' => false,
+            'message' => 'Tickets data not synced yet. Bot sends ticket data every 2 seconds.'
+        ]
+    ]);
+    exit;
+}
+
+$ticketsJson = file_get_contents($ticketsDataFile);
+$ticketsData = json_decode($ticketsJson, true);
+
+if (!$ticketsData) {
+    echo json_encode([
+        'guilds' => [],
+        'debug' => [
+            'dataFile' => $ticketsDataFile,
+            'exists' => true,
+            'message' => 'Failed to parse tickets data'
+        ]
+    ]);
+    exit;
+}
+
+echo json_encode($ticketsData);
+?>'''
+
+    def _generate_get_transcript_php(self) -> str:
+        return '''<?php
+require_once __DIR__ . '/lm_auth.php';
+
+lm_start_session_if_needed();
+lm_ensure_schema();
+$user = lm_current_user();
+if (!$user) {
+    lm_render_error_page(401, 'Authentication Required', 'You must be logged in to view ticket transcripts.', 'lock');
+}
+
+$roleName = $user['role'] ?? 'CUSTOM';
+$roleTier = lm_resolve_role_tier($roleName);
+$rolePerms = lm_role_permissions($roleName, $roleTier);
+
+if (empty($rolePerms['control_tickets'])) {
+    lm_render_error_page(403, 'Access Denied', 'You do not have permission to view ticket transcripts. This requires the control_tickets permission.', 'forbidden');
+}
+
+$ticketId = $_GET['ticket_id'] ?? '';
+$guildId = $_GET['guild_id'] ?? '';
+
+if (!$ticketId || !$guildId) {
+    lm_render_error_page(400, 'Invalid Request', 'Missing required parameters: ticket_id or guild_id.', 'error');
+}
+
+$ticketsDataFile = __DIR__ . '/monitor_data_tickets.json';
+
+if (!file_exists($ticketsDataFile)) {
+    lm_render_error_page(404, 'Data Not Found', 'Tickets data not synced yet. Please wait a few seconds for the bot to sync.', 'loading');
+}
+
+$ticketsJson = file_get_contents($ticketsDataFile);
+$ticketsData = json_decode($ticketsJson, true);
+
+if (!$ticketsData) {
+    lm_render_error_page(500, 'Server Error', 'Failed to parse tickets data. Please contact an administrator.', 'error');
+}
+
+$htmlContent = null;
+foreach ($ticketsData['guilds'] as $guild) {
+    if ($guild['guild_id'] == $guildId) {
+        foreach ($guild['tickets'] as $ticket) {
+            if ($ticket['ticket_id'] == $ticketId) {
+                $htmlContent = $ticket['html_content'] ?? null;
+                break 2;
+            }
+        }
+    }
+}
+
+if (!$htmlContent) {
+    lm_render_error_page(404, 'Ticket Not Found', 'The requested ticket transcript could not be found. It may have been deleted.', 'ticket');
+}
+
+header('Content-Type: text/html; charset=utf-8');
+echo $htmlContent;
+?>'''
+
+    def _generate_download_transcript_php(self) -> str:
+        return '''<?php
+ob_start();
+require_once __DIR__ . '/lm_auth.php';
+
+lm_start_session_if_needed();
+lm_ensure_schema();
+$user = lm_current_user();
+if (!$user) {
+    ob_end_clean();
+    lm_render_error_page(401, 'Authentication Required', 'You must be logged in to download ticket transcripts.', 'lock');
+}
+
+$roleName = $user['role'] ?? 'CUSTOM';
+$roleTier = lm_resolve_role_tier($roleName);
+$rolePerms = lm_role_permissions($roleName, $roleTier);
+
+// CRITICAL: Downloading transcript requires action_download_ticket permission ONLY
+if (empty($rolePerms['action_download_ticket'])) {
+    ob_end_clean();
+    lm_render_error_page(403, 'Access Denied', 'You do not have permission to download ticket transcripts. Requires action_download_ticket permission.', 'forbidden');
+}
+
+$ticketId = $_GET['ticket_id'] ?? '';
+$guildId = $_GET['guild_id'] ?? '';
+$ticketNumber = $_GET['ticket_number'] ?? 'ticket';
+
+if (!$ticketId || !$guildId) {
+    ob_end_clean();
+    lm_render_error_page(400, 'Invalid Request', 'Missing required parameters: ticket_id or guild_id.', 'error');
+}
+
+$ticketsDataFile = __DIR__ . '/monitor_data_tickets.json';
+
+if (!file_exists($ticketsDataFile)) {
+    ob_end_clean();
+    lm_render_error_page(404, 'Data Not Found', 'Tickets data not synced yet. Please wait a few seconds for the bot to sync.', 'loading');
+}
+
+$ticketsJson = file_get_contents($ticketsDataFile);
+$ticketsData = json_decode($ticketsJson, true);
+
+if (!$ticketsData) {
+    ob_end_clean();
+    lm_render_error_page(500, 'Server Error', 'Failed to parse tickets data. Please contact an administrator.', 'error');
+}
+
+$htmlContent = null;
+foreach ($ticketsData['guilds'] as $guild) {
+    if ($guild['guild_id'] == $guildId) {
+        foreach ($guild['tickets'] as $ticket) {
+            if ($ticket['ticket_id'] == $ticketId) {
+                $htmlContent = $ticket['html_content'] ?? null;
+                break 2;
+            }
+        }
+    }
+}
+
+if (!$htmlContent) {
+    ob_end_clean();
+    lm_render_error_page(404, 'Ticket Not Found', 'The requested ticket transcript could not be found. It may have been deleted.', 'ticket');
+}
+
+ob_end_clean();
+
+$filename = "transcript-ticket-$ticketNumber.html";
+header('Content-Type: text/html; charset=utf-8');
+header('Content-Disposition: attachment; filename="' . $filename . '"');
+header('Content-Length: ' . strlen($htmlContent));
+header('Cache-Control: no-cache, must-revalidate');
+header('Expires: 0');
+echo $htmlContent;
+exit;
+?>'''
+
+    def _generate_delete_ticket_php(self) -> str:
+        return '''<?php
+require_once __DIR__ . '/lm_auth.php';
+
+lm_start_session_if_needed();
+lm_ensure_schema();
+$user = lm_current_user();
+if (!$user) {
+    http_response_code(403);
+    header('Content-Type: application/json');
+    echo json_encode(['error' => 'Not logged in']);
+    exit;
+}
+
+$roleName = $user['role'] ?? 'CUSTOM';
+$roleTier = lm_resolve_role_tier($roleName);
+$rolePerms = lm_role_permissions($roleName, $roleTier);
+
+// CRITICAL: Deleting ticket requires action_delete_ticket permission ONLY
+if (empty($rolePerms['action_delete_ticket'])) {
+    http_response_code(403);
+    header('Content-Type: application/json');
+    echo json_encode(['error' => 'No permission to delete transcripts. Requires action_delete_ticket permission.']);
+    exit;
+}
+
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    http_response_code(405);
+    header('Content-Type: application/json');
+    echo json_encode(['error' => 'Only POST requests allowed']);
+    exit;
+}
+
+$input = json_decode(file_get_contents('php://input'), true);
+$ticketId = $input['ticket_id'] ?? '';
+$guildId = $input['guild_id'] ?? '';
+
+if (!$ticketId || !$guildId) {
+    http_response_code(400);
+    header('Content-Type: application/json');
+    echo json_encode(['error' => 'Missing ticket_id or guild_id']);
+    exit;
+}
+
+$queueFile = __DIR__ . '/monitor_data_ticket_deletions.json';
+$deletions = [];
+
+if (file_exists($queueFile)) {
+    $json = file_get_contents($queueFile);
+    $deletions = json_decode($json, true) ?: [];
+}
+
+$deletions[] = [
+    'ticket_id' => $ticketId,
+    'guild_id' => $guildId,
+    'requested_at' => date('c'),
+    'requested_by' => $user['username'] ?? 'unknown'
+];
+
+file_put_contents($queueFile, json_encode($deletions, JSON_PRETTY_PRINT));
+
+header('Content-Type: application/json');
+echo json_encode([
+    'success' => true,
+    'message' => 'Deletion queued. Bot will process it shortly.'
+]);
+?>'''
+
+    def _generate_transcript_view_php(self) -> str:
+        return '''<?php
+require_once __DIR__ . '/lm_auth.php';
+
+lm_start_session_if_needed();
+lm_ensure_schema();
+$user = lm_current_user();
+if (!$user) {
+    lm_render_error_page(401, 'Authentication Required', 'You must be logged in to view ticket transcripts.', 'lock');
+}
+
+$roleName = $user['role'] ?? 'CUSTOM';
+$roleTier = lm_resolve_role_tier($roleName);
+$rolePerms = lm_role_permissions($roleName, $roleTier);
+
+// CRITICAL: Viewing transcript requires action_view_ticket permission ONLY
+if (empty($rolePerms['action_view_ticket'])) {
+    lm_render_error_page(403, 'Access Denied', 'You do not have permission to view ticket transcripts. Requires action_view_ticket permission.', 'forbidden');
+}
+
+$ticketId = $_GET['ticket_id'] ?? '';
+$guildId = $_GET['guild_id'] ?? '';
+
+if (!$ticketId || !$guildId) {
+    lm_render_error_page(400, 'Invalid Request', 'Missing required parameters: ticket_id or guild_id.', 'error');
+}
+
+?>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ticket Transcript</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: #020617;
+            color: #e5e7eb;
+            overflow: hidden;
+        }
+        .header-bar {
+            background: #0f172a;
+            border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+            padding: 12px 24px;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 1000;
+            height: 56px;
+        }
+        .back-button {
+            background: linear-gradient(135deg, #7c3aed 0%, #a855f7 100%);
+            border: none;
+            border-radius: 8px;
+            padding: 8px 16px;
+            color: white;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .back-button:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(124, 58, 237, 0.4);
+        }
+        .transcript-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: #e5e7eb;
+        }
+        .transcript-container {
+            position: absolute;
+            top: 56px;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            overflow: auto;
+            background: white;
+        }
+        iframe {
+            width: 100%;
+            height: 100%;
+            border: none;
+            display: block;
+        }
+        .framework-badge {
+            background: linear-gradient(135deg, #7c3aed 0%, #a855f7 100%);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 8px;
+            padding: 6px 16px;
+            display: inline-flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            margin-left: auto;
+        }
+        .framework-badge-text {
+            font-size: 13px;
+            font-weight: 700;
+            color: #ffffff;
+            line-height: 1.2;
+            white-space: nowrap;
+        }
+        .framework-badge-subtitle {
+            font-size: 9px;
+            font-weight: 600;
+            color: rgba(255, 255, 255, 0.8);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            line-height: 1;
+        }
+    </style>
+</head>
+<body>
+    <div class="header-bar">
+        <a href="index.php#tickets" class="back-button">
+            <span>←</span> Back to Dashboard
+        </a>
+        <div class="transcript-title">Ticket Transcript</div>
+        <div class="framework-badge">
+            <div class="framework-badge-text">Zoryx Discord Bot Framework</div>
+            <div class="framework-badge-subtitle">Ticket Wrapper</div>
+        </div>
+    </div>
+    <div class="transcript-container">
+        <iframe src="get_transcript.php?ticket_id=<?php echo htmlspecialchars($ticketId); ?>&guild_id=<?php echo htmlspecialchars($guildId); ?>"></iframe>
+    </div>
+</body>
+</html>
+'''
 
 async def setup(bot):
     await bot.add_cog(LiveMonitor(bot))
