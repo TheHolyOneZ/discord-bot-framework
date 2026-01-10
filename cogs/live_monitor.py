@@ -1,14 +1,78 @@
-"""Zoryx Discord Bot Framework - Live Monitor Dashboard
+"""Zoryx Discord Bot Framework – Live Monitor Dashboard
 
-Credits tab and visual design (c) 2025 TheHolyOneZ (GitHub: @TheHolyOneZ).
-This dedicated Credits section (including layout, wording, and crown artwork)
-IS NOT covered by the MIT license of the rest of the framework and MUST remain
-clearly visible at all times in any use or modification of this dashboard.
+Copyright (c) 2025–2026 TheHolyOneZ
+GitHub: https://github.com/TheHolyOneZ
+Discord: theholyonez (ID: 1284210833869639680)
 
+────────────────────────────────────────────────────────────
 
+CREDITS & IDENTITY PROTECTION NOTICE
 
-Tutorial on how you can use this cog can be found on YouTube! I will post a video later in the next 1-3 days on how to set it up properly.
-Btw, this cog got created over two weeks of work, so there may be comments in the code like error fixes, notes, etc. If you decide to play with this cog, know the license above + read the license on the git or the LICENSE file in the main directory! You can ignore the comments; they won't harm but may make the code even longer.
+The Zoryx Discord Bot Framework, its name, branding, and identity
+—including but not limited to the following—
+
+• “Zoryx”
+• “Zoryx Framework”
+• “Zoryx Discord Bot Framework”
+• “TheHolyOneZ”
+• The Credits tab (layout, wording, structure, and crown artwork)
+
+are NOT covered by the MIT license of the remaining framework.
+
+The Credits tab MUST:
+• Remain clearly visible at all times
+• Remain unaltered in wording, layout, and design
+• NOT be hidden, removed, renamed, duplicated, or repositioned
+• NOT be visually minimized or obscured in any way
+
+Any modification, removal, concealment, or misrepresentation of the
+Credits tab or protected names is strictly prohibited unless explicit,
+direct permission is granted by TheHolyOneZ.
+
+────────────────────────────────────────────────────────────
+
+CUSTOMIZATION & MODIFICATION POLICY
+
+You ARE allowed to:
+• Customize styling, layout, or functionality of the dashboard
+  outside of the protected Credits section
+• Extend the framework by adding new features or integrations
+• Create additional tabs for your own work or contributions
+
+If you add a new tab, you MUST:
+• Clearly label it as your own work
+• Accurately describe what you modified or added (roughly)
+• Use wording such as:
+  “Tab created by <YourName>. Added custom functionality on top of the existing Zoryx system.”
+
+You MUST NOT:
+• Claim authorship of code, systems, or backend logic you did not create
+• Present yourself as the original creator of the framework
+• Imply ownership over backend systems you did not meaningfully modify
+• Alter backend logic in a way that introduces security risks
+• Attempt to remove, obscure, or disassociate the framework from
+  its original author to damage reputation or mislead others
+
+Any attempt to misrepresent authorship, remove attribution, or
+maliciously modify the framework to reflect poorly on the original
+author is considered a violation of this license and intent.
+
+────────────────────────────────────────────────────────────
+
+Tutorial & Showcase:
+https://www.youtube.com/watch?v=ir3AsxZOshw&t=497s
+
+Note:
+The interface design has evolved significantly since the video was recorded.
+The current dashboard is more refined, though core logic remains unchanged.
+
+Additional Information:
+During development, temporary comments or notes may exist in the code.
+These do not affect functionality and may be safely ignored.
+
+License Reminder:
+By using or modifying this framework, you agree to comply with this notice
+and the LICENSE file located in the main project directory.
 """
 
 from discord.ext import commands, tasks
