@@ -509,8 +509,10 @@ class LiveMonitor(commands.Cog):
         logger.info(f"Live Monitor: Config loaded - enabled={self.config.get('enabled')}, website_url={self.config.get('website_url')}, has_token={bool(self.config.get('secret_token'))}")
         if self.config.get("enabled") and self.config.get("website_url"):
             self.is_enabled = True
+            interval = self.config.get("update_interval", 5)
+            self.send_status_loop.change_interval(seconds=interval)
             self.send_status_loop.start()
-            logger.info(f"Live Monitor: Auto-started from saved config (sending data every 2 seconds to {self.config.get('website_url')})")
+            logger.info(f"Live Monitor: Auto-started from saved config (sending data every {interval} seconds to {self.config.get('website_url')})")
         else:
             logger.warning(f"Live Monitor: NOT auto-started - enabled={self.config.get('enabled')}, has_website_url={bool(self.config.get('website_url'))}")
     
@@ -536,6 +538,7 @@ class LiveMonitor(commands.Cog):
         return self._process
     
     async def _collect_monitor_data(self) -> Dict[str, Any]:
+        collection_start = time.time()
         loop = asyncio.get_event_loop()
         process = await self._get_process()
         
@@ -917,9 +920,14 @@ class LiveMonitor(commands.Cog):
         except Exception as e:
             logger.error(f"Live Monitor: Failed to collect hook creator data: {e}")
         
+        collection_duration_ms = round((time.time() - collection_start) * 1000, 2)
+        
         monitor_settings = {
             "verbose_logging": self.verbose_logging,
             "debug_packages": getattr(self.bot.config, 'debug_packages', False) if hasattr(self.bot, 'config') else False,
+            "update_interval": self.config.get("update_interval", 5),
+            "collection_duration_ms": collection_duration_ms,
+            "recommended_buffer_ms": max(200, min(collection_duration_ms + 200, 500)),
         }
         
         return {
@@ -2153,7 +2161,7 @@ class LiveMonitor(commands.Cog):
     @app_commands.describe(
         action="Action to perform",
         url="Website URL for the dashboard",
-        interval="Update interval in seconds (5-60)"
+        interval="Update interval in seconds (2-60)"
     )
     @app_commands.choices(action=[
         app_commands.Choice(name="Quick Start (Setup + Files)", value="quickstart"),
@@ -2349,10 +2357,12 @@ class LiveMonitor(commands.Cog):
             ]
             
             embed = discord.Embed(
-                title=" Live Monitor - Setup Complete!",
+                title="✅ Live Monitor - Setup Complete!",
                 color=0x00ff00,
                 description="Your dashboard files are ready. Follow the steps below:"
             )
+            
+            configured_interval = self.config.get("update_interval", 5)
             
             embed.add_field(
                 name="📁 Step 1: Upload Files",
@@ -2372,7 +2382,7 @@ class LiveMonitor(commands.Cog):
             
             embed.add_field(
                 name="🚀 Step 3: Enable Monitoring",
-                value="Run: `/livemonitor enable`",
+                value=f"Run: `/livemonitor enable`\n\n**Update Interval:** {configured_interval} seconds\nTo change: `/livemonitor enable [interval]` (e.g. `/livemonitor enable 10`)",
                 inline=False
             )
 
@@ -2423,12 +2433,31 @@ class LiveMonitor(commands.Cog):
                 await (ctx.send(embed=embed) if hasattr(ctx, 'send') else ctx.response.send_message(embed=embed))
                 return
             
+            # Update interval if provided
+            if interval is not None:
+                if interval < 2 or interval > 60:
+                    embed = discord.Embed(
+                        title="⚠️ Invalid Interval",
+                        color=0xff0000,
+                        description="Interval must be between 2 and 60 seconds"
+                    )
+                    await (ctx.send(embed=embed) if hasattr(ctx, 'send') else ctx.response.send_message(embed=embed))
+                    return
+                self.config["update_interval"] = interval
+                self._save_config()
+            
             self.is_enabled = True
             self.config["enabled"] = True
             self._save_config()
             
+            effective_interval = self.config.get("update_interval", 5)
+            
             if not self.send_status_loop.is_running():
+                self.send_status_loop.change_interval(seconds=effective_interval)
                 self.send_status_loop.start()
+            else:
+                # Update interval on already running loop
+                self.send_status_loop.change_interval(seconds=effective_interval)
 
 
 
@@ -2439,7 +2468,7 @@ class LiveMonitor(commands.Cog):
                 logger.error(f"Live Monitor: Asset sync on enable failed: {e}")
             
             embed = discord.Embed(
-                title=" Live Monitor Enabled",
+                title="✅ Live Monitor Enabled",
                 color=0x00ff00,
                 description="Bot is now sending data to your dashboard"
             )
@@ -2450,9 +2479,16 @@ class LiveMonitor(commands.Cog):
             )
             embed.add_field(
                 name="Update Interval",
-                value=f"Every {self.config.get('update_interval', 5)} seconds",
-                inline=False
+                value=f"Every {effective_interval} seconds",
+                inline=True
             )
+            if interval is not None:
+                embed.add_field(
+                    name="Interval Updated",
+                    value="✓ New interval applied",
+                    inline=True
+                )
+            embed.set_footer(text="Tip: Use '/livemonitor enable [interval]' to change the update frequency")
             
             await (ctx.send(embed=embed) if hasattr(ctx, 'send') else ctx.response.send_message(embed=embed))
         
@@ -2464,11 +2500,34 @@ class LiveMonitor(commands.Cog):
             if self.send_status_loop.is_running():
                 self.send_status_loop.cancel()
             
+            # Send final "disabled" status to website so it knows bot stopped
+            try:
+                if self.config.get("website_url") and self.config.get("secret_token"):
+                    base_url = self.config['website_url']
+                    token = self.config['secret_token']
+                    url = f"{base_url}/receive.php?token={token}&package=status"
+                    async with aiohttp.ClientSession() as session:
+                        await session.post(url, json={
+                            "enabled": False,
+                            "status": "disabled",
+                            "message": "Live Monitor has been disabled by bot owner",
+                            "timestamp": datetime.now().isoformat()
+                        }, timeout=aiohttp.ClientTimeout(total=5))
+                    logger.info("Live Monitor: Sent disabled status to dashboard")
+            except Exception as e:
+                logger.warning(f"Live Monitor: Failed to send disabled status: {e}")
+            
             embed = discord.Embed(
                 title="⏸️ Live Monitor Disabled",
                 color=0xff0000,
-                description="Bot has stopped sending data"
+                description="Bot has stopped sending data to the dashboard"
             )
+            embed.add_field(
+                name="Dashboard Status",
+                value="The dashboard will show a disconnected indicator",
+                inline=False
+            )
+            embed.set_footer(text="Use '/livemonitor enable' to resume monitoring")
             
             await (ctx.send(embed=embed) if hasattr(ctx, 'send') else ctx.response.send_message(embed=embed))
         
@@ -3364,119 +3423,429 @@ class LiveMonitor(commands.Cog):
             color: #60a5fa !important;
         }
 
+        /* ═══════════════════════════════════════════════════════════════════════
+           MARKETPLACE CARDS - Ultra Modern Professional Design
+           ═══════════════════════════════════════════════════════════════════════ */
+        
         .marketplace-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-            gap: 16px;
-            margin-top: 16px;
+            grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+            gap: 24px;
+            margin-top: 20px;
+            padding: 4px;
         }
 
         .marketplace-extension-card {
-            background: linear-gradient(135deg, rgba(13, 17, 23, 0.98) 0%, rgba(17, 24, 39, 0.98) 100%);
-            border: 1px solid rgba(59, 130, 246, 0.3);
-            border-radius: 12px;
-            padding: 18px;
-            transition: all 0.3s ease;
-            position: relative;
+            --card-accent: #6366f1;
+            --card-glow: rgba(99, 102, 241, 0.15);
+            background: linear-gradient(165deg, rgba(15, 23, 42, 0.95) 0%, rgba(30, 41, 59, 0.9) 100%);
+            border: 1px solid rgba(148, 163, 184, 0.1);
+            border-radius: 20px;
             overflow: hidden;
+            transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            display: flex;
+            flex-direction: column;
         }
-
+        
         .marketplace-extension-card::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: radial-gradient(ellipse at top right, var(--card-glow), transparent 70%);
+            opacity: 0;
+            transition: opacity 0.4s ease;
+            pointer-events: none;
+        }
+        
+        .marketplace-extension-card::after {
             content: '';
             position: absolute;
             top: 0;
             left: 0;
             right: 0;
-            height: 2px;
-            background: linear-gradient(90deg, transparent, rgba(59, 130, 246, 0.6), transparent);
+            height: 3px;
+            background: linear-gradient(90deg, transparent, var(--card-accent), transparent);
+            opacity: 0;
+            transition: opacity 0.3s ease;
         }
 
         .marketplace-extension-card:hover {
-            border-color: rgba(59, 130, 246, 0.6);
-            transform: translateY(-2px);
-            box-shadow: 0 8px 24px rgba(59, 130, 246, 0.2);
+            transform: translateY(-8px) scale(1.02);
+            border-color: rgba(99, 102, 241, 0.4);
+            box-shadow: 
+                0 25px 50px -12px rgba(0, 0, 0, 0.5),
+                0 0 0 1px rgba(99, 102, 241, 0.1),
+                0 0 60px -10px var(--card-glow);
+        }
+        
+        .marketplace-extension-card:hover::before {
+            opacity: 1;
+        }
+        
+        .marketplace-extension-card:hover::after {
+            opacity: 1;
+        }
+        
+        /* Status-based accent colors */
+        .marketplace-extension-card[data-status="working"] {
+            --card-accent: #10b981;
+            --card-glow: rgba(16, 185, 129, 0.2);
+        }
+        
+        .marketplace-extension-card[data-status="beta"] {
+            --card-accent: #f59e0b;
+            --card-glow: rgba(245, 158, 11, 0.2);
+        }
+        
+        .marketplace-extension-card[data-status="broken"] {
+            --card-accent: #ef4444;
+            --card-glow: rgba(239, 68, 68, 0.2);
+        }
+
+        .marketplace-ext-banner-wrap {
+            position: relative;
+            height: 140px;
+            overflow: hidden;
+            background: linear-gradient(135deg, rgba(99, 102, 241, 0.1) 0%, rgba(139, 92, 246, 0.05) 100%);
+        }
+        
+        .marketplace-ext-banner {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transition: transform 0.5s ease;
+        }
+        
+        .marketplace-extension-card:hover .marketplace-ext-banner {
+            transform: scale(1.08);
+        }
+        
+        .marketplace-ext-banner-overlay {
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(to top, rgba(15, 23, 42, 1) 0%, rgba(15, 23, 42, 0.4) 50%, transparent 100%);
+        }
+        
+        .marketplace-ext-banner-placeholder {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, rgba(99, 102, 241, 0.15) 0%, rgba(139, 92, 246, 0.1) 100%);
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .marketplace-ext-banner-placeholder::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: url('assets/zoryx-framework.png') center/cover no-repeat;
+            opacity: 0.25;
+            filter: blur(1px);
+        }
+        
+        .marketplace-ext-banner-placeholder svg {
+            width: 48px;
+            height: 48px;
+            color: rgba(148, 163, 184, 0.3);
+            position: relative;
+            z-index: 1;
+        }
+
+        .marketplace-ext-body {
+            padding: 20px;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+            z-index: 1;
         }
 
         .marketplace-ext-header {
             display: flex;
             align-items: flex-start;
-            gap: 12px;
-            margin-bottom: 12px;
+            gap: 14px;
+            margin-bottom: 16px;
         }
 
         .marketplace-ext-icon {
-            width: 48px;
-            height: 48px;
-            border-radius: 8px;
+            width: 56px;
+            height: 56px;
+            border-radius: 14px;
             object-fit: cover;
-            border: 1px solid rgba(59, 130, 246, 0.3);
+            border: 2px solid rgba(148, 163, 184, 0.15);
+            background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+            flex-shrink: 0;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        }
+        
+        .marketplace-extension-card:hover .marketplace-ext-icon {
+            border-color: var(--card-accent);
+            box-shadow: 0 0 20px -5px var(--card-glow);
+        }
+        
+        .marketplace-ext-icon-placeholder {
+            width: 56px;
+            height: 56px;
+            border-radius: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, var(--card-accent), rgba(139, 92, 246, 0.8));
+            font-size: 22px;
+            font-weight: 700;
+            color: white;
+            text-transform: uppercase;
+            flex-shrink: 0;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            transition: all 0.3s ease;
+        }
+        
+        .marketplace-extension-card:hover .marketplace-ext-icon-placeholder {
+            transform: rotate(-3deg) scale(1.05);
         }
 
         .marketplace-ext-info {
             flex: 1;
+            min-width: 0;
         }
 
         .marketplace-ext-title {
-            font-size: 15px;
-            font-weight: 600;
-            color: #60a5fa;
-            margin-bottom: 4px;
+            font-size: 17px;
+            font-weight: 700;
+            color: #f1f5f9;
+            margin-bottom: 6px;
+            line-height: 1.3;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+        
+        .marketplace-ext-meta {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
         }
 
         .marketplace-ext-version {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
             font-size: 11px;
-            color: var(--text-secondary);
+            font-weight: 600;
+            color: #94a3b8;
+            background: rgba(148, 163, 184, 0.1);
+            padding: 3px 8px;
+            border-radius: 6px;
+        }
+        
+        .marketplace-ext-version svg {
+            width: 12px;
+            height: 12px;
+        }
+        
+        .marketplace-ext-type {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #64748b;
+            background: rgba(100, 116, 139, 0.1);
+            padding: 3px 8px;
+            border-radius: 6px;
         }
 
         .marketplace-ext-status {
-            padding: 4px 10px;
-            border-radius: 6px;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 5px 12px;
+            border-radius: 20px;
             font-size: 11px;
-            font-weight: 600;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            position: absolute;
+            top: 16px;
+            right: 16px;
+            backdrop-filter: blur(8px);
+            z-index: 2;
+        }
+        
+        .marketplace-ext-status svg {
+            width: 12px;
+            height: 12px;
         }
 
         .marketplace-status-working {
-            background: rgba(34, 197, 94, 0.2);
-            color: #22c55e;
-            border: 1px solid rgba(34, 197, 94, 0.3);
+            background: rgba(16, 185, 129, 0.2);
+            color: #34d399;
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            box-shadow: 0 0 12px rgba(16, 185, 129, 0.2);
         }
 
         .marketplace-status-beta {
             background: rgba(245, 158, 11, 0.2);
-            color: #f59e0b;
+            color: #fbbf24;
             border: 1px solid rgba(245, 158, 11, 0.3);
+            box-shadow: 0 0 12px rgba(245, 158, 11, 0.2);
         }
 
         .marketplace-status-broken {
             background: rgba(239, 68, 68, 0.2);
-            color: #ef4444;
+            color: #f87171;
             border: 1px solid rgba(239, 68, 68, 0.3);
+            box-shadow: 0 0 12px rgba(239, 68, 68, 0.2);
         }
 
         .marketplace-ext-description {
-            font-size: 12px;
-            color: var(--text-secondary);
-            margin: 12px 0;
-            line-height: 1.5;
+            font-size: 13px;
+            color: #94a3b8;
+            line-height: 1.6;
+            flex: 1;
+            display: -webkit-box;
+            -webkit-line-clamp: 3;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+            margin-bottom: 16px;
         }
-
-        .marketplace-ext-banner {
-            width: 100%;
-            height: 120px;
-            border-radius: 8px;
-            object-fit: cover;
-            margin-bottom: 12px;
-            border: 1px solid rgba(59, 130, 246, 0.2);
+        
+        .marketplace-ext-stats {
+            display: flex;
+            gap: 16px;
+            padding: 12px 0;
+            border-top: 1px solid rgba(148, 163, 184, 0.1);
+            margin-bottom: 16px;
+        }
+        
+        .marketplace-ext-stat {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            color: #64748b;
+        }
+        
+        .marketplace-ext-stat svg {
+            width: 14px;
+            height: 14px;
+            color: #475569;
+        }
+        
+        .marketplace-ext-stat-value {
+            font-weight: 600;
+            color: #94a3b8;
         }
 
         .marketplace-ext-footer {
             display: flex;
-            gap: 8px;
-            margin-top: 12px;
+            gap: 10px;
+            margin-top: auto;
         }
 
-        .marketplace-ext-footer button {
+        .marketplace-ext-footer .button {
             flex: 1;
+            padding: 12px 16px;
+            font-size: 13px;
+            font-weight: 600;
+            border-radius: 12px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            transition: all 0.3s ease;
+        }
+        
+        .marketplace-ext-footer .button svg {
+            flex-shrink: 0;
+            vertical-align: middle;
+        }
+        
+        .marketplace-btn-download {
+            background: linear-gradient(135deg, var(--card-accent) 0%, rgba(139, 92, 246, 0.9) 100%);
+            color: white;
+            border: none;
+            box-shadow: 0 4px 12px -2px var(--card-glow);
+        }
+        
+        .marketplace-btn-download:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px -4px var(--card-glow);
+        }
+        
+        .marketplace-btn-download:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .marketplace-btn-details {
+            background: rgba(148, 163, 184, 0.1);
+            color: #94a3b8;
+            border: 1px solid rgba(148, 163, 184, 0.2);
+        }
+        
+        .marketplace-btn-details:hover {
+            background: rgba(148, 163, 184, 0.15);
+            color: #e2e8f0;
+            border-color: rgba(148, 163, 184, 0.3);
+        }
+        
+        /* Loading state for cards */
+        .marketplace-extension-card.is-loading {
+            pointer-events: none;
+        }
+        
+        .marketplace-extension-card.is-loading::before {
+            opacity: 1;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.03), transparent);
+            animation: card-shimmer 1.5s infinite;
+        }
+        
+        @keyframes card-shimmer {
+            0% { transform: translateX(-100%); }
+            100% { transform: translateX(100%); }
+        }
+        
+        /* Empty state */
+        .marketplace-empty-state {
+            grid-column: 1 / -1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 60px 20px;
+            text-align: center;
+            background: rgba(15, 23, 42, 0.5);
+            border: 2px dashed rgba(148, 163, 184, 0.2);
+            border-radius: 20px;
+        }
+        
+        .marketplace-empty-state svg {
+            width: 64px;
+            height: 64px;
+            color: #475569;
+            margin-bottom: 16px;
+        }
+        
+        .marketplace-empty-state h3 {
+            font-size: 18px;
+            font-weight: 600;
+            color: #94a3b8;
+            margin-bottom: 8px;
+        }
+        
+        .marketplace-empty-state p {
+            font-size: 14px;
+            color: #64748b;
         }
 
         .status-critical {
@@ -4795,6 +5164,36 @@ class LiveMonitor(commands.Cog):
         @keyframes btnSpin {
             to { transform: rotate(360deg); }
         }
+        
+        /* Enhanced marketplace download button states */
+        .marketplace-btn-download.btn-waiting {
+            background: linear-gradient(135deg, rgba(100, 116, 139, 0.6), rgba(71, 85, 105, 0.7)) !important;
+            box-shadow: none !important;
+            transform: none !important;
+        }
+        
+        .marketplace-btn-download.btn-waiting .btn-spinner {
+            width: 16px;
+            height: 16px;
+            border-width: 2.5px;
+            border-color: rgba(255, 255, 255, 0.2);
+            border-top-color: rgba(255, 255, 255, 0.9);
+        }
+        
+        .marketplace-extension-card.download-success {
+            animation: downloadSuccess 0.6s ease-out;
+        }
+        
+        .marketplace-extension-card.download-success::after {
+            opacity: 1;
+            background: linear-gradient(90deg, transparent, #10b981, transparent) !important;
+        }
+        
+        @keyframes downloadSuccess {
+            0%, 100% { transform: translateY(0); }
+            25% { transform: translateY(-4px); }
+            50% { transform: translateY(-2px); }
+        }
 
         .badge {
             display: inline-block;
@@ -5047,6 +5446,368 @@ class LiveMonitor(commands.Cog):
             padding: 32px;
             max-height: calc(90vh - 100px);
             overflow-y: auto;
+        }
+        
+        /* ═══════════════════════════════════════════════════════════════════════
+           MARKDOWN RENDERING STYLES
+           ═══════════════════════════════════════════════════════════════════════ */
+        
+        .md-h2 {
+            font-size: 20px;
+            font-weight: 700;
+            color: #f1f5f9;
+            margin: 20px 0 12px 0;
+            padding-bottom: 8px;
+            border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+        }
+        
+        .md-h3 {
+            font-size: 17px;
+            font-weight: 600;
+            color: #e2e8f0;
+            margin: 16px 0 10px 0;
+        }
+        
+        .md-h4 {
+            font-size: 14px;
+            font-weight: 600;
+            color: #cbd5e1;
+            margin: 14px 0 8px 0;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .md-bold {
+            font-weight: 600;
+            color: #f1f5f9;
+        }
+        
+        .md-italic {
+            font-style: italic;
+            color: #cbd5e1;
+        }
+        
+        .md-strike {
+            text-decoration: line-through;
+            opacity: 0.6;
+        }
+        
+        .md-code-block {
+            display: block;
+            background: rgba(0, 0, 0, 0.4);
+            border: 1px solid rgba(148, 163, 184, 0.15);
+            border-radius: 8px;
+            padding: 14px 16px;
+            margin: 12px 0;
+            font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace;
+            font-size: 12px;
+            line-height: 1.6;
+            color: #a5f3fc;
+            overflow-x: auto;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        
+        .md-inline-code {
+            background: rgba(139, 92, 246, 0.15);
+            border: 1px solid rgba(139, 92, 246, 0.25);
+            border-radius: 4px;
+            padding: 2px 6px;
+            font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace;
+            font-size: 0.9em;
+            color: #c4b5fd;
+        }
+        
+        .md-ul, .md-ol {
+            margin: 12px 0;
+            padding-left: 24px;
+        }
+        
+        .md-li, .md-li-num {
+            margin: 6px 0;
+            line-height: 1.6;
+            color: #cbd5e1;
+        }
+        
+        .md-li::marker {
+            color: #8b5cf6;
+        }
+        
+        .md-li-num::marker {
+            color: #6366f1;
+            font-weight: 600;
+        }
+        
+        .md-quote {
+            border-left: 3px solid #8b5cf6;
+            background: rgba(139, 92, 246, 0.08);
+            padding: 10px 16px;
+            margin: 12px 0;
+            border-radius: 0 8px 8px 0;
+            color: #cbd5e1;
+            font-style: italic;
+        }
+        
+        .md-hr {
+            border: none;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, rgba(148, 163, 184, 0.3), transparent);
+            margin: 20px 0;
+        }
+        
+        .md-link {
+            color: #60a5fa;
+            text-decoration: none;
+            border-bottom: 1px solid rgba(96, 165, 250, 0.3);
+            transition: all 0.2s ease;
+        }
+        
+        .md-link:hover {
+            color: #93c5fd;
+            border-bottom-color: rgba(147, 197, 253, 0.5);
+        }
+        
+        /* ═══════════════════════════════════════════════════════════════════════
+           EXTENSION DETAILS MODAL - Premium Design
+           ═══════════════════════════════════════════════════════════════════════ */
+        
+        .ext-modal-container {
+            display: flex;
+            flex-direction: column;
+            gap: 0;
+        }
+        
+        .ext-modal-banner {
+            width: calc(100% + 64px);
+            height: 180px;
+            margin: -32px -32px 0 -32px;
+            object-fit: cover;
+            border-radius: 0;
+        }
+        
+        .ext-modal-banner-placeholder {
+            width: calc(100% + 64px);
+            height: 180px;
+            margin: -32px -32px 0 -32px;
+            background: linear-gradient(135deg, rgba(99, 102, 241, 0.2) 0%, rgba(139, 92, 246, 0.15) 50%, rgba(59, 130, 246, 0.1) 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .ext-modal-banner-placeholder::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: url('assets/zoryx-framework.png') center/cover no-repeat;
+            opacity: 0.3;
+        }
+        
+        .ext-modal-banner-placeholder svg {
+            width: 64px;
+            height: 64px;
+            color: rgba(148, 163, 184, 0.4);
+            position: relative;
+            z-index: 1;
+        }
+        
+        .ext-modal-header {
+            display: flex;
+            align-items: flex-start;
+            gap: 16px;
+            padding: 20px 0;
+            margin-top: -40px;
+            position: relative;
+            z-index: 2;
+        }
+        
+        .ext-modal-icon {
+            width: 80px;
+            height: 80px;
+            border-radius: 16px;
+            object-fit: cover;
+            border: 3px solid #0f172a;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+            background: linear-gradient(135deg, #1e293b, #0f172a);
+            flex-shrink: 0;
+        }
+        
+        .ext-modal-icon-placeholder {
+            width: 80px;
+            height: 80px;
+            border-radius: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 32px;
+            font-weight: 700;
+            color: white;
+            border: 3px solid #0f172a;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+            flex-shrink: 0;
+        }
+        
+        .ext-modal-icon-placeholder.status-working {
+            background: linear-gradient(135deg, #10b981, #059669);
+        }
+        
+        .ext-modal-icon-placeholder.status-beta {
+            background: linear-gradient(135deg, #f59e0b, #d97706);
+        }
+        
+        .ext-modal-icon-placeholder.status-broken {
+            background: linear-gradient(135deg, #ef4444, #dc2626);
+        }
+        
+        .ext-modal-title-section {
+            flex: 1;
+            padding-top: 44px;
+        }
+        
+        .ext-modal-title {
+            font-size: 22px;
+            font-weight: 700;
+            color: #f1f5f9;
+            margin: 0 0 8px 0;
+            line-height: 1.2;
+        }
+        
+        .ext-modal-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            align-items: center;
+        }
+        
+        .ext-modal-meta-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        
+        .ext-modal-meta-pill svg {
+            width: 14px;
+            height: 14px;
+        }
+        
+        .ext-modal-meta-pill.version {
+            background: rgba(99, 102, 241, 0.15);
+            color: #a5b4fc;
+            border: 1px solid rgba(99, 102, 241, 0.3);
+        }
+        
+        .ext-modal-meta-pill.type {
+            background: rgba(148, 163, 184, 0.1);
+            color: #94a3b8;
+            border: 1px solid rgba(148, 163, 184, 0.2);
+            text-transform: uppercase;
+            font-size: 11px;
+            letter-spacing: 0.5px;
+        }
+        
+        .ext-modal-meta-pill.id {
+            background: rgba(30, 41, 59, 0.8);
+            color: #64748b;
+            border: 1px solid rgba(148, 163, 184, 0.15);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+        }
+        
+        .ext-modal-meta-pill.status {
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            font-size: 11px;
+        }
+        
+        .ext-modal-meta-pill.status.working {
+            background: rgba(16, 185, 129, 0.15);
+            color: #34d399;
+            border: 1px solid rgba(16, 185, 129, 0.3);
+        }
+        
+        .ext-modal-meta-pill.status.beta {
+            background: rgba(245, 158, 11, 0.15);
+            color: #fbbf24;
+            border: 1px solid rgba(245, 158, 11, 0.3);
+        }
+        
+        .ext-modal-meta-pill.status.broken {
+            background: rgba(239, 68, 68, 0.15);
+            color: #f87171;
+            border: 1px solid rgba(239, 68, 68, 0.3);
+        }
+        
+        .ext-modal-description {
+            font-size: 14px;
+            line-height: 1.7;
+            color: #94a3b8;
+            padding: 16px 0;
+            border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+        }
+        
+        .ext-modal-details-section {
+            padding: 20px 0 0 0;
+        }
+        
+        .ext-modal-details-title {
+            font-size: 13px;
+            font-weight: 700;
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .ext-modal-details-title svg {
+            width: 16px;
+            height: 16px;
+        }
+        
+        .ext-modal-details-content {
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid rgba(148, 163, 184, 0.1);
+            border-radius: 12px;
+            padding: 20px;
+            font-size: 13px;
+            line-height: 1.7;
+            color: #cbd5e1;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        
+        .ext-modal-actions {
+            display: flex;
+            gap: 12px;
+            padding-top: 20px;
+            margin-top: 20px;
+            border-top: 1px solid rgba(148, 163, 184, 0.1);
+        }
+        
+        .ext-modal-actions .button {
+            flex: 1;
+            padding: 14px 20px;
+            font-size: 14px;
+            font-weight: 600;
+            border-radius: 12px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+        
+        .ext-modal-actions .button svg {
+            flex-shrink: 0;
+            vertical-align: middle;
         }
 
                 /* Custom Scrollbar Styling for Database Viewer */
@@ -7099,6 +7860,90 @@ class LiveMonitor(commands.Cog):
             align-items: center;
             gap: 10px;
             flex-wrap: wrap;
+        }
+        
+        /* ═══════════════════════════════════════════════════════════════════════
+           CONNECTION STATUS INDICATOR - Red/Green dot with label
+           ═══════════════════════════════════════════════════════════════════════ */
+        
+        .connection-status-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 14px;
+            border-radius: 999px;
+            font-size: 12px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            cursor: default;
+        }
+        
+        .connection-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            transition: all 0.3s ease;
+            flex-shrink: 0;
+        }
+        
+        /* Connected state - Green */
+        .connection-status-indicator.connected {
+            background: rgba(16, 185, 129, 0.15);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            color: #34d399;
+        }
+        
+        .connection-status-indicator.connected .connection-dot {
+            background: #10b981;
+            box-shadow: 0 0 8px rgba(16, 185, 129, 0.6);
+            animation: pulse-green 2s infinite;
+        }
+        
+        @keyframes pulse-green {
+            0%, 100% { box-shadow: 0 0 8px rgba(16, 185, 129, 0.6); }
+            50% { box-shadow: 0 0 16px rgba(16, 185, 129, 0.9); }
+        }
+        
+        /* Connecting state - Yellow/Amber */
+        .connection-status-indicator.connecting {
+            background: rgba(251, 191, 36, 0.15);
+            border: 1px solid rgba(251, 191, 36, 0.3);
+            color: #fbbf24;
+        }
+        
+        .connection-status-indicator.connecting .connection-dot {
+            background: #f59e0b;
+            box-shadow: 0 0 8px rgba(245, 158, 11, 0.6);
+            animation: pulse-yellow 1s infinite;
+        }
+        
+        @keyframes pulse-yellow {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        /* Disconnected state - Red */
+        .connection-status-indicator.disconnected {
+            background: rgba(239, 68, 68, 0.15);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            color: #f87171;
+        }
+        
+        .connection-status-indicator.disconnected .connection-dot {
+            background: #ef4444;
+            box-shadow: 0 0 8px rgba(239, 68, 68, 0.6);
+        }
+        
+        /* Disabled state - Gray */
+        .connection-status-indicator.disabled {
+            background: rgba(100, 116, 139, 0.15);
+            border: 1px solid rgba(100, 116, 139, 0.3);
+            color: #94a3b8;
+        }
+        
+        .connection-status-indicator.disabled .connection-dot {
+            background: #64748b;
+            box-shadow: none;
         }
         
         .main-status-badge {
@@ -10247,6 +11092,10 @@ class LiveMonitor(commands.Cog):
                         </div>
                     </div>
                     <div class="main-header-status">
+                        <div id="connection-status" class="connection-status-indicator connecting" title="Connecting to bot...">
+                            <span class="connection-dot"></span>
+                            <span class="connection-text">Connecting</span>
+                        </div>
                         <div id="status-badge" class="main-status-badge">Loading...</div>
                         <button id="hero-info-button" class="main-header-details-btn" onclick="toggleHeroInfo()">
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
@@ -13881,50 +14730,99 @@ if (typeof window !== 'undefined') {
             const content = document.getElementById('marketplace-content');
             
             if (!extensions || extensions.length === 0) {
-                content.innerHTML = '<div class="empty-state">No extensions found</div>';
+                content.innerHTML = `
+                    <div class="marketplace-empty-state">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <path d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/>
+                        </svg>
+                        <h3>No Extensions Found</h3>
+                        <p>Click "Refresh Extensions" to load available extensions from the marketplace.</p>
+                    </div>
+                `;
                 return;
             }
             
             let html = '<div class="marketplace-grid">';
             
             extensions.forEach(ext => {
-                const statusClass = `marketplace-status-${ext.status.toLowerCase()}`;
-                const statusIcon = ext.status === 'working' 
-                    ? '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style="display:inline-block;vertical-align:middle;"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>'
-                    : ext.status === 'beta'
-                    ? '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style="display:inline-block;vertical-align:middle;"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>'
-                    : '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style="display:inline-block;vertical-align:middle;"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>';
+                const statusLower = ext.status.toLowerCase();
+                const statusClass = `marketplace-status-${statusLower}`;
+                const statusIcons = {
+                    working: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg>',
+                    beta: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>',
+                    broken: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 18L18 6M6 6l12 12"/></svg>'
+                };
+                const statusIcon = statusIcons[statusLower] || statusIcons.beta;
+                const fileTypeUpper = ext.fileType ? ext.fileType.toUpperCase() : 'COG';
+                const downloadDisabled = typeof LM_PERMS !== 'undefined' && !(LM_PERMS.action_download_extension || LM_PERMS.control_marketplace);
                 
                 html += `
-                    <div class="marketplace-extension-card" data-status="${ext.status.toLowerCase()}" data-title="${ext.title.toLowerCase()}" data-description="${ext.description.toLowerCase()}">
-                        ${ext.banner ? `<img src="${ext.banner}" class="marketplace-ext-banner" onerror="this.style.display='none'" />` : ''}
-                        <div class="marketplace-ext-header">
-                            ${ext.icon ? `<img src="${ext.icon}" class="marketplace-ext-icon" onerror="this.src='https://via.placeholder.com/48?text=${ext.title[0]}'" />` : `<div class="marketplace-ext-icon" style="display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#3b82f6,#8b5cf6);font-size:20px;font-weight:bold;">${ext.title[0]}</div>`}
-                            <div class="marketplace-ext-info">
-                                <div class="marketplace-ext-title">${ext.title}</div>
-                                <div class="marketplace-ext-version">v${ext.version}</div>
-                            </div>
-                            <div class="marketplace-ext-status ${statusClass}">
-                                ${statusIcon} ${ext.status}
-                            </div>
+                    <div class="marketplace-extension-card" data-status="${statusLower}" data-title="${ext.title.toLowerCase()}" data-description="${ext.description.toLowerCase()}">
+                        <div class="marketplace-ext-status ${statusClass}">
+                            ${statusIcon}
+                            ${ext.status}
                         </div>
-                        <div class="marketplace-ext-description">${ext.description}</div>
-                        <div style="font-size:11px;color:var(--text-secondary);margin-bottom:8px;">
-                            Type: ${ext.fileType.toUpperCase()} • ID: ${ext.id}
+                        
+                        <div class="marketplace-ext-banner-wrap">
+                            ${ext.banner 
+                                ? `<img src="${ext.banner}" class="marketplace-ext-banner" onerror="this.parentElement.innerHTML='<div class=\\'marketplace-ext-banner-placeholder\\'><svg viewBox=\\'0 0 24 24\\' fill=\\'none\\' stroke=\\'currentColor\\' stroke-width=\\'1.5\\'><rect x=\\'3\\' y=\\'3\\' width=\\'18\\' height=\\'18\\' rx=\\'2\\'/><circle cx=\\'8.5\\' cy=\\'8.5\\' r=\\'1.5\\'/><path d=\\'M21 15l-5-5L5 21\\'/></svg></div>'" />`
+                                : `<div class="marketplace-ext-banner-placeholder">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                        <rect x="3" y="3" width="18" height="18" rx="2"/>
+                                        <circle cx="8.5" cy="8.5" r="1.5"/>
+                                        <path d="M21 15l-5-5L5 21"/>
+                                    </svg>
+                                </div>`
+                            }
+                            <div class="marketplace-ext-banner-overlay"></div>
                         </div>
-                        <div class="marketplace-ext-footer">
-                            <button class="button button-primary button-compact extension-download-btn" onclick="downloadExtension(this, ${ext.id})" ${typeof LM_PERMS !== 'undefined' && !(LM_PERMS.action_download_extension || LM_PERMS.control_marketplace) ? 'disabled title="You do not have permission to download extensions"' : ''}>
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:4px;display:inline-block;vertical-align:middle;">
-                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>
-                                </svg>
-                                Download
-                            </button>
-                            <button class="button button-secondary button-compact" onclick="showExtensionDetails(${ext.id})">
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:4px;display:inline-block;vertical-align:middle;">
-                                    <circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>
-                                </svg>
-                                Details
-                            </button>
+                        
+                        <div class="marketplace-ext-body">
+                            <div class="marketplace-ext-header">
+                                ${ext.icon 
+                                    ? `<img src="${ext.icon}" class="marketplace-ext-icon" onerror="this.outerHTML='<div class=\\'marketplace-ext-icon-placeholder\\'>${ext.title[0]}</div>'" />`
+                                    : `<div class="marketplace-ext-icon-placeholder">${ext.title[0]}</div>`
+                                }
+                                <div class="marketplace-ext-info">
+                                    <div class="marketplace-ext-title">${ext.title}</div>
+                                    <div class="marketplace-ext-meta">
+                                        <span class="marketplace-ext-version">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83"/></svg>
+                                            v${ext.version}
+                                        </span>
+                                        <span class="marketplace-ext-type">${fileTypeUpper}</span>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="marketplace-ext-description">${ext.description}</div>
+                            
+                            <div class="marketplace-ext-stats">
+                                <div class="marketplace-ext-stat">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7V4h16v3M9 20h6M12 4v16"/></svg>
+                                    <span>ID: <span class="marketplace-ext-stat-value">${ext.id}</span></span>
+                                </div>
+                                ${ext.downloads ? `
+                                <div class="marketplace-ext-stat">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+                                    <span class="marketplace-ext-stat-value">${ext.downloads}</span> downloads
+                                </div>` : ''}
+                            </div>
+                            
+                            <div class="marketplace-ext-footer">
+                                <button class="button marketplace-btn-download extension-download-btn" onclick="downloadExtension(this, ${ext.id})" ${downloadDisabled ? 'disabled title="You do not have permission to download extensions"' : ''}>
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+                                        <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/>
+                                    </svg>
+                                    Download
+                                </button>
+                                <button class="button marketplace-btn-details" onclick="showExtensionDetails(${ext.id})">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+                                        <circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>
+                                    </svg>
+                                    Details
+                                </button>
+                            </div>
                         </div>
                     </div>
                 `;
@@ -14076,6 +14974,14 @@ if (typeof window !== 'undefined') {
                 restoreButton();
                 
                 if (response && response.success) {
+                    // Add success animation to the card
+                    if (btn) {
+                        const card = btn.closest('.marketplace-extension-card');
+                        if (card) {
+                            card.classList.add('download-success');
+                            setTimeout(() => card.classList.remove('download-success'), 600);
+                        }
+                    }
                     showNotification(`Downloaded ${extension.title} to ./extensions/`, 'success');
                     
                     if (shouldLoad && response.filepath) {
@@ -14122,42 +15028,146 @@ if (typeof window !== 'undefined') {
 
         function renderMarkdown(text) {
             if (!text) return '';
-            return text
+            
+            // Escape HTML first
+            let html = text
                 .replace(/&/g, '&amp;')
                 .replace(/</g, '&lt;')
-                .replace(/>/g, '&gt;')
-                .replace(/\\n/g, '<br/>');
+                .replace(/>/g, '&gt;');
+            
+            // Code blocks (```) - must be before inline code
+            html = html.replace(/```([\\\\s\\\\S]*?)```/g, '<pre class="md-code-block">$1</pre>');
+            
+            // Inline code (`)
+            html = html.replace(/`([^`]+)`/g, '<code class="md-inline-code">$1</code>');
+            
+            // Headers (### ## #)
+            html = html.replace(/^### (.+)$/gm, '<h4 class="md-h4">$1</h4>');
+            html = html.replace(/^## (.+)$/gm, '<h3 class="md-h3">$1</h3>');
+            html = html.replace(/^# (.+)$/gm, '<h2 class="md-h2">$1</h2>');
+            
+            // Bold (**text** or __text__)
+            html = html.replace(/\\*\\*([^*]+)\\*\\*/g, '<strong class="md-bold">$1</strong>');
+            html = html.replace(/__([^_]+)__/g, '<strong class="md-bold">$1</strong>');
+            
+            // Italic (*text* or _text_)
+            html = html.replace(/\\*([^*]+)\\*/g, '<em class="md-italic">$1</em>');
+            html = html.replace(/_([^_]+)_/g, '<em class="md-italic">$1</em>');
+            
+            // Strikethrough (~~text~~)
+            html = html.replace(/~~([^~]+)~~/g, '<del class="md-strike">$1</del>');
+            
+            // Unordered lists (- item or * item)
+            html = html.replace(/^[\\-\\*] (.+)$/gm, '<li class="md-li">$1</li>');
+            html = html.replace(/(<li class="md-li">.*<\\/li>\\\\n?)+/g, '<ul class="md-ul">$&</ul>');
+            
+            // Ordered lists (1. item)
+            html = html.replace(/^\\d+\\. (.+)$/gm, '<li class="md-li-num">$1</li>');
+            html = html.replace(/(<li class="md-li-num">.*<\\/li>\\\\n?)+/g, '<ol class="md-ol">$&</ol>');
+            
+            // Blockquotes (> text)
+            html = html.replace(/^&gt; (.+)$/gm, '<blockquote class="md-quote">$1</blockquote>');
+            
+            // Horizontal rule (---)
+            html = html.replace(/^---$/gm, '<hr class="md-hr"/>');
+            
+            // Links [text](url)
+            html = html.replace(/\\[([^\\]]+)\\]\\(([^)]+)\\)/g, '<a href="$2" target="_blank" class="md-link">$1</a>');
+            
+            // Line breaks
+            html = html.replace(/\\\\n/g, '<br/>');
+            
+            // Clean up double <br/> after block elements
+            html = html.replace(/(<\\/h[234]>)<br\\/>/g, '$1');
+            html = html.replace(/(<\\/pre>)<br\\/>/g, '$1');
+            html = html.replace(/(<\\/ul>)<br\\/>/g, '$1');
+            html = html.replace(/(<\\/ol>)<br\\/>/g, '$1');
+            html = html.replace(/(<\\/blockquote>)<br\\/>/g, '$1');
+            html = html.replace(/(<hr class="md-hr"\\/>)<br\\/>/g, '$1');
+            
+            return html;
         }
 
         function showExtensionDetails(extensionId) {
             const ext = marketplaceExtensions.find(e => e.id === extensionId);
             if (!ext) return;
             
-            const statusIcon = ext.status === 'working' 
-                    ? '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style="display:inline-block;vertical-align:middle;"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>'
-                    : ext.status === 'beta'
-                    ? '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style="display:inline-block;vertical-align:middle;"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>'
-                    : '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style="display:inline-block;vertical-align:middle;"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>';
+            const statusLower = ext.status.toLowerCase();
+            const statusIcons = {
+                working: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>',
+                beta: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>',
+                broken: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 18L18 6M6 6l12 12"/></svg>'
+            };
+            const statusIcon = statusIcons[statusLower] || statusIcons.beta;
+            const fileTypeUpper = ext.fileType ? ext.fileType.toUpperCase() : 'COG';
             
-            const renderedDetails = renderMarkdown(ext.details || ext.description);
+            const renderedDetails = renderMarkdown(ext.details || 'No additional details provided.');
+            const downloadDisabled = typeof LM_PERMS !== 'undefined' && !(LM_PERMS.action_download_extension || LM_PERMS.control_marketplace);
             
             const html = `
-                <div style="max-height:500px;overflow-y:auto;">
-                    ${ext.banner ? `<img src="${ext.banner}" style="width:100%;border-radius:8px;margin-bottom:12px;" />` : ''}
-                    <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;">
-                        ${ext.icon ? `<img src="${ext.icon}" style="width:64px;height:64px;border-radius:8px;" />` : ''}
-                        <div>
-                            <h3 style="margin:0;color:#60a5fa;">${ext.title}</h3>
-                            <p style="margin:4px 0;color:var(--text-secondary);font-size:13px;">Version ${ext.version} • ${statusIcon} ${ext.status}</p>
+                <div class="ext-modal-container">
+                    ${ext.banner 
+                        ? `<img src="${ext.banner}" class="ext-modal-banner" onerror="this.outerHTML='<div class=\\'ext-modal-banner-placeholder\\'><svg viewBox=\\'0 0 24 24\\' fill=\\'none\\' stroke=\\'currentColor\\' stroke-width=\\'1.5\\'><rect x=\\'3\\' y=\\'3\\' width=\\'18\\' height=\\'18\\' rx=\\'2\\'/><circle cx=\\'8.5\\' cy=\\'8.5\\' r=\\'1.5\\'/><path d=\\'M21 15l-5-5L5 21\\'/></svg></div>'" />`
+                        : `<div class="ext-modal-banner-placeholder">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                <rect x="3" y="3" width="18" height="18" rx="2"/>
+                                <circle cx="8.5" cy="8.5" r="1.5"/>
+                                <path d="M21 15l-5-5L5 21"/>
+                            </svg>
+                        </div>`
+                    }
+                    
+                    <div class="ext-modal-header">
+                        ${ext.icon 
+                            ? `<img src="${ext.icon}" class="ext-modal-icon" onerror="this.outerHTML='<div class=\\'ext-modal-icon-placeholder status-${statusLower}\\'>${ext.title[0]}</div>'" />`
+                            : `<div class="ext-modal-icon-placeholder status-${statusLower}">${ext.title[0]}</div>`
+                        }
+                        <div class="ext-modal-title-section">
+                            <h2 class="ext-modal-title">${ext.title}</h2>
+                            <div class="ext-modal-meta">
+                                <span class="ext-modal-meta-pill status ${statusLower}">
+                                    ${statusIcon}
+                                    ${ext.status}
+                                </span>
+                                <span class="ext-modal-meta-pill version">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v6m0 6v6m11-7h-6m-6 0H1m15.36-5.64l-4.24 4.24m0 2.83l4.24 4.24M6.64 6.64l4.24 4.24m0 2.83l-4.24 4.24"/></svg>
+                                    v${ext.version}
+                                </span>
+                                <span class="ext-modal-meta-pill type">${fileTypeUpper}</span>
+                                <span class="ext-modal-meta-pill id">#${ext.id}</span>
+                            </div>
                         </div>
                     </div>
-                    <p style="font-size:13px;line-height:1.6;margin-bottom:12px;">${ext.description}</p>
-                    <div style="background:rgba(59,130,246,0.08);padding:14px;border-radius:8px;margin-bottom:12px;">
-                        <div style="font-size:12px;line-height:1.7;color:var(--text-primary);">${renderedDetails}</div>
+                    
+                    <div class="ext-modal-description">${ext.description}</div>
+                    
+                    <div class="ext-modal-details-section">
+                        <div class="ext-modal-details-title">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                                <polyline points="14 2 14 8 20 8"/>
+                                <line x1="16" y1="13" x2="8" y2="13"/>
+                                <line x1="16" y1="17" x2="8" y2="17"/>
+                                <polyline points="10 9 9 9 8 9"/>
+                            </svg>
+                            Documentation & Details
+                        </div>
+                        <div class="ext-modal-details-content">${renderedDetails}</div>
                     </div>
-                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px;">
-                        <div><strong>Type:</strong> ${ext.fileType.toUpperCase()}</div>
-                        <div><strong>ID:</strong> ${ext.id}</div>
+                    
+                    <div class="ext-modal-actions">
+                        <button class="button marketplace-btn-download" onclick="closeModal(); downloadExtension(null, ${ext.id});" ${downloadDisabled ? 'disabled title="You do not have permission to download extensions"' : ''}>
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
+                                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/>
+                            </svg>
+                            Download Extension
+                        </button>
+                        <button class="button marketplace-btn-details" onclick="closeModal();">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
+                                <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                            </svg>
+                            Close
+                        </button>
                     </div>
                 </div>
             `;
@@ -15547,12 +16557,7 @@ if (typeof window !== 'undefined') {
         }
 
         function sendFileCommand(command, params = {}) {
-            // Check if we have a working connection first
-            if (typeof ws === 'undefined' || !ws || ws.readyState !== WebSocket.OPEN) {
-                console.warn('[FILE] WebSocket not ready, skipping file command:', command);
-                return null;
-            }
-            
+            // Use polling-based command system (no WebSocket needed)
             const requestId = generateRequestId();
             params.request_id = requestId;
 
@@ -16816,13 +17821,21 @@ if (typeof window !== 'undefined') {
             
             // Monitor Settings Card
             if (data.monitor_settings) {
+                const ms = data.monitor_settings;
+                const intervalInfo = ms.update_interval ? `${ms.update_interval}s` : 'N/A';
+                const collectionInfo = ms.collection_duration_ms ? `${ms.collection_duration_ms}ms` : 'N/A';
+                const bufferInfo = ms.recommended_buffer_ms ? `${ms.recommended_buffer_ms}ms` : 'N/A';
+                
                 cards += buildCard(
                     '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>',
                     'Monitor Settings',
                     '#06b6d4',
-                    buildProperty('Verbose Logging', buildBadge(data.monitor_settings.verbose_logging)) +
-                    buildProperty('Debug Packages', buildBadge(data.monitor_settings.debug_packages)) +
-                    '<div class="sys-hint">Verbose hides repetitive logs • Debug shows package details</div>',
+                    buildProperty('Update Interval', intervalInfo) +
+                    buildProperty('Collection Time', collectionInfo) +
+                    buildProperty('Recommended Buffer', bufferInfo) +
+                    buildProperty('Verbose Logging', buildBadge(ms.verbose_logging)) +
+                    buildProperty('Debug Packages', buildBadge(ms.debug_packages)) +
+                    '<div class="sys-hint">Buffer accounts for network latency • Collection time = data gathering duration</div>',
                     buildBtn('Toggle Verbose', 'toggleVerboseLogging()') + buildBtn('Toggle Debug', 'toggleDebugPackages()')
                 );
             }
@@ -19228,9 +20241,221 @@ if (typeof window !== 'undefined') {
             if (e.target.id === 'modal') closeModal();
         });
 
-        loadData();
+        // Note: loadData() is called AFTER the wrapper is set up below
         maybeShowTour();
-        setInterval(loadData, 20000);
+        
+        // ═══════════════════════════════════════════════════════════════════════
+        // CONNECTION STATUS INDICATOR - Tracks bot connectivity
+        // ═══════════════════════════════════════════════════════════════════════
+        let connectionStatus = 'connecting';
+        let lastSuccessfulFetch = null;
+        let consecutiveFailures = 0;
+        let botDisabled = false;
+        let lastSeenTimestamp = null;
+        let lastNewDataTime = Date.now();
+        
+        function updateConnectionStatus(status, message) {
+            connectionStatus = status;
+            const indicator = document.getElementById('connection-status');
+            if (!indicator) return;
+            
+            // Remove all state classes
+            indicator.classList.remove('connected', 'connecting', 'disconnected', 'disabled');
+            indicator.classList.add(status);
+            
+            const dot = indicator.querySelector('.connection-dot');
+            const text = indicator.querySelector('.connection-text');
+            
+            const statusLabels = {
+                connected: 'Connected',
+                connecting: 'Connecting',
+                disconnected: 'Disconnected',
+                disabled: 'Disabled'
+            };
+            
+            if (text) text.textContent = statusLabels[status] || status;
+            indicator.title = message || statusLabels[status];
+        }
+        
+        // Check for disabled status from bot
+        async function checkBotStatus() {
+            try {
+                const response = await fetch('monitor_data_status.json?t=' + Date.now());
+                if (response.ok) {
+                    const statusData = await response.json();
+                    if (statusData.enabled === false || statusData.status === 'disabled') {
+                        botDisabled = true;
+                        updateConnectionStatus('disabled', statusData.message || 'Live Monitor is disabled on the bot');
+                        return true;
+                    } else {
+                        botDisabled = false;
+                    }
+                }
+            } catch (e) {
+                // Status file doesn't exist or couldn't be read - that's fine
+            }
+            return false;
+        }
+        
+        // Check connection status based on time since last NEW data
+        function checkConnectionHealth() {
+            if (botDisabled) return;
+            
+            const expectedInterval = (currentData?.monitor_settings?.update_interval || 5) * 1000;
+            const timeSinceNewData = Date.now() - lastNewDataTime;
+            
+            // Thresholds: interval + 10s = connecting, interval + 40s = disconnected
+            const connectingThreshold = expectedInterval + 10000;
+            const disconnectedThreshold = expectedInterval + 40000;
+            
+            if (timeSinceNewData > disconnectedThreshold) {
+                updateConnectionStatus('disconnected', `No new data for ${Math.round(timeSinceNewData/1000)}s`);
+            } else if (timeSinceNewData > connectingThreshold) {
+                updateConnectionStatus('connecting', `Waiting for data (${Math.round(timeSinceNewData/1000)}s)...`);
+            } else {
+                updateConnectionStatus('connected', 'Live');
+            }
+        }
+        
+        // Initial status check
+        checkBotStatus();
+        
+        // Check bot status periodically (every 30 seconds)
+        setInterval(checkBotStatus, 30000);
+        
+        // Check connection health every 2 seconds
+        setInterval(checkConnectionHealth, 2000);
+        
+        // ═══════════════════════════════════════════════════════════════════════
+        // SMART POLLING SYSTEM with buffer, freshness detection, and adaptive timing
+        // ═══════════════════════════════════════════════════════════════════════
+        let dataRefreshInterval = null;
+        let pollingStats = {
+            lastFetchDuration: 0,
+            avgFetchDuration: 500,
+            fetchCount: 0,
+            staleCount: 0,
+            lastDataTimestamp: null,
+            bufferMs: 300,
+        };
+        
+        function getDataAge() {
+            if (!pollingStats.lastDataTimestamp) return null;
+            const dataTime = new Date(pollingStats.lastDataTimestamp).getTime();
+            return Date.now() - dataTime;
+        }
+        
+        function updateStaleIndicator(isStale, ageMs) {
+            // Don't show stale indicator if bot is disabled
+            if (botDisabled) return;
+            
+            let indicator = document.getElementById('lm-stale-indicator');
+            if (!indicator) {
+                indicator = document.createElement('div');
+                indicator.id = 'lm-stale-indicator';
+                indicator.style.cssText = 'position:fixed;top:10px;right:10px;padding:6px 12px;border-radius:6px;font-size:12px;font-weight:600;z-index:9999;transition:all 0.3s ease;display:none;';
+                document.body.appendChild(indicator);
+            }
+            
+            if (isStale && ageMs) {
+                const ageSec = Math.round(ageMs / 1000);
+                indicator.textContent = `⚠️ Data ${ageSec}s old`;
+                indicator.style.background = ageSec > 30 ? '#dc2626' : '#f59e0b';
+                indicator.style.color = '#fff';
+                indicator.style.display = 'block';
+                
+                // Update connection status to disconnected if very stale
+                if (ageSec > 30 && !botDisabled) {
+                    updateConnectionStatus('disconnected', `No data received for ${ageSec} seconds`);
+                }
+            } else {
+                indicator.style.display = 'none';
+            }
+        }
+        
+        function calculateOptimalInterval(botInterval, bufferMs, avgFetchDuration) {
+            // Bot interval in ms + small buffer to avoid race conditions
+            // Buffer should be minimal - just enough to not hit mid-write
+            const baseInterval = (botInterval || 5) * 1000;
+            // Use 200-500ms buffer max, or recommended buffer from bot (clamped)
+            const clampedBuffer = Math.max(200, Math.min(bufferMs || 300, 500));
+            return baseInterval + clampedBuffer;
+        }
+        
+        function startDataRefresh(intervalSeconds, bufferMs) {
+            if (dataRefreshInterval) clearInterval(dataRefreshInterval);
+            const optimalMs = calculateOptimalInterval(intervalSeconds, bufferMs, pollingStats.avgFetchDuration);
+            dataRefreshInterval = setInterval(loadData, optimalMs);
+            console.log('[LiveMonitor] Polling: interval=' + intervalSeconds + 's, buffer=' + Math.round(bufferMs || 300) + 'ms, effective=' + optimalMs + 'ms');
+        }
+        
+        // Wrap loadData to track timing, freshness, and connection status
+        // IMPORTANT: This must happen BEFORE startDataRefresh so the interval uses the wrapped version
+        const originalLoadData = loadData;
+        loadData = async function() {
+            const fetchStart = Date.now();
+            
+            try {
+                await originalLoadData();
+                const fetchDuration = Date.now() - fetchStart;
+                
+                // Update stats
+                pollingStats.fetchCount++;
+                pollingStats.lastFetchDuration = fetchDuration;
+                pollingStats.avgFetchDuration = pollingStats.avgFetchDuration * 0.7 + fetchDuration * 0.3; // Exponential moving average
+                
+                // Check if we got NEW data (timestamp changed)
+                if (currentData?.timestamp) {
+                    const currentTimestamp = currentData.timestamp;
+                    
+                    // Check if timestamp is different from last seen (new data!)
+                    if (currentTimestamp !== lastSeenTimestamp) {
+                        lastSeenTimestamp = currentTimestamp;
+                        lastNewDataTime = Date.now();
+                        consecutiveFailures = 0;
+                        
+                        // Immediately update to connected when we get fresh data
+                        if (!botDisabled) {
+                            updateConnectionStatus('connected', 'Live');
+                        }
+                        console.log('[LiveMonitor] New data received, timestamp:', currentTimestamp);
+                    }
+                    
+                    pollingStats.lastDataTimestamp = currentTimestamp;
+                    lastSuccessfulFetch = Date.now();
+                    
+                    // Stale indicator: only show if no new data for a long time
+                    const timeSinceNewData = Date.now() - lastNewDataTime;
+                    const expectedInterval = (currentData?.monitor_settings?.update_interval || 5) * 1000;
+                    const isStale = timeSinceNewData > expectedInterval * 5;
+                    updateStaleIndicator(isStale, timeSinceNewData);
+                    if (isStale) pollingStats.staleCount++;
+                }
+            } catch (err) {
+                consecutiveFailures++;
+                console.warn('[LiveMonitor] Fetch failed:', err.message, `(${consecutiveFailures} failures)`);
+            }
+            
+            // Adapt polling based on bot config
+            if (currentData?.monitor_settings) {
+                const ms = currentData.monitor_settings;
+                const botInterval = ms.update_interval || 5;
+                const recommendedBuffer = ms.recommended_buffer_ms || 300;
+                
+                // Only update if config changed
+                if (window._lastBotInterval !== botInterval || window._lastBuffer !== recommendedBuffer) {
+                    window._lastBotInterval = botInterval;
+                    window._lastBuffer = recommendedBuffer;
+                    pollingStats.bufferMs = recommendedBuffer;
+                    startDataRefresh(botInterval, recommendedBuffer);
+                }
+            }
+        };
+        
+        // Now start polling with the WRAPPED loadData
+        // Call loadData() once immediately, then start the interval
+        loadData();
+        startDataRefresh(5, 300);
         
         // CRITICAL: Apply permission visibility to ALL tabs on page load
         // This ensures buttons are properly disabled IMMEDIATELY, not just when tab is first visited
@@ -24410,7 +25635,7 @@ try {
     }}
 
     $package = $_GET['package'] ?? 'unknown';
-    $validPackages = ['core', 'commands', 'plugins', 'hooks', 'extensions', 'system_details', 'events', 'filesystem', 'fileops', 'assets', 'tickets', 'hook_creator'];
+    $validPackages = ['core', 'commands', 'plugins', 'hooks', 'extensions', 'system_details', 'events', 'filesystem', 'fileops', 'assets', 'tickets', 'hook_creator', 'status'];
 
     if (!in_array($package, $validPackages)) {{
         http_response_code(400);
