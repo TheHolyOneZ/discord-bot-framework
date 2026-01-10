@@ -189,6 +189,7 @@ class LiveMonitor(commands.Cog):
         if len(self._hook_execution_log) > self._max_hook_execution_log:
             self._hook_execution_log = self._hook_execution_log[-self._max_hook_execution_log:]
     
+    
     async def _get_db_command_stats(self) -> List[tuple]:
         if hasattr(self.bot, 'db') and self.bot.db:
             try:
@@ -670,7 +671,7 @@ class LiveMonitor(commands.Cog):
                 }
                 fw_section = self.bot.config.get("framework", {}) or {}
                 framework_info = {
-                    "version": "1.4.5",
+                    "version": "1.5.0",
                     "recommended_python": fw_section.get("recommended_python", "3.12.7"),
                     "python_runtime": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
                     "docs_url": "https://zygnalbot.com/bot-framework/",
@@ -854,6 +855,7 @@ class LiveMonitor(commands.Cog):
         
         monitor_settings = {
             "verbose_logging": self.verbose_logging,
+            "debug_packages": getattr(self.bot.config, 'debug_packages', False) if hasattr(self.bot, 'config') else False,
         }
         
         return {
@@ -1018,6 +1020,7 @@ class LiveMonitor(commands.Cog):
                     "system": data["system"],
                     "health": data.get("health", {}),
                     "chat_history": data.get("chat_history"),
+                    "monitor_settings": data.get("monitor_settings", {}),
                 },
                 "commands": data.get("commands", {}),
                 "plugins": data.get("plugins", {}),
@@ -2253,7 +2256,13 @@ class LiveMonitor(commands.Cog):
             (output_dir / "delete_ticket.php").write_text(self._generate_delete_ticket_php(), encoding='utf-8')
             (output_dir / "transcript_view.php").write_text(self._generate_transcript_view_php(), encoding='utf-8')
 
-
+            # Security: Generate .htaccess files to protect sensitive files
+            (output_dir / ".htaccess").write_text(self._generate_htaccess(), encoding='utf-8')
+            
+            # Create data directory with its own .htaccess for extra protection
+            data_dir = output_dir / "data"
+            data_dir.mkdir(exist_ok=True)
+            (data_dir / ".htaccess").write_text(self._generate_data_htaccess(), encoding='utf-8')
 
             self._copy_dashboard_assets(output_dir)
             
@@ -2321,6 +2330,7 @@ class LiveMonitor(commands.Cog):
                     "• Bridge endpoints: `receive.php`, `get_commands.php`, `send_command.php`\\n"\
                     "• Security helpers: `setup.php`, `login.php`, `logout.php`, `oauth_callback.php`, `lm_db.php`, `lm_auth.php`, `lm_bootstrap.php`, `owner_audit.php`, `owner_roles.php`, `owner_db.php`, `backup_dashboard.php`\\n"\
                     "• Branding assets in `/assets` (icons, banner) so images load without extra setup.\\n"\
+                    "• **Security:** `.htaccess` files protect JSON, SQLite & sensitive files from direct web access\\n"\
                 ),
                 inline=False
             )
@@ -2453,7 +2463,13 @@ class LiveMonitor(commands.Cog):
             (output_dir / "delete_ticket.php").write_text(self._generate_delete_ticket_php(), encoding='utf-8')
             (output_dir / "transcript_view.php").write_text(self._generate_transcript_view_php(), encoding='utf-8')
 
-
+            # Security: Generate .htaccess files to protect sensitive files
+            (output_dir / ".htaccess").write_text(self._generate_htaccess(), encoding='utf-8')
+            
+            # Create data directory with its own .htaccess for extra protection
+            data_dir = output_dir / "data"
+            data_dir.mkdir(exist_ok=True)
+            (data_dir / ".htaccess").write_text(self._generate_data_htaccess(), encoding='utf-8')
 
             self._copy_dashboard_assets(output_dir)
             
@@ -3734,6 +3750,137 @@ class LiveMonitor(commands.Cog):
             transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease, border-color 0.2s ease;
         }
 
+        .card:hover {
+            border-color: rgba(139, 92, 246, 0.4);
+            box-shadow: 0 8px 24px rgba(139, 92, 246, 0.15);
+        }
+
+        /* Improved checkbox styling */
+        input[type="checkbox"] {
+            appearance: none;
+            -webkit-appearance: none;
+            width: 18px;
+            height: 18px;
+            border: 2px solid rgba(139, 92, 246, 0.5);
+            border-radius: 5px;
+            background: rgba(15, 23, 42, 0.8);
+            cursor: pointer;
+            position: relative;
+            transition: all 0.2s ease;
+            flex-shrink: 0;
+        }
+
+        input[type="checkbox"]:hover {
+            border-color: rgba(139, 92, 246, 0.8);
+            background: rgba(139, 92, 246, 0.1);
+        }
+
+        input[type="checkbox"]:checked {
+            background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
+            border-color: #8b5cf6;
+        }
+
+        input[type="checkbox"]:checked::after {
+            content: '✓';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            font-size: 12px;
+            font-weight: bold;
+        }
+
+        input[type="checkbox"]:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* Improved role card styling */
+        .card[data-role-id] {
+            background: linear-gradient(145deg, rgba(30, 41, 59, 0.6) 0%, rgba(15, 23, 42, 0.8) 100%);
+            border: 1px solid rgba(139, 92, 246, 0.2);
+        }
+
+        .card[data-role-id]:hover {
+            transform: translateY(-2px);
+            border-color: rgba(139, 92, 246, 0.5);
+        }
+
+        .card[data-role-id] .card-body {
+            padding: 20px;
+            border-top: 1px solid rgba(139, 92, 246, 0.15);
+            margin-top: 12px;
+        }
+
+        /* Permission grid styling */
+        .card-body label {
+            padding: 10px 12px;
+            border-radius: 8px;
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid rgba(71, 85, 105, 0.3);
+            transition: all 0.2s ease;
+            cursor: pointer;
+        }
+
+        .card-body label:hover {
+            background: rgba(30, 41, 59, 0.8);
+            border-color: rgba(139, 92, 246, 0.4);
+        }
+
+        .card-body label input[type="checkbox"]:checked + span {
+            color: #a78bfa;
+            font-weight: 600;
+        }
+
+        /* Role badge styling */
+        .role-edited-badge {
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% {
+                opacity: 1;
+            }
+            50% {
+                opacity: 0.6;
+            }
+        }
+
+        /* Description textarea styling */
+        .card-body textarea {
+            background: rgba(15, 23, 42, 0.9);
+            border: 1px solid rgba(71, 85, 105, 0.4);
+            border-radius: 10px;
+            padding: 12px;
+            transition: all 0.2s ease;
+        }
+
+        .card-body textarea:focus {
+            border-color: rgba(139, 92, 246, 0.6);
+            background: rgba(30, 41, 59, 0.9);
+        }
+
+        /* Base tier select styling in cards - inherits global but with purple theme */
+        .card-body select {
+            border-color: rgba(139, 92, 246, 0.3);
+            background-image: url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%238b5cf6' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+        }
+
+        .card-body select:focus {
+            border-color: rgba(139, 92, 246, 0.6);
+            box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.1);
+        }
+
+        /* Section headers in role editor */
+        .card-body > div[style*="text-transform:uppercase"] {
+            background: linear-gradient(90deg, rgba(139, 92, 246, 0.15) 0%, transparent 100%);
+            padding: 8px 12px;
+            border-radius: 8px;
+            border-left: 3px solid rgba(139, 92, 246, 0.6);
+            margin-bottom: 12px;
+        }
+
         /* Layout helpers for two-column sections (Plugins & Extensions, etc.) */
         .two-column-grid {
             display: grid;
@@ -4070,14 +4217,140 @@ class LiveMonitor(commands.Cog):
             color: var(--text-secondary);
         }
 
-        .select {
-            flex: 0 0 auto;
-            padding: 8px 10px;
-            border-radius: 8px;
-            border: 1px solid var(--border);
-            background: rgba(15, 23, 42, 0.8);
-            color: var(--text-primary);
+        /* ============================================
+           GLOBAL DROPDOWN / SELECT STYLES
+           ============================================ */
+        
+        /* Base select styling - applies to all selects */
+        select,
+        .select,
+        .lm-select {
+            appearance: none;
+            -webkit-appearance: none;
+            -moz-appearance: none;
+            padding: 10px 36px 10px 14px;
+            border-radius: 10px;
+            border: 1px solid rgba(148, 163, 184, 0.2);
+            background-color: rgba(15, 23, 42, 0.8);
+            background-image: url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 12px center;
+            color: #e5e7eb;
             font-size: 13px;
+            font-family: inherit;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            min-width: 120px;
+        }
+        
+        select:hover,
+        .select:hover,
+        .lm-select:hover {
+            border-color: rgba(148, 163, 184, 0.4);
+            background-color: rgba(15, 23, 42, 0.95);
+        }
+        
+        select:focus,
+        .select:focus,
+        .lm-select:focus {
+            outline: none;
+            border-color: rgba(139, 92, 246, 0.5);
+            box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.1);
+        }
+        
+        select:disabled,
+        .select:disabled,
+        .lm-select:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        /* Option styling for dark theme */
+        select option,
+        .select option,
+        .lm-select option {
+            background-color: #0f172a;
+            color: #e5e7eb;
+            padding: 10px 14px;
+        }
+        
+        select option:hover,
+        .select option:hover,
+        .lm-select option:hover {
+            background-color: #1e293b;
+        }
+        
+        select option:checked,
+        .select option:checked,
+        .lm-select option:checked {
+            background-color: rgba(139, 92, 246, 0.3);
+        }
+        
+        select optgroup,
+        .select optgroup,
+        .lm-select optgroup {
+            background-color: #0f172a;
+            color: #94a3b8;
+            font-weight: 600;
+        }
+        
+        /* Color-themed select variants */
+        .lm-select-blue {
+            border-color: rgba(59, 130, 246, 0.3);
+            background-image: url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%233b82f6' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+        }
+        
+        .lm-select-blue:focus {
+            border-color: rgba(59, 130, 246, 0.5);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        }
+        
+        .lm-select-green {
+            border-color: rgba(16, 185, 129, 0.3);
+            background-image: url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%2310b981' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+        }
+        
+        .lm-select-green:focus {
+            border-color: rgba(16, 185, 129, 0.5);
+            box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1);
+        }
+        
+        .lm-select-orange {
+            border-color: rgba(249, 115, 22, 0.3);
+            background-image: url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%23f97316' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+        }
+        
+        .lm-select-orange:focus {
+            border-color: rgba(249, 115, 22, 0.5);
+            box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.1);
+        }
+        
+        .lm-select-purple {
+            border-color: rgba(168, 85, 247, 0.3);
+            background-image: url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%23a855f7' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+        }
+        
+        .lm-select-purple:focus {
+            border-color: rgba(168, 85, 247, 0.5);
+            box-shadow: 0 0 0 3px rgba(168, 85, 247, 0.1);
+        }
+        
+        .lm-select-yellow {
+            border-color: rgba(251, 191, 36, 0.3);
+            background-image: url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%23fbbf24' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+        }
+        
+        .lm-select-yellow:focus {
+            border-color: rgba(251, 191, 36, 0.5);
+            box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.1);
+        }
+        
+        /* Small select variant */
+        .lm-select-sm {
+            padding: 8px 32px 8px 12px;
+            font-size: 12px;
+            border-radius: 8px;
+            min-width: 100px;
         }
 
         /* System tab layout */
@@ -4087,7 +4360,22 @@ class LiveMonitor(commands.Cog):
             gap: 20px;
             align-items: flex-start;
         }
+     
+            #db-data-grid {
+                width: 100%;
+                overflow-x: auto !important;
+                display: block;
+                background: rgba(15, 23, 42, 0.6);
+                border-radius: 12px;
+                border: 1px solid rgba(148, 163, 184, 0.1);
+                margin-top: 15px;
+            }
 
+            #db-data-grid table {
+                width: 100%;
+                border-collapse: collapse;
+                min-width: 1000px; /* Erzwingt die Breite, damit man scrollen muss */
+            }
         .system-main {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
@@ -4418,6 +4706,32 @@ class LiveMonitor(commands.Cog):
             box-shadow: 0 6px 20px rgba(16, 185, 129, 0.4);
         }
 
+        /* Button waiting/loading state */
+        .button.btn-waiting {
+            opacity: 0.8;
+            cursor: wait;
+            pointer-events: none;
+            background: linear-gradient(135deg, rgba(100, 116, 139, 0.8), rgba(71, 85, 105, 0.8)) !important;
+            border-color: rgba(148, 163, 184, 0.3) !important;
+            color: #e2e8f0 !important;
+        }
+        
+        .btn-spinner {
+            display: inline-block;
+            width: 14px;
+            height: 14px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-top-color: #fff;
+            border-radius: 50%;
+            animation: btnSpin 0.8s linear infinite;
+            vertical-align: middle;
+            margin-right: 6px;
+        }
+        
+        @keyframes btnSpin {
+            to { transform: rotate(360deg); }
+        }
+
         .badge {
             display: inline-block;
             padding: 5px 12px;
@@ -4509,12 +4823,73 @@ class LiveMonitor(commands.Cog):
             color: var(--text-secondary);
         }
 
-        .footer {
+        /* ============================================
+           GLOBAL FOOTER - CENTERED ON PAGE
+           ============================================ */
+        
+        .lm-global-footer {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            z-index: 50;
+            padding: 12px 24px;
+            background: linear-gradient(to top, rgba(15, 23, 42, 0.98) 0%, rgba(15, 23, 42, 0.9) 70%, transparent 100%);
+            pointer-events: none;
+        }
+        
+        .lm-footer-content {
+            max-width: 1200px;
+            margin: 0 auto;
             text-align: center;
-            padding: 24px;
-            color: var(--text-secondary);
-            font-size: 13px;
-            margin-top: 30px;
+            pointer-events: auto;
+        }
+        
+        .lm-footer-update {
+            font-size: 11px;
+            color: #64748b;
+            margin-bottom: 4px;
+        }
+        
+        .lm-footer-update span {
+            color: #94a3b8;
+        }
+        
+        .lm-footer-brand {
+            font-size: 12px;
+            margin-bottom: 2px;
+        }
+        
+        .lm-footer-brand a {
+            color: #94a3b8;
+            text-decoration: none;
+            transition: color 0.2s ease;
+        }
+        
+        .lm-footer-brand a:hover {
+            color: #e5e7eb;
+        }
+        
+        .lm-footer-credit {
+            font-size: 11px;
+            color: #64748b;
+        }
+        
+        .lm-footer-credit a {
+            color: #fbbf24;
+            text-decoration: none;
+            font-weight: 600;
+            transition: color 0.2s ease;
+        }
+        
+        .lm-footer-credit a:hover {
+            color: #fde047;
+        }
+        
+        @media (max-width: 768px) {
+            .lm-global-footer {
+                padding: 10px 16px;
+            }
         }
 
         .modal {
@@ -4524,11 +4899,28 @@ class LiveMonitor(commands.Cog):
             left: 0;
             width: 100%;
             height: 100%;
-            background: rgba(0, 0, 0, 0.8);
-            backdrop-filter: blur(8px);
-            z-index: 1000;
+            background: rgba(0, 0, 0, 0.85);
+            backdrop-filter: blur(12px);
+            z-index: 10000;
             justify-content: center;
             align-items: center;
+            animation: fadeIn 0.2s ease;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        @keyframes slideUp {
+            from {
+                opacity: 0;
+                transform: translateY(20px) scale(0.98);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+            }
         }
 
         .modal.active {
@@ -4536,58 +4928,134 @@ class LiveMonitor(commands.Cog):
         }
 
         .modal-content {
-            background: var(--bg-card);
-            backdrop-filter: blur(20px);
-            border-radius: 16px;
-            border: 1px solid var(--border);
-            padding: 28px;
-            max-width: 700px;
-            width: 90%;
-            max-height: 85vh;
-            overflow-y: auto;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+            background: linear-gradient(145deg, #0f172a 0%, #1e293b 100%);
+            border-radius: 20px;
+            border: 1px solid rgba(139, 92, 246, 0.3);
+            padding: 0;
+            max-width: 900px;
+            width: 95%;
+            max-height: 90vh;
+            overflow: hidden;
+            box-shadow: 0 25px 80px rgba(0, 0, 0, 0.6), 0 0 1px 1px rgba(139, 92, 246, 0.2);
+            animation: slideUp 0.3s ease;
         }
 
         .modal-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 24px;
-            padding-bottom: 18px;
-            border-bottom: 1px solid var(--border);
+            padding: 24px 32px;
+            background: linear-gradient(135deg, rgba(139, 92, 246, 0.15) 0%, rgba(59, 130, 246, 0.1) 100%);
+            border-bottom: 1px solid rgba(139, 92, 246, 0.2);
         }
 
         .modal-title {
-            font-size: 22px;
+            font-size: 24px;
             font-weight: 700;
-            background: linear-gradient(135deg, var(--primary), var(--accent-cyan));
-
-            background-clip: text;
-            -webkit-background-clip: text;
-
-            color: transparent;
-            -webkit-text-fill-color: transparent;
+            color: #ffffff;
+            text-shadow: 0 2px 10px rgba(139, 92, 246, 0.3);
         }
 
         .close-button {
-            background: none;
-            border: none;
-            color: var(--text-secondary);
-            font-size: 28px;
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            color: #ef4444;
+            font-size: 20px;
             cursor: pointer;
-            transition: all 0.3s ease;
-            width: 36px;
-            height: 36px;
+            transition: all 0.2s ease;
+            width: 40px;
+            height: 40px;
             display: flex;
             align-items: center;
             justify-content: center;
-            border-radius: 8px;
+            border-radius: 10px;
+            font-weight: 600;
         }
 
         .close-button:hover {
-            color: var(--text-primary);
             background: rgba(239, 68, 68, 0.2);
+            border-color: rgba(239, 68, 68, 0.5);
+            transform: scale(1.05);
+            box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);
         }
+
+        #modal-body {
+            padding: 32px;
+            max-height: calc(90vh - 100px);
+            overflow-y: auto;
+        }
+
+                /* Custom Scrollbar Styling for Database Viewer */
+        #db-tables-list::-webkit-scrollbar,
+        #db-data-grid::-webkit-scrollbar,
+        #db-main-content::-webkit-scrollbar,
+        #db-data-grid > div::-webkit-scrollbar {
+            width: 12px;
+            height: 12px;
+        }
+
+        #db-tables-list::-webkit-scrollbar-track,
+        #db-data-grid::-webkit-scrollbar-track,
+        #db-main-content::-webkit-scrollbar-track,
+        #db-data-grid > div::-webkit-scrollbar-track {
+            background: rgba(15, 23, 42, 0.8);
+            border-radius: 6px;
+            margin: 2px;
+        }
+
+        #db-tables-list::-webkit-scrollbar-thumb,
+        #db-data-grid::-webkit-scrollbar-thumb,
+        #db-main-content::-webkit-scrollbar-thumb,
+        #db-data-grid > div::-webkit-scrollbar-thumb {
+            background: linear-gradient(135deg, rgba(168, 85, 247, 0.6), rgba(139, 92, 246, 0.8));
+            border-radius: 6px;
+            border: 2px solid rgba(15, 23, 42, 0.8);
+        }
+
+        #db-tables-list::-webkit-scrollbar-thumb:hover,
+        #db-data-grid::-webkit-scrollbar-thumb:hover,
+        #db-main-content::-webkit-scrollbar-thumb:hover,
+        #db-data-grid > div::-webkit-scrollbar-thumb:hover {
+            background: linear-gradient(135deg, rgba(168, 85, 247, 0.9), rgba(139, 92, 246, 1));
+        }
+
+        /* Enhanced table scrolling */
+        #db-data-grid table {
+            border-spacing: 0;
+        }
+
+        #db-data-grid > div {
+            scrollbar-width: thin;
+            scrollbar-color: rgba(168, 85, 247, 0.8) rgba(15, 23, 42, 0.8);
+        }
+
+        /* Force horizontal scrollbar visibility for db-data-grid inner container */
+        #db-data-grid > div::-webkit-scrollbar {
+            width: 12px;
+            height: 12px;
+            display: block;
+        }
+
+        #db-data-grid > div::-webkit-scrollbar-track {
+            background: rgba(15, 23, 42, 0.8);
+            border-radius: 6px;
+        }
+
+        #db-data-grid > div::-webkit-scrollbar-thumb {
+            background: linear-gradient(135deg, rgba(168, 85, 247, 0.6), rgba(139, 92, 246, 0.8));
+            border-radius: 6px;
+            border: 2px solid rgba(15, 23, 42, 0.8);
+        }
+
+        #db-data-grid > div::-webkit-scrollbar-thumb:hover {
+            background: linear-gradient(135deg, rgba(168, 85, 247, 0.9), rgba(139, 92, 246, 1));
+        }
+
+        #db-data-grid > div::-webkit-scrollbar-corner {
+            background: rgba(15, 23, 42, 0.8);
+        }
+
+
 
         ::-webkit-scrollbar {
             width: 8px;
@@ -4709,6 +5177,4687 @@ class LiveMonitor(commands.Cog):
             display: flex;
             flex-wrap: wrap;
             gap: 8px;
+        }
+
+        /* ============================================
+           MODERNIZED DASHBOARD TAB STYLES
+           ============================================ */
+        
+        /* Dashboard Hero Header */
+        .dash-hero {
+            position: relative;
+            border-radius: 20px;
+            overflow: hidden;
+            margin-bottom: 24px;
+            padding: 32px;
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid rgba(148, 163, 184, 0.15);
+        }
+        
+        .dash-hero-bg {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            overflow: hidden;
+            pointer-events: none;
+        }
+        
+        .dash-hero-orb {
+            position: absolute;
+            border-radius: 50%;
+            filter: blur(60px);
+            animation: dashOrbFloat 20s ease-in-out infinite;
+        }
+        
+        .dash-hero-orb-1 {
+            width: 300px;
+            height: 300px;
+            background: rgba(124, 58, 237, 0.25);
+            top: -100px;
+            left: -50px;
+        }
+        
+        .dash-hero-orb-2 {
+            width: 250px;
+            height: 250px;
+            background: rgba(59, 130, 246, 0.2);
+            bottom: -80px;
+            right: -30px;
+            animation-delay: -10s;
+        }
+        
+        @keyframes dashOrbFloat {
+            0%, 100% { transform: translate(0, 0) scale(1); }
+            50% { transform: translate(20px, -20px) scale(1.1); }
+        }
+        
+        .dash-hero-grid {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-image: 
+                linear-gradient(rgba(148, 163, 184, 0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(148, 163, 184, 0.03) 1px, transparent 1px);
+            background-size: 40px 40px;
+        }
+        
+        .dash-hero-content {
+            position: relative;
+            z-index: 1;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 20px;
+        }
+        
+        .dash-hero-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 14px;
+            background: rgba(124, 58, 237, 0.15);
+            border: 1px solid rgba(124, 58, 237, 0.3);
+            border-radius: 999px;
+            font-size: 12px;
+            font-weight: 500;
+            color: #c4b5fd;
+            margin-bottom: 12px;
+        }
+        
+        .dash-hero-badge-dot {
+            width: 8px;
+            height: 8px;
+            background: #10b981;
+            border-radius: 50%;
+            animation: dashDotPulse 2s ease-in-out infinite;
+        }
+        
+        @keyframes dashDotPulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.5; transform: scale(1.2); }
+        }
+        
+        .dash-hero-title {
+            font-size: 28px;
+            font-weight: 700;
+            background: linear-gradient(135deg, #ffffff, #a855f7);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin: 0 0 8px 0;
+        }
+        
+        .dash-hero-subtitle {
+            font-size: 14px;
+            color: #94a3b8;
+            margin: 0;
+        }
+        
+        .dash-tour-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 18px;
+            background: rgba(148, 163, 184, 0.1);
+            border: 1px solid rgba(148, 163, 184, 0.2);
+            border-radius: 10px;
+            color: #e5e7eb;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .dash-tour-btn:hover {
+            background: rgba(148, 163, 184, 0.2);
+            border-color: rgba(148, 163, 184, 0.3);
+            transform: translateY(-1px);
+        }
+        
+        /* Dashboard Stats Grid */
+        .dash-stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+        
+        .dash-stat-card {
+            position: relative;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            padding: 20px;
+            background: rgba(15, 23, 42, 0.7);
+            border: 1px solid rgba(148, 163, 184, 0.15);
+            border-radius: 16px;
+            overflow: hidden;
+            transition: all 0.3s ease;
+            cursor: default;
+        }
+        
+        .dash-stat-card:hover {
+            transform: translateY(-4px);
+            border-color: rgba(148, 163, 184, 0.3);
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
+        }
+        
+        .dash-stat-card:hover .dash-stat-glow {
+            opacity: 1;
+        }
+        
+        .dash-stat-health {
+            cursor: pointer;
+        }
+        
+        .dash-stat-health:hover {
+            border-color: rgba(16, 185, 129, 0.5);
+        }
+        
+        .dash-stat-health .dash-stat-icon {
+            background: linear-gradient(135deg, rgba(16, 185, 129, 0.2), rgba(52, 211, 153, 0.1));
+            color: #34d399;
+        }
+        
+        .dash-stat-health .dash-stat-glow {
+            background: radial-gradient(circle at center, rgba(16, 185, 129, 0.15), transparent 70%);
+        }
+        
+        .dash-stat-uptime .dash-stat-icon {
+            background: linear-gradient(135deg, rgba(59, 130, 246, 0.2), rgba(96, 165, 250, 0.1));
+            color: #60a5fa;
+        }
+        
+        .dash-stat-uptime .dash-stat-glow {
+            background: radial-gradient(circle at center, rgba(59, 130, 246, 0.15), transparent 70%);
+        }
+        
+        .dash-stat-activity .dash-stat-icon {
+            background: linear-gradient(135deg, rgba(168, 85, 247, 0.2), rgba(192, 132, 252, 0.1));
+            color: #c084fc;
+        }
+        
+        .dash-stat-activity .dash-stat-glow {
+            background: radial-gradient(circle at center, rgba(168, 85, 247, 0.15), transparent 70%);
+        }
+        
+        .dash-stat-framework .dash-stat-icon {
+            background: linear-gradient(135deg, rgba(251, 191, 36, 0.2), rgba(252, 211, 77, 0.1));
+            color: #fcd34d;
+        }
+        
+        .dash-stat-framework .dash-stat-glow {
+            background: radial-gradient(circle at center, rgba(251, 191, 36, 0.15), transparent 70%);
+        }
+        
+        .dash-stat-glow {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+            pointer-events: none;
+        }
+        
+        .dash-stat-icon {
+            width: 48px;
+            height: 48px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+        
+        .dash-stat-content {
+            flex: 1;
+            min-width: 0;
+        }
+        
+        .dash-stat-label {
+            font-size: 11px;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: #64748b;
+            margin-bottom: 4px;
+        }
+        
+        .dash-stat-value {
+            font-size: 15px;
+            font-weight: 600;
+            color: #e5e7eb;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        
+        .dash-stat-arrow {
+            color: #64748b;
+            opacity: 0;
+            transform: translateX(-4px);
+            transition: all 0.2s ease;
+        }
+        
+        .dash-stat-health:hover .dash-stat-arrow {
+            opacity: 1;
+            transform: translateX(0);
+        }
+        
+        /* Dashboard Columns */
+        .dash-columns {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 20px;
+        }
+        
+        .dash-column-card {
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid rgba(148, 163, 184, 0.15);
+            border-radius: 20px;
+            overflow: hidden;
+        }
+        
+        .dash-column-header {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            padding: 20px 24px;
+            border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+            background: rgba(0, 0, 0, 0.2);
+        }
+        
+        .dash-column-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .dash-column-icon-alerts {
+            background: linear-gradient(135deg, rgba(251, 191, 36, 0.2), rgba(245, 158, 11, 0.1));
+            color: #fbbf24;
+        }
+        
+        .dash-column-icon-actions {
+            background: linear-gradient(135deg, rgba(59, 130, 246, 0.2), rgba(99, 102, 241, 0.1));
+            color: #60a5fa;
+        }
+        
+        .dash-column-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: #e5e7eb;
+        }
+        
+        .dash-column-subtitle {
+            font-size: 12px;
+            color: #64748b;
+            margin-top: 2px;
+        }
+        
+        /* Alert List */
+        .dash-alert-list {
+            padding: 16px;
+            min-height: 200px;
+        }
+        
+        .dash-alert-list:empty::before {
+            content: 'No alerts at this time';
+            display: block;
+            text-align: center;
+            color: #64748b;
+            font-size: 13px;
+            padding: 40px 20px;
+        }
+        
+        /* Quick Actions Container */
+        .dash-actions-container {
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        
+        .dash-action-section {
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 14px;
+            padding: 16px;
+            border: 1px solid rgba(148, 163, 184, 0.08);
+        }
+        
+        .dash-action-section-danger {
+            border-color: rgba(239, 68, 68, 0.2);
+            background: rgba(239, 68, 68, 0.05);
+        }
+        
+        .dash-action-section-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: #94a3b8;
+            margin-bottom: 12px;
+        }
+        
+        .dash-action-section-danger .dash-action-section-header {
+            color: #f87171;
+        }
+        
+        .dash-action-btn-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+            gap: 8px;
+        }
+        
+        .dash-action-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            padding: 10px 14px;
+            background: rgba(148, 163, 184, 0.08);
+            border: 1px solid rgba(148, 163, 184, 0.15);
+            border-radius: 10px;
+            color: #cbd5e1;
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            white-space: nowrap;
+        }
+        
+        .dash-action-btn:hover {
+            background: rgba(148, 163, 184, 0.15);
+            border-color: rgba(148, 163, 184, 0.25);
+            transform: translateY(-1px);
+            color: #f1f5f9;
+        }
+        
+        .dash-action-btn-danger {
+            background: rgba(239, 68, 68, 0.15);
+            border-color: rgba(239, 68, 68, 0.3);
+            color: #fca5a5;
+        }
+        
+        .dash-action-btn-danger:hover {
+            background: rgba(239, 68, 68, 0.25);
+            border-color: rgba(239, 68, 68, 0.5);
+            color: #fecaca;
+            box-shadow: 0 4px 20px rgba(239, 68, 68, 0.2);
+        }
+        
+        .dash-action-btn-toggle {
+            background: rgba(59, 130, 246, 0.1);
+            border-color: rgba(59, 130, 246, 0.2);
+            color: #93c5fd;
+        }
+        
+        .dash-action-btn-toggle:hover {
+            background: rgba(59, 130, 246, 0.2);
+            border-color: rgba(59, 130, 246, 0.3);
+        }
+        
+        .dash-action-btn-toggle.active {
+            background: rgba(16, 185, 129, 0.15);
+            border-color: rgba(16, 185, 129, 0.3);
+            color: #6ee7b7;
+        }
+        
+        .dash-action-hint {
+            font-size: 11px;
+            color: #64748b;
+            margin-top: 10px;
+            line-height: 1.5;
+        }
+        
+        .dash-action-section-danger .dash-action-hint {
+            color: #fca5a5;
+            opacity: 0.7;
+        }
+        
+        /* Responsive adjustments for dashboard */
+        @media (max-width: 900px) {
+            .dash-columns {
+                grid-template-columns: 1fr;
+            }
+            
+            .dash-hero-content {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+            
+            .dash-hero-right {
+                width: 100%;
+            }
+            
+            .dash-tour-btn {
+                width: 100%;
+                justify-content: center;
+            }
+        }
+        
+        @media (max-width: 600px) {
+            .dash-stats-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .dash-hero {
+                padding: 24px 20px;
+            }
+            
+            .dash-hero-title {
+                font-size: 22px;
+            }
+        }
+        
+        /* ============================================
+           END MODERNIZED DASHBOARD STYLES
+           ============================================ */
+
+        /* ============================================
+           MODERNIZED COMMANDS TAB STYLES
+           ============================================ */
+        
+        /* Commands Hero Customizations */
+        .cmd-hero .dash-hero-orb-1,
+        .cmd-orb-1 {
+            background: rgba(59, 130, 246, 0.25) !important;
+        }
+        
+        .cmd-hero .dash-hero-orb-2,
+        .cmd-orb-2 {
+            background: rgba(34, 211, 238, 0.2) !important;
+        }
+        
+        .cmd-badge {
+            background: rgba(59, 130, 246, 0.15) !important;
+            border-color: rgba(59, 130, 246, 0.3) !important;
+            color: #93c5fd !important;
+        }
+        
+        /* Commands Stats Grid */
+        .cmd-stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 12px;
+            margin-bottom: 24px;
+        }
+        
+        .cmd-stat-card {
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 20px 16px;
+            background: rgba(15, 23, 42, 0.7);
+            border: 1px solid rgba(148, 163, 184, 0.15);
+            border-radius: 16px;
+            text-align: center;
+            transition: all 0.3s ease;
+            overflow: hidden;
+        }
+        
+        .cmd-stat-card:hover {
+            transform: translateY(-3px);
+            border-color: rgba(148, 163, 184, 0.25);
+            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.25);
+        }
+        
+        .cmd-stat-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 12px;
+        }
+        
+        .cmd-stat-value {
+            font-size: 26px;
+            font-weight: 700;
+            color: #e5e7eb;
+            line-height: 1;
+            margin-bottom: 6px;
+        }
+        
+        .cmd-stat-label {
+            font-size: 11px;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: #64748b;
+        }
+        
+        /* Command Stat Card Color Variants */
+        .cmd-stat-total .cmd-stat-icon { background: linear-gradient(135deg, rgba(59, 130, 246, 0.2), rgba(99, 102, 241, 0.1)); color: #60a5fa; }
+        .cmd-stat-slash .cmd-stat-icon { background: linear-gradient(135deg, rgba(168, 85, 247, 0.2), rgba(139, 92, 246, 0.1)); color: #c084fc; }
+        .cmd-stat-prefix .cmd-stat-icon { background: linear-gradient(135deg, rgba(34, 211, 238, 0.2), rgba(6, 182, 212, 0.1)); color: #22d3ee; }
+        .cmd-stat-hybrid .cmd-stat-icon { background: linear-gradient(135deg, rgba(251, 191, 36, 0.2), rgba(245, 158, 11, 0.1)); color: #fbbf24; }
+        .cmd-stat-cogs .cmd-stat-icon { background: linear-gradient(135deg, rgba(244, 114, 182, 0.2), rgba(236, 72, 153, 0.1)); color: #f472b6; }
+        .cmd-stat-usage .cmd-stat-icon { background: linear-gradient(135deg, rgba(52, 211, 153, 0.2), rgba(16, 185, 129, 0.1)); color: #34d399; }
+        .cmd-stat-errors .cmd-stat-icon { background: linear-gradient(135deg, rgba(239, 68, 68, 0.2), rgba(220, 38, 38, 0.1)); color: #f87171; }
+        .cmd-stat-success .cmd-stat-icon { background: linear-gradient(135deg, rgba(16, 185, 129, 0.2), rgba(5, 150, 105, 0.1)); color: #10b981; }
+        
+        .cmd-stat-total:hover { border-color: rgba(59, 130, 246, 0.4); }
+        .cmd-stat-slash:hover { border-color: rgba(168, 85, 247, 0.4); }
+        .cmd-stat-prefix:hover { border-color: rgba(34, 211, 238, 0.4); }
+        .cmd-stat-hybrid:hover { border-color: rgba(251, 191, 36, 0.4); }
+        .cmd-stat-cogs:hover { border-color: rgba(244, 114, 182, 0.4); }
+        .cmd-stat-usage:hover { border-color: rgba(52, 211, 153, 0.4); }
+        .cmd-stat-errors:hover { border-color: rgba(239, 68, 68, 0.4); }
+        .cmd-stat-success:hover { border-color: rgba(16, 185, 129, 0.4); }
+        
+        /* Commands Explorer */
+        .cmd-explorer {
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid rgba(148, 163, 184, 0.15);
+            border-radius: 20px;
+            overflow: hidden;
+        }
+        
+        .cmd-explorer-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 18px 24px;
+            background: rgba(0, 0, 0, 0.2);
+            border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+            flex-wrap: wrap;
+            gap: 12px;
+        }
+        
+        .cmd-explorer-title {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 15px;
+            font-weight: 600;
+            color: #e5e7eb;
+        }
+        
+        .cmd-view-controls {
+            display: flex;
+            gap: 6px;
+            background: rgba(0, 0, 0, 0.3);
+            padding: 4px;
+            border-radius: 10px;
+        }
+        
+        .cmd-view-btn {
+            padding: 8px 14px;
+            background: transparent;
+            border: none;
+            border-radius: 8px;
+            color: #94a3b8;
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .cmd-view-btn:hover {
+            background: rgba(148, 163, 184, 0.1);
+            color: #e5e7eb;
+        }
+        
+        .cmd-view-btn.active {
+            background: linear-gradient(135deg, rgba(59, 130, 246, 0.3), rgba(99, 102, 241, 0.2));
+            color: #93c5fd;
+        }
+        
+        .cmd-explorer-toolbar {
+            display: flex;
+            gap: 12px;
+            padding: 16px 24px;
+            border-bottom: 1px solid rgba(148, 163, 184, 0.08);
+            flex-wrap: wrap;
+        }
+        
+        .cmd-search-wrap {
+            flex: 1;
+            min-width: 200px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(148, 163, 184, 0.15);
+            border-radius: 10px;
+            padding: 0 14px;
+            transition: all 0.2s ease;
+        }
+        
+        .cmd-search-wrap:focus-within {
+            border-color: rgba(59, 130, 246, 0.5);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        }
+        
+        .cmd-search-wrap svg {
+            color: #64748b;
+            flex-shrink: 0;
+        }
+        
+        .cmd-search-input {
+            flex: 1;
+            background: transparent;
+            border: none;
+            outline: none;
+            padding: 12px 0;
+            color: #e5e7eb;
+            font-size: 13px;
+        }
+        
+        .cmd-search-input::placeholder {
+            color: #64748b;
+        }
+        
+        .cmd-sort-select {
+            border-color: rgba(59, 130, 246, 0.3);
+            background-image: url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%233b82f6' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+        }
+        
+        .cmd-sort-select:focus {
+            border-color: rgba(59, 130, 246, 0.5);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        }
+        
+        .cmd-list {
+            padding: 16px;
+            min-height: 200px;
+        }
+        
+        /* ============================================
+           MODERNIZED PLUGINS TAB STYLES
+           ============================================ */
+        
+        /* Plugins Hero Customizations */
+        .plug-hero .dash-hero-orb-1,
+        .plug-orb-1 {
+            background: rgba(16, 185, 129, 0.25) !important;
+        }
+        
+        .plug-hero .dash-hero-orb-2,
+        .plug-orb-2 {
+            background: rgba(52, 211, 153, 0.2) !important;
+        }
+        
+        .plug-badge {
+            background: rgba(16, 185, 129, 0.15) !important;
+            border-color: rgba(16, 185, 129, 0.3) !important;
+            color: #6ee7b7 !important;
+        }
+        
+        /* Plugins Stats Card */
+        .plug-stats-card {
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid rgba(148, 163, 184, 0.15);
+            border-radius: 20px;
+            margin-bottom: 20px;
+            overflow: hidden;
+        }
+        
+        .plug-stats-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 18px 24px;
+            background: rgba(0, 0, 0, 0.2);
+            border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+            flex-wrap: wrap;
+            gap: 16px;
+        }
+        
+        .plug-stats-header-left {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+        }
+        
+        .plug-stats-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 12px;
+            background: linear-gradient(135deg, rgba(16, 185, 129, 0.2), rgba(52, 211, 153, 0.1));
+            color: #34d399;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .plug-stats-title {
+            font-size: 15px;
+            font-weight: 600;
+            color: #e5e7eb;
+        }
+        
+        .plug-stats-subtitle {
+            font-size: 12px;
+            color: #64748b;
+            margin-top: 2px;
+        }
+        
+        .plug-stats-toggle-wrap {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .plug-stats-toggle-label {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: #64748b;
+            font-weight: 500;
+        }
+        
+        .plug-toggle-pill {
+            position: relative;
+            width: 44px;
+            height: 24px;
+            border-radius: 999px;
+            border: 1px solid rgba(148, 163, 184, 0.3);
+            background: rgba(15, 23, 42, 0.9);
+            padding: 2px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .plug-toggle-knob {
+            width: 18px;
+            height: 18px;
+            border-radius: 999px;
+            background: #64748b;
+            transition: all 0.2s ease;
+            display: block;
+        }
+        
+        .plug-toggle-pill[aria-pressed="true"] {
+            background: rgba(16, 185, 129, 0.25);
+            border-color: rgba(16, 185, 129, 0.5);
+        }
+        
+        .plug-toggle-pill[aria-pressed="true"] .plug-toggle-knob {
+            transform: translateX(20px);
+            background: #34d399;
+        }
+        
+        .plug-stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 12px;
+            padding: 20px;
+        }
+        
+        .plug-stat-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+            padding: 16px 12px;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 14px;
+            border: 1px solid rgba(148, 163, 184, 0.08);
+            transition: all 0.2s ease;
+        }
+        
+        .plug-stat-item:hover {
+            background: rgba(0, 0, 0, 0.3);
+            border-color: rgba(148, 163, 184, 0.15);
+        }
+        
+        .plug-stat-icon {
+            width: 32px;
+            height: 32px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 10px;
+        }
+        
+        .plug-stat-icon-total { background: rgba(59, 130, 246, 0.15); color: #60a5fa; }
+        .plug-stat-icon-loaded { background: rgba(16, 185, 129, 0.15); color: #34d399; }
+        .plug-stat-icon-healthy { background: rgba(52, 211, 153, 0.15); color: #6ee7b7; }
+        .plug-stat-icon-issues { background: rgba(251, 191, 36, 0.15); color: #fbbf24; }
+        .plug-stat-icon-commands { background: rgba(168, 85, 247, 0.15); color: #c084fc; }
+        .plug-stat-icon-cogs { background: rgba(244, 114, 182, 0.15); color: #f472b6; }
+        .plug-stat-icon-extensions { background: rgba(34, 211, 238, 0.15); color: #22d3ee; }
+        .plug-stat-icon-time { background: rgba(99, 102, 241, 0.15); color: #818cf8; }
+        
+        .plug-stat-value {
+            font-size: 20px;
+            font-weight: 700;
+            color: #e5e7eb;
+            line-height: 1;
+            margin-bottom: 4px;
+        }
+        
+        .plug-stat-label {
+            font-size: 10px;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: #64748b;
+        }
+        
+        /* Plugins Promo Card */
+        .plug-promo-card {
+            position: relative;
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid rgba(16, 185, 129, 0.2);
+            border-radius: 20px;
+            margin-bottom: 20px;
+            overflow: hidden;
+        }
+        
+        .plug-promo-bg {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            overflow: hidden;
+            pointer-events: none;
+        }
+        
+        .plug-promo-orb {
+            position: absolute;
+            border-radius: 50%;
+            filter: blur(50px);
+        }
+        
+        .plug-promo-orb-1 {
+            width: 200px;
+            height: 200px;
+            background: rgba(16, 185, 129, 0.15);
+            top: -50px;
+            right: -50px;
+        }
+        
+        .plug-promo-orb-2 {
+            width: 150px;
+            height: 150px;
+            background: rgba(52, 211, 153, 0.1);
+            bottom: -30px;
+            left: 20%;
+        }
+        
+        .plug-promo-content {
+            position: relative;
+            z-index: 1;
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            padding: 24px;
+            flex-wrap: wrap;
+        }
+        
+        .plug-promo-icon {
+            width: 52px;
+            height: 52px;
+            border-radius: 14px;
+            background: linear-gradient(135deg, rgba(16, 185, 129, 0.2), rgba(52, 211, 153, 0.1));
+            color: #34d399;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+        
+        .plug-promo-text {
+            flex: 1;
+            min-width: 200px;
+        }
+        
+        .plug-promo-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: #e5e7eb;
+            margin-bottom: 4px;
+        }
+        
+        .plug-promo-subtitle {
+            font-size: 13px;
+            color: #94a3b8;
+        }
+        
+        .plug-promo-actions {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        
+        .plug-promo-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 11px 18px;
+            border-radius: 10px;
+            font-size: 13px;
+            font-weight: 500;
+            text-decoration: none;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            border: none;
+        }
+        
+        .plug-promo-btn-primary {
+            background: linear-gradient(135deg, #10b981, #059669);
+            color: white;
+            box-shadow: 0 4px 15px rgba(16, 185, 129, 0.3);
+        }
+        
+        .plug-promo-btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(16, 185, 129, 0.4);
+        }
+        
+        .plug-promo-btn-secondary {
+            background: rgba(148, 163, 184, 0.1);
+            border: 1px solid rgba(148, 163, 184, 0.2);
+            color: #e5e7eb;
+        }
+        
+        .plug-promo-btn-secondary:hover {
+            background: rgba(148, 163, 184, 0.2);
+        }
+        
+        /* Plugins Explorer */
+        .plug-explorer {
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid rgba(148, 163, 184, 0.15);
+            border-radius: 20px;
+            overflow: hidden;
+        }
+        
+        .plug-explorer-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 18px 24px;
+            background: rgba(0, 0, 0, 0.2);
+            border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+        }
+        
+        .plug-explorer-title {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 15px;
+            font-weight: 600;
+            color: #e5e7eb;
+        }
+        
+        .plug-explorer-toolbar {
+            display: flex;
+            gap: 12px;
+            padding: 16px 24px;
+            border-bottom: 1px solid rgba(148, 163, 184, 0.08);
+            flex-wrap: wrap;
+        }
+        
+        .plug-search-wrap {
+            flex: 1;
+            min-width: 200px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(148, 163, 184, 0.15);
+            border-radius: 10px;
+            padding: 0 14px;
+            transition: all 0.2s ease;
+        }
+        
+        .plug-search-wrap:focus-within {
+            border-color: rgba(16, 185, 129, 0.5);
+            box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1);
+        }
+        
+        .plug-search-wrap svg {
+            color: #64748b;
+            flex-shrink: 0;
+        }
+        
+        .plug-search-input {
+            flex: 1;
+            background: transparent;
+            border: none;
+            outline: none;
+            padding: 12px 0;
+            color: #e5e7eb;
+            font-size: 13px;
+        }
+        
+        .plug-search-input::placeholder {
+            color: #64748b;
+        }
+        
+        .plug-filter-select {
+            border-color: rgba(16, 185, 129, 0.3);
+            background-image: url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%2310b981' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+        }
+        
+        .plug-filter-select:focus {
+            border-color: rgba(16, 185, 129, 0.5);
+            box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1);
+        }
+        
+        .plug-list {
+            padding: 16px;
+            min-height: 200px;
+        }
+        
+        /* Responsive for Commands & Plugins */
+        @media (max-width: 768px) {
+            .cmd-stats-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+            
+            .plug-stats-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+            
+            .plug-promo-content {
+                flex-direction: column;
+                text-align: center;
+            }
+            
+            .plug-promo-actions {
+                width: 100%;
+                justify-content: center;
+            }
+        }
+        
+        @media (max-width: 480px) {
+            .cmd-stats-grid {
+                grid-template-columns: repeat(2, 1fr);
+                gap: 8px;
+            }
+            
+            .cmd-stat-card {
+                padding: 14px 10px;
+            }
+            
+            .cmd-stat-value {
+                font-size: 20px;
+            }
+            
+            .plug-stats-grid {
+                grid-template-columns: repeat(2, 1fr);
+                gap: 8px;
+            }
+        }
+        
+        /* ============================================
+           END MODERNIZED COMMANDS & PLUGINS STYLES
+           ============================================ */
+
+        /* ============================================
+           MODERNIZED EVENT HOOKS TAB STYLES
+           ============================================ */
+        
+        /* Hooks Hero Customizations */
+        .hooks-hero .dash-hero-orb-1,
+        .hooks-orb-1 {
+            background: rgba(249, 115, 22, 0.25) !important;
+        }
+        
+        .hooks-hero .dash-hero-orb-2,
+        .hooks-orb-2 {
+            background: rgba(251, 191, 36, 0.2) !important;
+        }
+        
+        .hooks-badge {
+            background: rgba(249, 115, 22, 0.15) !important;
+            border-color: rgba(249, 115, 22, 0.3) !important;
+            color: #fdba74 !important;
+        }
+        
+        /* Hooks Stats Grid */
+        .hooks-stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 12px;
+            margin-bottom: 24px;
+        }
+        
+        .hooks-stat-card {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 20px 16px;
+            background: rgba(15, 23, 42, 0.7);
+            border: 1px solid rgba(148, 163, 184, 0.15);
+            border-radius: 16px;
+            text-align: center;
+            transition: all 0.3s ease;
+        }
+        
+        .hooks-stat-card:hover {
+            transform: translateY(-3px);
+            border-color: rgba(148, 163, 184, 0.25);
+            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.25);
+        }
+        
+        .hooks-stat-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 12px;
+        }
+        
+        .hooks-stat-value {
+            font-size: 26px;
+            font-weight: 700;
+            color: #e5e7eb;
+            line-height: 1;
+            margin-bottom: 6px;
+        }
+        
+        .hooks-stat-label {
+            font-size: 11px;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: #64748b;
+        }
+        
+        /* Hooks Stat Card Color Variants */
+        .hooks-stat-emissions .hooks-stat-icon { background: linear-gradient(135deg, rgba(59, 130, 246, 0.2), rgba(99, 102, 241, 0.1)); color: #60a5fa; }
+        .hooks-stat-executions .hooks-stat-icon { background: linear-gradient(135deg, rgba(16, 185, 129, 0.2), rgba(52, 211, 153, 0.1)); color: #34d399; }
+        .hooks-stat-failures .hooks-stat-icon { background: linear-gradient(135deg, rgba(239, 68, 68, 0.2), rgba(220, 38, 38, 0.1)); color: #f87171; }
+        .hooks-stat-queue .hooks-stat-icon { background: linear-gradient(135deg, rgba(168, 85, 247, 0.2), rgba(139, 92, 246, 0.1)); color: #c084fc; }
+        .hooks-stat-queuefull .hooks-stat-icon { background: linear-gradient(135deg, rgba(251, 191, 36, 0.2), rgba(245, 158, 11, 0.1)); color: #fbbf24; }
+        .hooks-stat-restarts .hooks-stat-icon { background: linear-gradient(135deg, rgba(34, 211, 238, 0.2), rgba(6, 182, 212, 0.1)); color: #22d3ee; }
+        .hooks-stat-disabled .hooks-stat-icon { background: linear-gradient(135deg, rgba(100, 116, 139, 0.2), rgba(71, 85, 105, 0.1)); color: #94a3b8; }
+        .hooks-stat-circuit .hooks-stat-icon { background: linear-gradient(135deg, rgba(249, 115, 22, 0.2), rgba(234, 88, 12, 0.1)); color: #fb923c; }
+        
+        .hooks-stat-emissions:hover { border-color: rgba(59, 130, 246, 0.4); }
+        .hooks-stat-executions:hover { border-color: rgba(16, 185, 129, 0.4); }
+        .hooks-stat-failures:hover { border-color: rgba(239, 68, 68, 0.4); }
+        .hooks-stat-queue:hover { border-color: rgba(168, 85, 247, 0.4); }
+        .hooks-stat-queuefull:hover { border-color: rgba(251, 191, 36, 0.4); }
+        .hooks-stat-restarts:hover { border-color: rgba(34, 211, 238, 0.4); }
+        .hooks-stat-disabled:hover { border-color: rgba(100, 116, 139, 0.4); }
+        .hooks-stat-circuit:hover { border-color: rgba(249, 115, 22, 0.4); }
+        
+        /* Hooks Explorer */
+        .hooks-explorer {
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid rgba(148, 163, 184, 0.15);
+            border-radius: 20px;
+            overflow: hidden;
+        }
+        
+        .hooks-explorer-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 18px 24px;
+            background: rgba(0, 0, 0, 0.2);
+            border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+            flex-wrap: wrap;
+            gap: 12px;
+        }
+        
+        .hooks-explorer-title {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 15px;
+            font-weight: 600;
+            color: #e5e7eb;
+        }
+        
+        .hooks-view-controls {
+            display: flex;
+            gap: 6px;
+            background: rgba(0, 0, 0, 0.3);
+            padding: 4px;
+            border-radius: 10px;
+            flex-wrap: wrap;
+        }
+        
+        .hooks-view-btn {
+            padding: 8px 14px;
+            background: transparent;
+            border: none;
+            border-radius: 8px;
+            color: #94a3b8;
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .hooks-view-btn:hover {
+            background: rgba(148, 163, 184, 0.1);
+            color: #e5e7eb;
+        }
+        
+        .hooks-view-btn.active {
+            background: linear-gradient(135deg, rgba(249, 115, 22, 0.3), rgba(251, 191, 36, 0.2));
+            color: #fdba74;
+        }
+        
+        .hooks-explorer-toolbar {
+            display: flex;
+            gap: 12px;
+            padding: 16px 24px;
+            border-bottom: 1px solid rgba(148, 163, 184, 0.08);
+            flex-wrap: wrap;
+        }
+        
+        .hooks-search-wrap {
+            flex: 1;
+            min-width: 200px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(148, 163, 184, 0.15);
+            border-radius: 10px;
+            padding: 0 14px;
+            transition: all 0.2s ease;
+        }
+        
+        .hooks-search-wrap:focus-within {
+            border-color: rgba(249, 115, 22, 0.5);
+            box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.1);
+        }
+        
+        .hooks-search-wrap svg { color: #64748b; flex-shrink: 0; }
+        
+        .hooks-search-input {
+            flex: 1;
+            background: transparent;
+            border: none;
+            outline: none;
+            padding: 12px 0;
+            color: #e5e7eb;
+            font-size: 13px;
+        }
+        
+        .hooks-search-input::placeholder { color: #64748b; }
+        
+        .hooks-sort-select {
+            border-color: rgba(249, 115, 22, 0.3);
+            background-image: url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%23f97316' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+        }
+        
+        .hooks-sort-select:focus {
+            border-color: rgba(249, 115, 22, 0.5);
+            box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.1);
+        }
+        
+        .hooks-list {
+            padding: 16px;
+            min-height: 200px;
+        }
+        
+        /* ============================================
+           MODERNIZED HOOK CREATOR TAB STYLES
+           ============================================ */
+        
+        /* Hook Creator Hero Customizations */
+        .hc-hero .dash-hero-orb-1,
+        .hc-orb-1 {
+            background: rgba(168, 85, 247, 0.25) !important;
+        }
+        
+        .hc-hero .dash-hero-orb-2,
+        .hc-orb-2 {
+            background: rgba(139, 92, 246, 0.2) !important;
+        }
+        
+        .hc-badge {
+            background: rgba(168, 85, 247, 0.15) !important;
+            border-color: rgba(168, 85, 247, 0.3) !important;
+            color: #c4b5fd !important;
+        }
+        
+        .hc-export-btn {
+            background: rgba(168, 85, 247, 0.15) !important;
+            border-color: rgba(168, 85, 247, 0.3) !important;
+            color: #c4b5fd !important;
+        }
+        
+        .hc-export-btn:hover {
+            background: rgba(168, 85, 247, 0.25) !important;
+        }
+        
+        /* Hook Creator Stats Grid */
+        .hc-stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 12px;
+            margin-bottom: 24px;
+        }
+        
+        .hc-stat-card {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 18px 14px;
+            background: rgba(15, 23, 42, 0.7);
+            border: 1px solid rgba(148, 163, 184, 0.15);
+            border-radius: 14px;
+            text-align: center;
+            transition: all 0.3s ease;
+        }
+        
+        .hc-stat-card:hover {
+            transform: translateY(-2px);
+            border-color: rgba(148, 163, 184, 0.25);
+        }
+        
+        .hc-stat-icon {
+            width: 36px;
+            height: 36px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 10px;
+        }
+        
+        .hc-stat-value {
+            font-size: 22px;
+            font-weight: 700;
+            color: #e5e7eb;
+            margin-bottom: 4px;
+        }
+        
+        .hc-stat-label {
+            font-size: 10px;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: #64748b;
+        }
+        
+        .hc-stat-total .hc-stat-icon { background: linear-gradient(135deg, rgba(168, 85, 247, 0.2), rgba(139, 92, 246, 0.1)); color: #c084fc; }
+        .hc-stat-active .hc-stat-icon { background: linear-gradient(135deg, rgba(16, 185, 129, 0.2), rgba(52, 211, 153, 0.1)); color: #34d399; }
+        .hc-stat-disabled .hc-stat-icon { background: linear-gradient(135deg, rgba(100, 116, 139, 0.2), rgba(71, 85, 105, 0.1)); color: #94a3b8; }
+        .hc-stat-templates .hc-stat-icon { background: linear-gradient(135deg, rgba(59, 130, 246, 0.2), rgba(99, 102, 241, 0.1)); color: #60a5fa; }
+        .hc-stat-executions .hc-stat-icon { background: linear-gradient(135deg, rgba(251, 191, 36, 0.2), rgba(245, 158, 11, 0.1)); color: #fbbf24; }
+        .hc-stat-success .hc-stat-icon { background: linear-gradient(135deg, rgba(52, 211, 153, 0.2), rgba(16, 185, 129, 0.1)); color: #6ee7b7; }
+        
+        /* Hook Creator Main Layout */
+        .hc-main-layout {
+            display: grid;
+            grid-template-columns: 380px 1fr;
+            gap: 20px;
+        }
+        
+        /* Hook Creator Sidebar */
+        .hc-sidebar {
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid rgba(148, 163, 184, 0.15);
+            border-radius: 20px;
+            overflow: hidden;
+            position: sticky;
+            top: 20px;
+            max-height: calc(100vh - 140px);
+        }
+        
+        .hc-sidebar-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 18px 20px;
+            background: rgba(0, 0, 0, 0.2);
+            border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+        }
+        
+        .hc-sidebar-icon {
+            width: 36px;
+            height: 36px;
+            border-radius: 10px;
+            background: linear-gradient(135deg, rgba(168, 85, 247, 0.2), rgba(139, 92, 246, 0.1));
+            color: #c084fc;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .hc-sidebar-title {
+            font-size: 15px;
+            font-weight: 600;
+            color: #e5e7eb;
+        }
+        
+        .hc-sidebar-content {
+            padding: 16px;
+            overflow-y: auto;
+            max-height: calc(100vh - 240px);
+        }
+        
+        .hc-search-wrap {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(148, 163, 184, 0.15);
+            border-radius: 10px;
+            padding: 0 12px;
+            margin-bottom: 12px;
+        }
+        
+        .hc-search-wrap:focus-within {
+            border-color: rgba(168, 85, 247, 0.5);
+        }
+        
+        .hc-search-wrap svg { color: #64748b; }
+        
+        .hc-search-input {
+            flex: 1;
+            background: transparent;
+            border: none;
+            outline: none;
+            padding: 10px 0;
+            color: #e5e7eb;
+            font-size: 13px;
+        }
+        
+        .hc-category-select {
+            width: 100%;
+            border-color: rgba(168, 85, 247, 0.3);
+            background-image: url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%23a855f7' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+            margin-bottom: 16px;
+        }
+        
+        .hc-category-select:focus {
+            border-color: rgba(168, 85, 247, 0.5);
+            box-shadow: 0 0 0 3px rgba(168, 85, 247, 0.1);
+        }
+        
+        .hc-templates-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        
+        /* Hook Creator Cards */
+        .hc-create-card,
+        .hc-hooks-card {
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid rgba(148, 163, 184, 0.15);
+            border-radius: 20px;
+            overflow: hidden;
+            margin-bottom: 20px;
+        }
+        
+        .hc-card-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 18px 24px;
+            background: rgba(0, 0, 0, 0.2);
+            border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+            flex-wrap: wrap;
+        }
+        
+        .hc-card-icon {
+            width: 36px;
+            height: 36px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .hc-card-icon-create {
+            background: linear-gradient(135deg, rgba(16, 185, 129, 0.2), rgba(52, 211, 153, 0.1));
+            color: #34d399;
+        }
+        
+        .hc-card-icon-list {
+            background: linear-gradient(135deg, rgba(59, 130, 246, 0.2), rgba(99, 102, 241, 0.1));
+            color: #60a5fa;
+        }
+        
+        .hc-card-title {
+            font-size: 15px;
+            font-weight: 600;
+            color: #e5e7eb;
+            flex: 1;
+        }
+        
+        .hc-card-filters {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        
+        .hc-filter-select {
+            border-color: rgba(168, 85, 247, 0.25);
+            background-image: url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%23a855f7' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+            padding: 8px 32px 8px 12px;
+            font-size: 12px;
+            min-width: 120px;
+            border-radius: 8px;
+        }
+        
+        .hc-filter-select:focus {
+            border-color: rgba(168, 85, 247, 0.5);
+            box-shadow: 0 0 0 3px rgba(168, 85, 247, 0.1);
+        }
+        
+        .hc-card-body {
+            padding: 20px 24px;
+        }
+        
+        /* Hook Creator Form */
+        .hc-form-group {
+            margin-bottom: 16px;
+        }
+        
+        .hc-label {
+            display: block;
+            margin-bottom: 8px;
+            font-size: 13px;
+            font-weight: 600;
+            color: #94a3b8;
+        }
+        
+        .hc-required {
+            color: #ef4444;
+            margin-left: 4px;
+        }
+        
+        .hc-select {
+            width: 100%;
+            border-color: rgba(168, 85, 247, 0.3);
+            background-image: url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%23a855f7' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+        }
+        
+        .hc-select:focus {
+            border-color: rgba(168, 85, 247, 0.5);
+            box-shadow: 0 0 0 3px rgba(168, 85, 247, 0.1);
+        }
+        
+        .hc-template-info {
+            padding: 16px;
+            background: linear-gradient(135deg, rgba(168, 85, 247, 0.1), rgba(139, 92, 246, 0.08));
+            border: 1px solid rgba(168, 85, 247, 0.25);
+            border-radius: 12px;
+            margin-bottom: 16px;
+        }
+        
+        .hc-template-info-header {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            margin-bottom: 10px;
+        }
+        
+        .hc-template-info-icon {
+            font-size: 24px;
+        }
+        
+        .hc-template-info-name {
+            font-size: 14px;
+            font-weight: 700;
+            color: #c084fc;
+            margin-bottom: 4px;
+        }
+        
+        .hc-template-info-desc {
+            font-size: 12px;
+            color: #cbd5e1;
+        }
+        
+        .hc-template-info-event {
+            display: inline-block;
+            font-size: 11px;
+            color: #94a3b8;
+            padding: 6px 12px;
+            background: rgba(15, 23, 42, 0.5);
+            border-radius: 6px;
+        }
+        
+        .hc-form-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+        }
+        
+        .hc-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 12px 20px;
+            border-radius: 10px;
+            font-size: 13px;
+            font-weight: 600;
+            border: none;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .hc-btn-primary {
+            flex: 1;
+            background: linear-gradient(135deg, #10b981, #059669);
+            color: white;
+            box-shadow: 0 4px 15px rgba(16, 185, 129, 0.3);
+        }
+        
+        .hc-btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(16, 185, 129, 0.4);
+        }
+        
+        .hc-btn-secondary {
+            background: rgba(148, 163, 184, 0.1);
+            border: 1px solid rgba(148, 163, 184, 0.2);
+            color: #e5e7eb;
+        }
+        
+        .hc-btn-secondary:hover {
+            background: rgba(148, 163, 184, 0.2);
+        }
+        
+        .hc-created-list {
+            min-height: 100px;
+        }
+        
+        /* ============================================
+           MODERNIZED MAIN HEADER STYLES
+           ============================================ */
+        
+        .main-header {
+            position: relative;
+            border-radius: 20px;
+            overflow: hidden;
+            margin-bottom: 20px;
+            padding: 24px 28px;
+            background: rgba(15, 23, 42, 0.95);
+            border: 1px solid rgba(148, 163, 184, 0.15);
+        }
+        
+        .main-header-bg {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            overflow: hidden;
+            pointer-events: none;
+        }
+        
+        .main-header-banner {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            min-width: 100%;
+            min-height: 100%;
+            width: auto;
+            height: auto;
+            object-fit: cover;
+            opacity: 0.35;
+            filter: blur(1px);
+        }
+        
+        .main-header-light {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            width: 40%;
+            pointer-events: none;
+            z-index: 1;
+        }
+        
+        .main-header-light-left {
+            left: 0;
+            background: linear-gradient(90deg, 
+                rgba(168, 85, 247, 0.4) 0%,
+                rgba(139, 92, 246, 0.25) 30%,
+                transparent 100%);
+            animation: headerLightPulseLeft 4s ease-in-out infinite;
+        }
+        
+        .main-header-light-right {
+            right: 0;
+            background: linear-gradient(-90deg, 
+                rgba(59, 130, 246, 0.4) 0%,
+                rgba(99, 102, 241, 0.25) 30%,
+                transparent 100%);
+            animation: headerLightPulseRight 4s ease-in-out infinite;
+            animation-delay: -2s;
+        }
+        
+        @keyframes headerLightPulseLeft {
+            0%, 100% { opacity: 0.8; }
+            50% { opacity: 1; }
+        }
+        
+        @keyframes headerLightPulseRight {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.8; }
+        }
+        
+        .main-header-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(180deg,
+                rgba(15, 23, 42, 0.3) 0%,
+                rgba(15, 23, 42, 0.6) 100%);
+            z-index: 2;
+        }
+        
+        .main-header-content {
+            position: relative;
+            z-index: 3;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 24px;
+            flex-wrap: wrap;
+        }
+        
+        .main-header-left {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        
+        .main-header-brand {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+        
+        .main-header-logo {
+            width: 48px;
+            height: 48px;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+        }
+        
+        .main-header-titles {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        
+        .main-header-title {
+            font-size: 24px;
+            font-weight: 700;
+            background: linear-gradient(135deg, #ffffff, #60a5fa);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin: 0;
+            line-height: 1.2;
+        }
+        
+        .main-header-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 13px;
+            color: #94a3b8;
+            text-decoration: none;
+            transition: color 0.2s ease;
+        }
+        
+        .main-header-link:hover {
+            color: #60a5fa;
+        }
+        
+        .main-header-status {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        
+        .main-status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 14px;
+            background: rgba(16, 185, 129, 0.15);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            border-radius: 999px;
+            font-size: 12px;
+            font-weight: 500;
+            color: #6ee7b7;
+        }
+        
+        .main-status-badge.offline {
+            background: rgba(239, 68, 68, 0.15);
+            border-color: rgba(239, 68, 68, 0.3);
+            color: #fca5a5;
+        }
+        
+        .main-status-badge.connecting {
+            background: rgba(251, 191, 36, 0.15);
+            border-color: rgba(251, 191, 36, 0.3);
+            color: #fcd34d;
+        }
+        
+        .main-header-details-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 12px;
+            background: rgba(148, 163, 184, 0.1);
+            border: 1px solid rgba(148, 163, 184, 0.2);
+            border-radius: 8px;
+            font-size: 12px;
+            font-weight: 500;
+            color: #94a3b8;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .main-header-details-btn:hover {
+            background: rgba(148, 163, 184, 0.2);
+            color: #e5e7eb;
+        }
+        
+        /* Main Header Metrics */
+        .main-header-metrics {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+        
+        .main-metric {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 14px 18px;
+            background: rgba(0, 0, 0, 0.25);
+            border: 1px solid rgba(148, 163, 184, 0.12);
+            border-radius: 14px;
+            min-width: 130px;
+            transition: all 0.2s ease;
+        }
+        
+        .main-metric:hover {
+            border-color: rgba(148, 163, 184, 0.25);
+            background: rgba(0, 0, 0, 0.35);
+        }
+        
+        .main-metric-icon {
+            width: 38px;
+            height: 38px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .main-metric-icon-cpu {
+            background: linear-gradient(135deg, rgba(59, 130, 246, 0.2), rgba(99, 102, 241, 0.1));
+            color: #60a5fa;
+        }
+        
+        .main-metric-icon-memory {
+            background: linear-gradient(135deg, rgba(16, 185, 129, 0.2), rgba(52, 211, 153, 0.1));
+            color: #34d399;
+        }
+        
+        .main-metric-icon-latency {
+            background: linear-gradient(135deg, rgba(168, 85, 247, 0.2), rgba(139, 92, 246, 0.1));
+            color: #c084fc;
+        }
+        
+        .main-metric-content {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+        
+        .main-metric-label {
+            font-size: 10px;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: #64748b;
+        }
+        
+        .main-metric-value {
+            font-size: 18px;
+            font-weight: 700;
+            color: #e5e7eb;
+        }
+        
+        /* Responsive for Hooks, Hook Creator, Header */
+        @media (max-width: 1100px) {
+            .hc-main-layout {
+                grid-template-columns: 1fr;
+            }
+            
+            .hc-sidebar {
+                position: static;
+                max-height: none;
+            }
+            
+            .hc-sidebar-content {
+                max-height: 300px;
+            }
+        }
+        
+        @media (max-width: 768px) {
+            .hooks-stats-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+            
+            .hc-stats-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+            
+            .main-header-content {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+            
+            .main-header-metrics {
+                width: 100%;
+            }
+            
+            .main-metric {
+                flex: 1;
+                min-width: 0;
+            }
+        }
+        
+        @media (max-width: 480px) {
+            .hooks-stats-grid,
+            .hc-stats-grid {
+                grid-template-columns: repeat(2, 1fr);
+                gap: 8px;
+            }
+            
+            .main-header {
+                padding: 20px;
+            }
+            
+            .main-header-title {
+                font-size: 20px;
+            }
+            
+            .main-header-metrics {
+                flex-direction: column;
+            }
+        }
+        
+        /* ============================================
+           END MODERNIZED HOOKS & HEADER STYLES
+           ============================================ */
+
+        /* ============================================
+           MODERNIZED FILE SYSTEM TAB STYLES
+           ============================================ */
+        
+        /* File System Hero Customizations */
+        .fs-hero .dash-hero-orb-1,
+        .fs-orb-1 {
+            background: rgba(34, 211, 238, 0.25) !important;
+        }
+        
+        .fs-hero .dash-hero-orb-2,
+        .fs-orb-2 {
+            background: rgba(6, 182, 212, 0.2) !important;
+        }
+        
+        .fs-badge {
+            background: rgba(34, 211, 238, 0.15) !important;
+            border-color: rgba(34, 211, 238, 0.3) !important;
+            color: #67e8f9 !important;
+        }
+        
+        /* File System Stats Grid */
+        .fs-stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 12px;
+            margin-bottom: 24px;
+        }
+        
+        .fs-stat-card {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 20px 16px;
+            background: rgba(15, 23, 42, 0.7);
+            border: 1px solid rgba(148, 163, 184, 0.15);
+            border-radius: 16px;
+            text-align: center;
+            transition: all 0.3s ease;
+        }
+        
+        .fs-stat-card:hover {
+            transform: translateY(-3px);
+            border-color: rgba(148, 163, 184, 0.25);
+            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.25);
+        }
+        
+        .fs-stat-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 12px;
+        }
+        
+        .fs-stat-value {
+            font-size: 24px;
+            font-weight: 700;
+            color: #e5e7eb;
+            line-height: 1;
+            margin-bottom: 6px;
+        }
+        
+        .fs-stat-label {
+            font-size: 11px;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: #64748b;
+        }
+        
+        /* File System Stat Card Color Variants */
+        .fs-stat-files .fs-stat-icon { background: linear-gradient(135deg, rgba(59, 130, 246, 0.2), rgba(99, 102, 241, 0.1)); color: #60a5fa; }
+        .fs-stat-size .fs-stat-icon { background: linear-gradient(135deg, rgba(168, 85, 247, 0.2), rgba(139, 92, 246, 0.1)); color: #c084fc; }
+        .fs-stat-data .fs-stat-icon { background: linear-gradient(135deg, rgba(34, 211, 238, 0.2), rgba(6, 182, 212, 0.1)); color: #22d3ee; }
+        .fs-stat-cogs .fs-stat-icon { background: linear-gradient(135deg, rgba(251, 191, 36, 0.2), rgba(245, 158, 11, 0.1)); color: #fbbf24; }
+        .fs-stat-ext .fs-stat-icon { background: linear-gradient(135deg, rgba(16, 185, 129, 0.2), rgba(52, 211, 153, 0.1)); color: #34d399; }
+        .fs-stat-logs .fs-stat-icon { background: linear-gradient(135deg, rgba(249, 115, 22, 0.2), rgba(234, 88, 12, 0.1)); color: #fb923c; }
+        .fs-stat-hits .fs-stat-icon { background: linear-gradient(135deg, rgba(52, 211, 153, 0.2), rgba(16, 185, 129, 0.1)); color: #6ee7b7; }
+        .fs-stat-misses .fs-stat-icon { background: linear-gradient(135deg, rgba(239, 68, 68, 0.2), rgba(220, 38, 38, 0.1)); color: #f87171; }
+        
+        .fs-stat-files:hover { border-color: rgba(59, 130, 246, 0.4); }
+        .fs-stat-size:hover { border-color: rgba(168, 85, 247, 0.4); }
+        .fs-stat-data:hover { border-color: rgba(34, 211, 238, 0.4); }
+        .fs-stat-cogs:hover { border-color: rgba(251, 191, 36, 0.4); }
+        .fs-stat-ext:hover { border-color: rgba(16, 185, 129, 0.4); }
+        .fs-stat-logs:hover { border-color: rgba(249, 115, 22, 0.4); }
+        .fs-stat-hits:hover { border-color: rgba(52, 211, 153, 0.4); }
+        .fs-stat-misses:hover { border-color: rgba(239, 68, 68, 0.4); }
+        
+        /* File System Explorer */
+        .fs-explorer {
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid rgba(148, 163, 184, 0.15);
+            border-radius: 20px;
+            overflow: hidden;
+        }
+        
+        .fs-explorer-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 18px 24px;
+            background: rgba(0, 0, 0, 0.2);
+            border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+        }
+        
+        .fs-explorer-title {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 15px;
+            font-weight: 600;
+            color: #e5e7eb;
+        }
+        
+        .fs-list {
+            padding: 16px;
+            min-height: 200px;
+        }
+        
+        /* ============================================
+           MODERNIZED FILE BROWSER TAB STYLES
+           ============================================ */
+        
+        /* File Browser Hero Customizations */
+        .fb-hero .dash-hero-orb-1,
+        .fb-orb-1 {
+            background: rgba(251, 191, 36, 0.25) !important;
+        }
+        
+        .fb-hero .dash-hero-orb-2,
+        .fb-orb-2 {
+            background: rgba(245, 158, 11, 0.2) !important;
+        }
+        
+        .fb-badge {
+            background: rgba(251, 191, 36, 0.15) !important;
+            border-color: rgba(251, 191, 36, 0.3) !important;
+            color: #fcd34d !important;
+        }
+        
+        .fb-explorer {
+            border-radius: 16px;
+            overflow: hidden;
+            border: 1px solid rgba(148, 163, 184, 0.15);
+        }
+        
+        .fb-dir-header {
+            background: rgba(0, 0, 0, 0.3);
+            border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+        }
+        
+        .fb-editor-pane {
+            background: rgba(15, 23, 42, 0.95);
+            border-left: 1px solid rgba(148, 163, 184, 0.15);
+        }
+        
+        .fb-editor-header {
+            background: rgba(0, 0, 0, 0.3);
+            border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+            padding: 12px 16px;
+        }
+        
+        .fb-filename {
+            font-size: 12px;
+            font-weight: 600;
+            color: #fcd34d;
+        }
+        
+        .fb-btn {
+            background: rgba(148, 163, 184, 0.1);
+            border: 1px solid rgba(148, 163, 184, 0.2);
+            color: #e5e7eb;
+            border-radius: 6px;
+            padding: 6px 12px;
+            font-size: 11px;
+            transition: all 0.2s ease;
+        }
+        
+        .fb-btn:hover {
+            background: rgba(148, 163, 184, 0.2);
+        }
+        
+        .fb-btn-save {
+            background: linear-gradient(135deg, rgba(16, 185, 129, 0.2), rgba(52, 211, 153, 0.1)) !important;
+            border-color: rgba(16, 185, 129, 0.3) !important;
+            color: #34d399 !important;
+        }
+        
+        .fb-btn-save:hover {
+            background: linear-gradient(135deg, rgba(16, 185, 129, 0.3), rgba(52, 211, 153, 0.2)) !important;
+        }
+        
+        .fb-textarea {
+            background: rgba(0, 0, 0, 0.4);
+            border: none;
+            color: #e5e7eb;
+            font-family: 'Fira Code', 'Monaco', 'Consolas', monospace;
+            font-size: 13px;
+            line-height: 1.6;
+        }
+        
+        /* ============================================
+           MODERNIZED CHAT CONSOLE TAB STYLES
+           ============================================ */
+        
+        /* Chat Console Hero Customizations */
+        .chat-hero .dash-hero-orb-1,
+        .chat-orb-1 {
+            background: rgba(236, 72, 153, 0.25) !important;
+        }
+        
+        .chat-hero .dash-hero-orb-2,
+        .chat-orb-2 {
+            background: rgba(219, 39, 119, 0.2) !important;
+        }
+        
+        .chat-badge {
+            background: rgba(236, 72, 153, 0.15) !important;
+            border-color: rgba(236, 72, 153, 0.3) !important;
+            color: #f9a8d4 !important;
+        }
+        
+        .chat-experimental-badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 6px 12px;
+            background: linear-gradient(135deg, rgba(251, 191, 36, 0.2), rgba(245, 158, 11, 0.15));
+            border: 1px solid rgba(251, 191, 36, 0.3);
+            border-radius: 6px;
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.05em;
+            color: #fcd34d;
+        }
+        
+        .chat-columns {
+            display: grid;
+            grid-template-columns: 350px 1fr;
+            gap: 20px;
+        }
+        
+        .chat-column-card {
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid rgba(148, 163, 184, 0.15);
+            border-radius: 20px;
+            overflow: hidden;
+        }
+        
+        .chat-column-header {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            padding: 18px 20px;
+            background: rgba(0, 0, 0, 0.2);
+            border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+        }
+        
+        .chat-column-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .chat-column-icon-servers {
+            background: linear-gradient(135deg, rgba(168, 85, 247, 0.2), rgba(139, 92, 246, 0.1));
+            color: #c084fc;
+        }
+        
+        .chat-column-icon-channel {
+            background: linear-gradient(135deg, rgba(236, 72, 153, 0.2), rgba(219, 39, 119, 0.1));
+            color: #f9a8d4;
+        }
+        
+        .chat-column-title {
+            font-size: 15px;
+            font-weight: 600;
+            color: #e5e7eb;
+            margin-bottom: 2px;
+        }
+        
+        .chat-column-subtitle {
+            font-size: 12px;
+            color: #64748b;
+        }
+        
+        .chat-guilds-list {
+            padding: 12px;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        
+        .chat-channels-list {
+            padding: 12px;
+            max-height: 200px;
+            overflow-y: auto;
+            border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+        }
+        
+        .chat-message-area {
+            padding: 16px;
+        }
+        
+        .chat-message-log {
+            height: 200px;
+            overflow-y: auto;
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(148, 163, 184, 0.15);
+            border-radius: 12px;
+            padding: 12px;
+            margin-bottom: 12px;
+        }
+        
+        .chat-input-row {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        
+        .chat-input {
+            flex: 1;
+            min-width: 180px;
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(148, 163, 184, 0.15);
+            border-radius: 10px;
+            padding: 12px 16px;
+            color: #e5e7eb;
+            font-size: 13px;
+            transition: all 0.2s ease;
+        }
+        
+        .chat-input:focus {
+            outline: none;
+            border-color: rgba(236, 72, 153, 0.5);
+            box-shadow: 0 0 0 3px rgba(236, 72, 153, 0.1);
+        }
+        
+        .chat-input::placeholder { color: #64748b; }
+        
+        .chat-send-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 12px 20px;
+            background: linear-gradient(135deg, #ec4899, #db2777);
+            border: none;
+            border-radius: 10px;
+            color: white;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            box-shadow: 0 4px 15px rgba(236, 72, 153, 0.3);
+        }
+        
+        .chat-send-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(236, 72, 153, 0.4);
+        }
+        
+        .chat-history-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 12px 16px;
+            background: rgba(148, 163, 184, 0.1);
+            border: 1px solid rgba(148, 163, 184, 0.2);
+            border-radius: 10px;
+            color: #e5e7eb;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .chat-history-btn:hover {
+            background: rgba(148, 163, 184, 0.2);
+        }
+        
+        /* ============================================
+           MODERNIZED SYSTEM TAB STYLES
+           ============================================ */
+        
+        /* System Hero Customizations */
+        .sys-hero .dash-hero-orb-1,
+        .sys-orb-1 {
+            background: rgba(99, 102, 241, 0.25) !important;
+        }
+        
+        .sys-hero .dash-hero-orb-2,
+        .sys-orb-2 {
+            background: rgba(79, 70, 229, 0.2) !important;
+        }
+        
+        .sys-badge {
+            background: rgba(99, 102, 241, 0.15) !important;
+            border-color: rgba(99, 102, 241, 0.3) !important;
+            color: #a5b4fc !important;
+        }
+        
+        .sys-details-container {
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid rgba(148, 163, 184, 0.15);
+            border-radius: 20px;
+            padding: 24px;
+        }
+        
+        /* Responsive for New Tabs */
+        @media (max-width: 1000px) {
+            .chat-columns {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        @media (max-width: 768px) {
+            .fs-stats-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+        
+        @media (max-width: 480px) {
+            .fs-stats-grid {
+                grid-template-columns: repeat(2, 1fr);
+                gap: 8px;
+            }
+            
+            .chat-input-row {
+                flex-direction: column;
+            }
+            
+            .chat-send-btn,
+            .chat-history-btn {
+                width: 100%;
+                justify-content: center;
+            }
+        }
+        
+        /* ============================================
+           END FILE SYSTEM/BROWSER/CHAT/SYSTEM STYLES
+           ============================================ */
+
+        /* ============================================
+           MODERNIZED SYSTEM TAB - DASHBOARD LAYOUT
+           ============================================ */
+        
+        .sys-dashboard {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        
+        .sys-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 16px;
+        }
+        
+        .sys-card {
+            background: rgba(15, 23, 42, 0.7);
+            border: 1px solid rgba(148, 163, 184, 0.15);
+            border-radius: 16px;
+            overflow: hidden;
+            transition: all 0.3s ease;
+        }
+        
+        .sys-card:hover {
+            border-color: var(--card-color, rgba(148, 163, 184, 0.3));
+            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.2);
+            transform: translateY(-2px);
+        }
+        
+        .sys-card-wide {
+            grid-column: 1 / -1;
+        }
+        
+        .sys-card-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 16px 20px;
+            background: rgba(0, 0, 0, 0.25);
+            border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+        }
+        
+        .sys-card-icon {
+            width: 38px;
+            height: 38px;
+            border-radius: 10px;
+            background: linear-gradient(135deg, color-mix(in srgb, var(--card-color, #6366f1) 20%, transparent), color-mix(in srgb, var(--card-color, #6366f1) 10%, transparent));
+            color: var(--card-color, #a5b4fc);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+        
+        .sys-card-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: #e5e7eb;
+            flex: 1;
+        }
+        
+        .sys-card-stats {
+            display: flex;
+            gap: 16px;
+        }
+        
+        .sys-mini-stat {
+            font-size: 12px;
+            color: #94a3b8;
+        }
+        
+        .sys-mini-stat strong {
+            color: #e5e7eb;
+        }
+        
+        .sys-card-body {
+            padding: 16px 20px;
+        }
+        
+        .sys-card-actions {
+            display: flex;
+            gap: 8px;
+            padding: 12px 20px 16px;
+            flex-wrap: wrap;
+        }
+        
+        .sys-prop {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 0;
+            border-bottom: 1px solid rgba(148, 163, 184, 0.08);
+        }
+        
+        .sys-prop:last-child {
+            border-bottom: none;
+        }
+        
+        .sys-prop-label {
+            font-size: 13px;
+            color: #94a3b8;
+        }
+        
+        .sys-prop-value {
+            font-size: 13px;
+            font-weight: 600;
+            color: #e5e7eb;
+        }
+        
+        .sys-badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+            border: 1px solid;
+        }
+        
+        .sys-progress {
+            height: 6px;
+            background: rgba(148, 163, 184, 0.15);
+            border-radius: 3px;
+            margin: 12px 0;
+            overflow: hidden;
+        }
+        
+        .sys-progress-bar {
+            height: 100%;
+            border-radius: 3px;
+            transition: width 0.5s ease;
+        }
+        
+        .sys-hint {
+            font-size: 11px;
+            color: #64748b;
+            margin-top: 8px;
+            padding: 8px 12px;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 6px;
+        }
+        
+        .sys-btn {
+            padding: 8px 14px;
+            border-radius: 8px;
+            font-size: 12px;
+            font-weight: 500;
+            border: 1px solid rgba(148, 163, 184, 0.2);
+            background: rgba(148, 163, 184, 0.1);
+            color: #e5e7eb;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .sys-btn:hover {
+            background: rgba(148, 163, 184, 0.2);
+        }
+        
+        .sys-btn-sm {
+            padding: 5px 10px;
+            border-radius: 6px;
+            font-size: 11px;
+            font-weight: 500;
+            border: 1px solid rgba(148, 163, 184, 0.2);
+            background: rgba(148, 163, 184, 0.1);
+            color: #e5e7eb;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .sys-btn-sm:hover {
+            background: rgba(148, 163, 184, 0.2);
+        }
+        
+        .sys-btn-danger {
+            border-color: rgba(239, 68, 68, 0.3);
+            color: #f87171;
+        }
+        
+        .sys-btn-danger:hover {
+            background: rgba(239, 68, 68, 0.15);
+        }
+        
+        /* System Locks Table */
+        .sys-locks-body {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        
+        .sys-locks-table {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        
+        .sys-locks-header {
+            display: grid;
+            grid-template-columns: 1fr 80px 90px 100px 140px;
+            gap: 12px;
+            padding: 10px 12px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: #64748b;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 8px;
+        }
+        
+        .sys-locks-row {
+            display: grid;
+            grid-template-columns: 1fr 80px 90px 100px 140px;
+            gap: 12px;
+            padding: 10px 12px;
+            align-items: center;
+            font-size: 12px;
+            color: #e5e7eb;
+            background: rgba(0, 0, 0, 0.1);
+            border-radius: 8px;
+            transition: background 0.2s ease;
+        }
+        
+        .sys-locks-row:hover {
+            background: rgba(236, 72, 153, 0.08);
+        }
+        
+        .sys-lock-path {
+            font-family: 'Fira Code', monospace;
+            font-size: 11px;
+            color: #94a3b8;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        
+        .sys-lock-chip {
+            display: inline-flex;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        
+        .sys-lock-chip.locked {
+            background: rgba(239, 68, 68, 0.15);
+            color: #f87171;
+        }
+        
+        .sys-lock-chip.idle {
+            background: rgba(16, 185, 129, 0.15);
+            color: #34d399;
+        }
+        
+        .sys-lock-time {
+            font-size: 11px;
+            color: #64748b;
+        }
+        
+        .sys-lock-actions {
+            display: flex;
+            gap: 6px;
+            justify-content: flex-end;
+        }
+        
+        .sys-empty-locks {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            padding: 40px 20px;
+            text-align: center;
+            color: #94a3b8;
+        }
+        
+        .sys-empty-sub {
+            font-size: 12px;
+            color: #64748b;
+        }
+        
+        @media (max-width: 1200px) {
+            .sys-locks-header,
+            .sys-locks-row {
+                grid-template-columns: 1fr 70px 80px 90px 120px;
+            }
+        }
+        
+        @media (max-width: 900px) {
+            .sys-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .sys-locks-header,
+            .sys-locks-row {
+                grid-template-columns: 1fr 60px auto;
+            }
+            
+            .sys-locks-header > *:nth-child(3),
+            .sys-locks-header > *:nth-child(4),
+            .sys-locks-row > *:nth-child(3),
+            .sys-locks-row > *:nth-child(4) {
+                display: none;
+            }
+        }
+        
+        /* ============================================
+           MODERNIZED EVENTS TIMELINE STYLES
+           ============================================ */
+        
+        .events-timeline {
+            padding: 20px;
+            position: relative;
+        }
+        
+        .events-empty {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 16px;
+            padding: 60px 20px;
+            text-align: center;
+        }
+        
+        .events-empty-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: #e5e7eb;
+        }
+        
+        .events-empty-text {
+            font-size: 14px;
+            color: #64748b;
+        }
+        
+        .event-item {
+            position: relative;
+            padding-left: 28px;
+            padding-bottom: 20px;
+        }
+        
+        .event-item:last-child {
+            padding-bottom: 0;
+        }
+        
+        .event-item:last-child .event-line {
+            display: none;
+        }
+        
+        .event-line {
+            position: absolute;
+            left: 5px;
+            top: 12px;
+            bottom: 0;
+            width: 2px;
+            opacity: 0.3;
+        }
+        
+        .event-dot {
+            position: absolute;
+            left: 0;
+            top: 4px;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+        }
+        
+        .event-content {
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid rgba(148, 163, 184, 0.12);
+            border-radius: 12px;
+            padding: 14px 16px;
+            transition: all 0.2s ease;
+        }
+        
+        .event-content:hover {
+            border-color: rgba(148, 163, 184, 0.25);
+            background: rgba(15, 23, 42, 0.8);
+        }
+        
+        .event-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+        }
+        
+        .event-type {
+            display: inline-flex;
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+            border: 1px solid;
+        }
+        
+        .event-time {
+            font-size: 11px;
+            color: #64748b;
+        }
+        
+        .event-details {
+            margin-top: 12px;
+            padding-top: 12px;
+            border-top: 1px solid rgba(148, 163, 184, 0.1);
+        }
+        
+        .event-detail-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 12px;
+            padding: 6px 0;
+        }
+        
+        .event-detail-key {
+            font-size: 12px;
+            color: #94a3b8;
+            flex-shrink: 0;
+        }
+        
+        .event-detail-value {
+            font-size: 11px;
+            color: #e5e7eb;
+            font-family: 'Fira Code', monospace;
+            word-break: break-all;
+            text-align: right;
+        }
+        
+        /* ============================================
+           MODERNIZED TICKETS TAB STYLES
+           ============================================ */
+        
+        /* Tickets Hero Customizations */
+        .tickets-hero .dash-hero-orb-1,
+        .tickets-orb-1 {
+            background: rgba(168, 85, 247, 0.25) !important;
+        }
+        
+        .tickets-hero .dash-hero-orb-2,
+        .tickets-orb-2 {
+            background: rgba(139, 92, 246, 0.2) !important;
+        }
+        
+        .tickets-badge {
+            background: rgba(168, 85, 247, 0.15) !important;
+            border-color: rgba(168, 85, 247, 0.3) !important;
+            color: #c4b5fd !important;
+        }
+        
+        /* Tickets Notice */
+        .tickets-notice {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            padding: 16px 20px;
+            background: linear-gradient(135deg, rgba(168, 85, 247, 0.1), rgba(139, 92, 246, 0.08));
+            border: 1px solid rgba(168, 85, 247, 0.25);
+            border-radius: 16px;
+            margin-bottom: 20px;
+        }
+        
+        .tickets-notice-icon {
+            width: 44px;
+            height: 44px;
+            border-radius: 12px;
+            background: rgba(168, 85, 247, 0.15);
+            color: #a855f7;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+        
+        .tickets-notice-content { flex: 1; }
+        
+        .tickets-notice-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: #e5e7eb;
+            margin-bottom: 4px;
+        }
+        
+        .tickets-notice-text {
+            font-size: 13px;
+            color: #94a3b8;
+        }
+        
+        .tickets-notice-text strong { color: #c084fc; }
+        
+        .tickets-notice-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 18px;
+            background: linear-gradient(135deg, #a855f7, #7c3aed);
+            border: none;
+            border-radius: 10px;
+            color: white;
+            font-size: 13px;
+            font-weight: 600;
+            text-decoration: none;
+            transition: all 0.2s ease;
+            box-shadow: 0 4px 15px rgba(168, 85, 247, 0.3);
+        }
+        
+        .tickets-notice-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(168, 85, 247, 0.4);
+        }
+        
+        /* Tickets Filters Card */
+        .tickets-filters-card {
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid rgba(148, 163, 184, 0.15);
+            border-radius: 20px;
+            overflow: hidden;
+            margin-bottom: 20px;
+        }
+        
+        .tickets-filters-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 16px 24px;
+            background: rgba(0, 0, 0, 0.2);
+            border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+        }
+        
+        .tickets-filters-icon {
+            width: 36px;
+            height: 36px;
+            border-radius: 10px;
+            background: linear-gradient(135deg, rgba(168, 85, 247, 0.2), rgba(139, 92, 246, 0.1));
+            color: #c084fc;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .tickets-filters-title {
+            font-size: 15px;
+            font-weight: 600;
+            color: #e5e7eb;
+        }
+        
+        .tickets-filters-body { padding: 20px 24px; }
+        
+        .tickets-filters-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 16px;
+            margin-bottom: 16px;
+        }
+        
+        .tickets-filter-group { display: flex; flex-direction: column; gap: 8px; }
+        
+        .tickets-filter-label {
+            font-size: 12px;
+            font-weight: 500;
+            color: #94a3b8;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        
+        .tickets-filter-select {
+            border-color: rgba(168, 85, 247, 0.3);
+            background-image: url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%23a855f7' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+            width: 100%;
+        }
+        
+        .tickets-filter-select:focus {
+            border-color: rgba(168, 85, 247, 0.5);
+            box-shadow: 0 0 0 3px rgba(168, 85, 247, 0.1);
+        }
+        
+        .tickets-search-row { display: flex; gap: 12px; }
+        
+        .tickets-search-wrap {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(148, 163, 184, 0.15);
+            border-radius: 10px;
+            padding: 0 14px;
+        }
+        
+        .tickets-search-wrap:focus-within {
+            border-color: rgba(168, 85, 247, 0.5);
+        }
+        
+        .tickets-search-wrap svg { color: #64748b; }
+        
+        .tickets-search-input {
+            flex: 1;
+            background: transparent;
+            border: none;
+            outline: none;
+            padding: 12px 0;
+            color: #e5e7eb;
+            font-size: 13px;
+        }
+        
+        /* Tickets Table Card */
+        .tickets-table-card {
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid rgba(148, 163, 184, 0.15);
+            border-radius: 20px;
+            overflow: hidden;
+        }
+        
+        .tickets-table-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px 24px;
+            background: rgba(0, 0, 0, 0.2);
+            border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+        }
+        
+        .tickets-table-title {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 15px;
+            font-weight: 600;
+            color: #e5e7eb;
+        }
+        
+        .tickets-count {
+            font-size: 13px;
+            color: #94a3b8;
+            padding: 6px 12px;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 8px;
+        }
+        
+        .tickets-table-body { min-height: 200px; }
+        
+        .tickets-empty {
+            padding: 60px 24px;
+            text-align: center;
+        }
+        
+        .tickets-empty-icon { font-size: 48px; margin-bottom: 16px; }
+        .tickets-empty-title { font-size: 16px; font-weight: 600; color: #e5e7eb; margin-bottom: 8px; }
+        .tickets-empty-text { font-size: 14px; color: #94a3b8; margin-bottom: 16px; }
+        .tickets-empty-link { color: #a855f7; text-decoration: none; font-weight: 600; }
+        
+        .tickets-loading {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            padding: 60px 24px;
+            color: #94a3b8;
+        }
+        
+        .tickets-loading-spinner {
+            width: 32px;
+            height: 32px;
+            border: 3px solid rgba(168, 85, 247, 0.2);
+            border-top-color: #a855f7;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin { to { transform: rotate(360deg); } }
+        
+        .tickets-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        
+        .tickets-table th {
+            padding: 14px 16px;
+            text-align: left;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: #64748b;
+            background: rgba(0, 0, 0, 0.2);
+            border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+        }
+        
+        .tickets-table td {
+            padding: 14px 16px;
+            font-size: 13px;
+            color: #e5e7eb;
+            border-bottom: 1px solid rgba(148, 163, 184, 0.08);
+        }
+        
+        .tickets-table tr:hover td {
+            background: rgba(168, 85, 247, 0.05);
+        }
+        
+        .tickets-pagination {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px 24px;
+            border-top: 1px solid rgba(148, 163, 184, 0.1);
+        }
+        
+        .tickets-page-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 10px 16px;
+            background: rgba(148, 163, 184, 0.1);
+            border: 1px solid rgba(148, 163, 184, 0.2);
+            border-radius: 8px;
+            color: #e5e7eb;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .tickets-page-btn:hover:not(:disabled) { background: rgba(148, 163, 184, 0.2); }
+        .tickets-page-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        
+        .tickets-page-info { font-size: 13px; color: #94a3b8; }
+        
+        @media (max-width: 900px) {
+            .tickets-filters-grid { grid-template-columns: repeat(2, 1fr); }
+        }
+        
+        @media (max-width: 600px) {
+            .tickets-filters-grid { grid-template-columns: 1fr; }
+            .tickets-notice { flex-direction: column; text-align: center; }
+        }
+        
+        /* ============================================
+           MODERNIZED GUILDS TAB STYLES
+           ============================================ */
+        
+        .guilds-hero .dash-hero-orb-1,
+        .guilds-orb-1 {
+            background: rgba(16, 185, 129, 0.25) !important;
+        }
+        
+        .guilds-hero .dash-hero-orb-2,
+        .guilds-orb-2 {
+            background: rgba(52, 211, 153, 0.2) !important;
+        }
+        
+        .guilds-badge {
+            background: rgba(16, 185, 129, 0.15) !important;
+            border-color: rgba(16, 185, 129, 0.3) !important;
+            color: #6ee7b7 !important;
+        }
+        
+        .guilds-card {
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid rgba(148, 163, 184, 0.15);
+            border-radius: 20px;
+            overflow: hidden;
+        }
+        
+        .guilds-card-header {
+            padding: 18px 24px;
+            background: rgba(0, 0, 0, 0.2);
+            border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+        }
+        
+        .guilds-card-title {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 15px;
+            font-weight: 600;
+            color: #e5e7eb;
+            margin-bottom: 4px;
+        }
+        
+        .guilds-card-subtitle {
+            font-size: 13px;
+            color: #64748b;
+        }
+        
+        .guilds-card-body { padding: 20px; }
+        
+        .guilds-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 16px;
+        }
+        
+        .guilds-loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            padding: 60px 24px;
+            color: #94a3b8;
+            grid-column: 1 / -1;
+        }
+        
+        .guilds-loading-spinner {
+            width: 24px;
+            height: 24px;
+            border: 3px solid rgba(16, 185, 129, 0.2);
+            border-top-color: #10b981;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        
+        /* ============================================
+           MODERNIZED EVENTS TAB STYLES
+           ============================================ */
+        
+        .events-hero .dash-hero-orb-1,
+        .events-orb-1 {
+            background: rgba(239, 68, 68, 0.25) !important;
+        }
+        
+        .events-hero .dash-hero-orb-2,
+        .events-orb-2 {
+            background: rgba(248, 113, 113, 0.2) !important;
+        }
+        
+        .events-badge {
+            background: rgba(239, 68, 68, 0.15) !important;
+            border-color: rgba(239, 68, 68, 0.3) !important;
+            color: #fca5a5 !important;
+        }
+        
+        .events-live-dot {
+            width: 8px;
+            height: 8px;
+            background: #ef4444;
+            border-radius: 50%;
+            animation: eventsPulse 2s ease-in-out infinite;
+        }
+        
+        @keyframes eventsPulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.5; transform: scale(0.9); }
+        }
+        
+        .events-counter {
+            padding: 8px 16px;
+            background: rgba(239, 68, 68, 0.15);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            border-radius: 10px;
+            font-size: 13px;
+            font-weight: 600;
+            color: #fca5a5;
+        }
+        
+        .events-card {
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid rgba(148, 163, 184, 0.15);
+            border-radius: 20px;
+            overflow: hidden;
+        }
+        
+        .events-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 18px 24px;
+            background: rgba(0, 0, 0, 0.2);
+            border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+        }
+        
+        .events-card-title {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 15px;
+            font-weight: 600;
+            color: #e5e7eb;
+        }
+        
+        .events-card-subtitle {
+            font-size: 13px;
+            color: #64748b;
+        }
+        
+        .events-timeline {
+            padding: 16px;
+            min-height: 300px;
+            max-height: 600px;
+            overflow-y: auto;
+        }
+        
+        /* ============================================
+           MODERNIZED INVITE TAB STYLES
+           ============================================ */
+        
+        .invite-hero .dash-hero-orb-1,
+        .invite-orb-1 {
+            background: rgba(59, 130, 246, 0.25) !important;
+        }
+        
+        .invite-hero .dash-hero-orb-2,
+        .invite-orb-2 {
+            background: rgba(99, 102, 241, 0.2) !important;
+        }
+        
+        .invite-badge {
+            background: rgba(59, 130, 246, 0.15) !important;
+            border-color: rgba(59, 130, 246, 0.3) !important;
+            color: #93c5fd !important;
+        }
+        
+        .invite-portal-btn {
+            background: rgba(59, 130, 246, 0.15) !important;
+            border: 1px solid rgba(59, 130, 246, 0.3) !important;
+            color: #93c5fd !important;
+            text-decoration: none;
+        }
+        
+        .invite-portal-btn:hover {
+            background: rgba(59, 130, 246, 0.25) !important;
+        }
+        
+        .invite-builder-card {
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid rgba(148, 163, 184, 0.15);
+            border-radius: 20px;
+            overflow: hidden;
+        }
+        
+        .invite-builder-header {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            padding: 20px 24px;
+            background: rgba(0, 0, 0, 0.2);
+            border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+        }
+        
+        .invite-builder-icon {
+            width: 48px;
+            height: 48px;
+            border-radius: 14px;
+            background: linear-gradient(135deg, rgba(59, 130, 246, 0.2), rgba(99, 102, 241, 0.1));
+            color: #60a5fa;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .invite-builder-title {
+            font-size: 17px;
+            font-weight: 600;
+            color: #e5e7eb;
+            margin-bottom: 4px;
+        }
+        
+        .invite-builder-subtitle {
+            font-size: 13px;
+            color: #64748b;
+        }
+        
+        .invite-builder-body { padding: 24px; }
+        
+        .invite-form-group { margin-bottom: 20px; }
+        .invite-form-full { grid-column: 1 / -1; }
+        
+        .invite-form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        
+        .invite-label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            font-weight: 600;
+            color: #60a5fa;
+            margin-bottom: 10px;
+        }
+        
+        .invite-input {
+            width: 100%;
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(59, 130, 246, 0.25);
+            border-radius: 12px;
+            padding: 14px 18px;
+            color: #e5e7eb;
+            font-size: 14px;
+            transition: all 0.2s ease;
+        }
+        
+        .invite-input:focus {
+            outline: none;
+            border-color: rgba(59, 130, 246, 0.5);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        }
+        
+        .invite-hint {
+            font-size: 12px;
+            color: #64748b;
+            margin-top: 8px;
+        }
+        
+        .invite-scopes-box {
+            background: rgba(0, 0, 0, 0.2);
+            border: 1px solid rgba(59, 130, 246, 0.2);
+            border-radius: 12px;
+            padding: 12px;
+        }
+        
+        .invite-scope-option {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background 0.2s ease;
+        }
+        
+        .invite-scope-option:hover { background: rgba(59, 130, 246, 0.1); }
+        
+        .invite-checkbox {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+            accent-color: #3b82f6;
+        }
+        
+        .invite-scope-name {
+            font-size: 14px;
+            font-weight: 600;
+            color: #e5e7eb;
+        }
+        
+        .invite-scope-desc {
+            font-size: 11px;
+            color: #64748b;
+            margin-left: auto;
+        }
+        
+        .invite-output-section {
+            padding: 20px;
+            background: linear-gradient(135deg, rgba(59, 130, 246, 0.08), rgba(99, 102, 241, 0.05));
+            border: 1px solid rgba(59, 130, 246, 0.25);
+            border-radius: 16px;
+            margin-bottom: 20px;
+        }
+        
+        .invite-output-label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            color: #60a5fa;
+            margin-bottom: 12px;
+        }
+        
+        .invite-output-input {
+            width: 100%;
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(59, 130, 246, 0.25);
+            border-radius: 10px;
+            padding: 14px 18px;
+            color: #94a3b8;
+            font-size: 13px;
+            margin-bottom: 16px;
+        }
+        
+        .invite-actions {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+        
+        .invite-generate-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 14px 24px;
+            background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+            border: none;
+            border-radius: 12px;
+            color: white;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            box-shadow: 0 4px 15px rgba(59, 130, 246, 0.3);
+        }
+        
+        .invite-generate-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(59, 130, 246, 0.4);
+        }
+        
+        .invite-secondary-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 14px 20px;
+            background: rgba(148, 163, 184, 0.1);
+            border: 1px solid rgba(148, 163, 184, 0.2);
+            border-radius: 12px;
+            color: #e5e7eb;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .invite-secondary-btn:hover { background: rgba(148, 163, 184, 0.2); }
+        
+        .invite-tip {
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            padding: 14px 18px;
+            background: rgba(59, 130, 246, 0.05);
+            border-left: 3px solid rgba(59, 130, 246, 0.5);
+            border-radius: 0 10px 10px 0;
+            font-size: 12px;
+            color: #94a3b8;
+        }
+        
+        .invite-tip svg { flex-shrink: 0; color: #60a5fa; margin-top: 1px; }
+        
+        @media (max-width: 768px) {
+            .invite-form-row { grid-template-columns: 1fr; }
+        }
+        
+        /* ============================================
+           END TICKETS/GUILDS/EVENTS/INVITE STYLES
+           ============================================ */
+
+        /* ============================================
+           MODERNIZED ROLES & ACCESS TAB STYLES
+           ============================================ */
+        
+        .roles-hero .dash-hero-orb-1,
+        .roles-orb-1 {
+            background: rgba(251, 191, 36, 0.25) !important;
+        }
+        
+        .roles-hero .dash-hero-orb-2,
+        .roles-orb-2 {
+            background: rgba(245, 158, 11, 0.2) !important;
+        }
+        
+        .roles-badge {
+            background: rgba(251, 191, 36, 0.15) !important;
+            border-color: rgba(251, 191, 36, 0.3) !important;
+            color: #fcd34d !important;
+        }
+        
+        .roles-container {
+            min-height: 300px;
+        }
+        
+        .roles-loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            padding: 60px 24px;
+            color: #94a3b8;
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid rgba(148, 163, 184, 0.15);
+            border-radius: 20px;
+        }
+        
+        .roles-loading-spinner {
+            width: 24px;
+            height: 24px;
+            border: 3px solid rgba(251, 191, 36, 0.2);
+            border-top-color: #fbbf24;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        
+        /* Roles Grid Layout */
+        .roles-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        
+        @media (max-width: 1100px) {
+            .roles-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        /* Roles Section Card */
+        .roles-section {
+            background: rgba(15, 23, 42, 0.7);
+            border: 1px solid rgba(148, 163, 184, 0.15);
+            border-radius: 20px;
+            overflow: hidden;
+        }
+        
+        .roles-section-header {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            padding: 20px 24px;
+            background: rgba(0, 0, 0, 0.25);
+            border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+        }
+        
+        .roles-section-icon {
+            width: 44px;
+            height: 44px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+        
+        .roles-section-icon.users {
+            background: linear-gradient(135deg, rgba(59, 130, 246, 0.2), rgba(99, 102, 241, 0.15));
+            color: #60a5fa;
+        }
+        
+        .roles-section-icon.profiles {
+            background: linear-gradient(135deg, rgba(251, 191, 36, 0.2), rgba(245, 158, 11, 0.15));
+            color: #fbbf24;
+        }
+        
+        .roles-section-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: #e5e7eb;
+        }
+        
+        .roles-section-subtitle {
+            font-size: 12px;
+            color: #94a3b8;
+            margin-top: 2px;
+        }
+        
+        .roles-section-body {
+            padding: 20px 24px;
+        }
+        
+        /* Add User Form */
+        .roles-add-form {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            align-items: flex-end;
+            padding: 16px;
+            background: rgba(59, 130, 246, 0.08);
+            border: 1px solid rgba(59, 130, 246, 0.2);
+            border-radius: 14px;
+            margin-bottom: 20px;
+        }
+        
+        .roles-form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            flex: 1;
+            min-width: 180px;
+        }
+        
+        .roles-form-label {
+            font-size: 11px;
+            font-weight: 600;
+            color: #60a5fa;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        
+        .roles-form-input {
+            padding: 10px 14px;
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(148, 163, 184, 0.2);
+            border-radius: 8px;
+            color: #e5e7eb;
+            font-size: 13px;
+            transition: all 0.2s ease;
+        }
+        
+        .roles-form-input:focus {
+            outline: none;
+            border-color: rgba(59, 130, 246, 0.5);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        }
+        
+        .roles-form-select {
+            padding: 10px 36px 10px 14px;
+            border-color: rgba(251, 191, 36, 0.25);
+            background-image: url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%23fbbf24' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+            font-size: 13px;
+        }
+        
+        .roles-form-select:focus {
+            border-color: rgba(251, 191, 36, 0.5);
+            box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.1);
+        }
+        
+        .roles-add-btn {
+            padding: 10px 20px;
+            background: linear-gradient(135deg, #3b82f6, #6366f1);
+            border: none;
+            border-radius: 8px;
+            color: white;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .roles-add-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
+        }
+        
+        .roles-form-hint {
+            font-size: 11px;
+            color: #64748b;
+            margin-top: 8px;
+        }
+        
+        /* Users Table */
+        .roles-table-wrap {
+            overflow-x: auto;
+            border-radius: 12px;
+            border: 1px solid rgba(148, 163, 184, 0.1);
+        }
+        
+        .roles-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        
+        .roles-table thead {
+            background: rgba(0, 0, 0, 0.3);
+        }
+        
+        .roles-table th {
+            padding: 12px 14px;
+            font-size: 11px;
+            font-weight: 600;
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            text-align: left;
+            border-bottom: 1px solid rgba(148, 163, 184, 0.15);
+        }
+        
+        .roles-table td {
+            padding: 12px 14px;
+            font-size: 13px;
+            color: #e5e7eb;
+            border-bottom: 1px solid rgba(148, 163, 184, 0.08);
+        }
+        
+        .roles-table tbody tr:hover {
+            background: rgba(59, 130, 246, 0.05);
+        }
+        
+        .roles-table tbody tr:last-child td {
+            border-bottom: none;
+        }
+        
+        .roles-user-id {
+            font-family: 'Fira Code', monospace;
+            font-size: 11px;
+            color: #94a3b8;
+        }
+        
+        .roles-user-discord {
+            font-family: 'Fira Code', monospace;
+            font-size: 12px;
+            color: #60a5fa;
+        }
+        
+        .roles-user-name {
+            font-weight: 500;
+            color: #e5e7eb;
+        }
+        
+        .roles-table-actions {
+            display: flex;
+            gap: 6px;
+        }
+        
+        .roles-btn-save {
+            padding: 6px 12px;
+            background: rgba(16, 185, 129, 0.15);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            border-radius: 6px;
+            color: #34d399;
+            font-size: 11px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .roles-btn-save:hover {
+            background: rgba(16, 185, 129, 0.25);
+        }
+        
+        .roles-btn-save:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .roles-btn-remove {
+            padding: 6px 12px;
+            background: rgba(239, 68, 68, 0.15);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            border-radius: 6px;
+            color: #f87171;
+            font-size: 11px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .roles-btn-remove:hover {
+            background: rgba(239, 68, 68, 0.25);
+        }
+        
+        .roles-btn-remove:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .roles-table-empty {
+            padding: 30px;
+            text-align: center;
+            color: #64748b;
+        }
+        
+        /* Role Profiles */
+        .roles-profile-card {
+            background: rgba(0, 0, 0, 0.2);
+            border: 1px solid rgba(148, 163, 184, 0.12);
+            border-radius: 14px;
+            margin-bottom: 12px;
+            overflow: hidden;
+            transition: all 0.2s ease;
+        }
+        
+        .roles-profile-card:hover {
+            border-color: rgba(251, 191, 36, 0.25);
+        }
+        
+        .roles-profile-header {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 14px;
+            padding: 16px;
+            cursor: pointer;
+        }
+        
+        .roles-profile-info {
+            flex: 1;
+        }
+        
+        .roles-profile-name {
+            font-size: 15px;
+            font-weight: 600;
+            color: #fbbf24;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .roles-profile-edited {
+            padding: 3px 8px;
+            background: rgba(251, 191, 36, 0.2);
+            border-radius: 4px;
+            font-size: 10px;
+            font-weight: 600;
+            color: #fbbf24;
+            display: none;
+        }
+        
+        .roles-profile-base {
+            font-size: 12px;
+            color: #94a3b8;
+            margin-top: 4px;
+        }
+        
+        .roles-profile-summary {
+            font-size: 11px;
+            color: #64748b;
+            margin-top: 6px;
+            line-height: 1.5;
+        }
+        
+        .roles-profile-actions {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        
+        .roles-btn-edit {
+            padding: 6px 14px;
+            background: rgba(148, 163, 184, 0.1);
+            border: 1px solid rgba(148, 163, 184, 0.2);
+            border-radius: 6px;
+            color: #94a3b8;
+            font-size: 11px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .roles-btn-edit:hover {
+            background: rgba(148, 163, 184, 0.2);
+            color: #e5e7eb;
+        }
+        
+        .roles-btn-delete {
+            padding: 6px 14px;
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid rgba(239, 68, 68, 0.2);
+            border-radius: 6px;
+            color: #f87171;
+            font-size: 11px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .roles-btn-delete:hover {
+            background: rgba(239, 68, 68, 0.2);
+        }
+        
+        .roles-profile-body {
+            display: none;
+            padding: 16px;
+            border-top: 1px solid rgba(148, 163, 184, 0.1);
+            background: rgba(0, 0, 0, 0.15);
+        }
+        
+        .roles-profile-body.active {
+            display: block;
+        }
+        
+        .roles-perm-section {
+            margin-bottom: 16px;
+        }
+        
+        .roles-perm-section:last-child {
+            margin-bottom: 0;
+        }
+        
+        .roles-perm-title {
+            font-size: 11px;
+            font-weight: 600;
+            color: #94a3b8;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 10px;
+            padding-bottom: 6px;
+            border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+        }
+        
+        .roles-perm-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+            gap: 8px;
+        }
+        
+        .roles-perm-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 10px;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 6px;
+            font-size: 12px;
+            color: #94a3b8;
+            transition: background 0.2s ease;
+        }
+        
+        .roles-perm-item:hover {
+            background: rgba(0, 0, 0, 0.3);
+        }
+        
+        .roles-perm-item input[type="checkbox"] {
+            accent-color: #fbbf24;
+        }
+        
+        .roles-profile-save {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+            margin-top: 16px;
+            padding-top: 16px;
+            border-top: 1px solid rgba(148, 163, 184, 0.1);
+        }
+        
+        .roles-btn-primary {
+            padding: 10px 20px;
+            background: linear-gradient(135deg, #fbbf24, #f59e0b);
+            border: none;
+            border-radius: 8px;
+            color: #1e293b;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .roles-btn-primary:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(251, 191, 36, 0.4);
+        }
+        
+        /* Create Role Form */
+        .roles-create-form {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            align-items: flex-end;
+            padding: 16px;
+            background: rgba(251, 191, 36, 0.08);
+            border: 1px solid rgba(251, 191, 36, 0.2);
+            border-radius: 14px;
+            margin-bottom: 20px;
+        }
+        
+        .roles-create-label {
+            font-size: 11px;
+            font-weight: 600;
+            color: #fbbf24;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        
+        .roles-create-btn {
+            padding: 10px 20px;
+            background: linear-gradient(135deg, #fbbf24, #f59e0b);
+            border: none;
+            border-radius: 8px;
+            color: #1e293b;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .roles-create-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(251, 191, 36, 0.4);
+        }
+        
+        /* Built-in Roles Card */
+        .roles-builtin-card {
+            padding: 16px;
+            background: rgba(99, 102, 241, 0.08);
+            border: 1px solid rgba(99, 102, 241, 0.2);
+            border-radius: 14px;
+            margin-bottom: 20px;
+        }
+        
+        .roles-builtin-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: #a5b4fc;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .roles-builtin-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        
+        .roles-builtin-item {
+            font-size: 12px;
+            color: #94a3b8;
+        }
+        
+        .roles-builtin-item strong {
+            color: #c7d2fe;
+        }
+        
+        .roles-builtin-note {
+            font-size: 11px;
+            color: #64748b;
+            margin-top: 10px;
+        }
+        
+        /* ============================================
+           MODERNIZED MARKETPLACE TAB STYLES
+           ============================================ */
+        
+        .market-hero .dash-hero-orb-1,
+        .market-orb-1 {
+            background: rgba(34, 197, 94, 0.25) !important;
+        }
+        
+        .market-hero .dash-hero-orb-2,
+        .market-orb-2 {
+            background: rgba(22, 163, 74, 0.2) !important;
+        }
+        
+        .market-badge {
+            background: rgba(34, 197, 94, 0.15) !important;
+            border-color: rgba(34, 197, 94, 0.3) !important;
+            color: #86efac !important;
+        }
+        
+        .market-beta-tag {
+            padding: 4px 10px;
+            background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+            border-radius: 6px;
+            font-size: 11px;
+            font-weight: 700;
+            color: white;
+            letter-spacing: 0.05em;
+        }
+        
+        .market-license-notice {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            padding: 14px 20px;
+            background: rgba(34, 197, 94, 0.08);
+            border: 1px solid rgba(34, 197, 94, 0.2);
+            border-radius: 14px;
+            margin-bottom: 16px;
+        }
+        
+        .market-license-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 10px;
+            background: rgba(34, 197, 94, 0.15);
+            color: #4ade80;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+        
+        .market-license-content { flex: 1; }
+        .market-license-title { font-size: 13px; font-weight: 600; color: #4ade80; margin-bottom: 2px; }
+        .market-license-text { font-size: 12px; color: #94a3b8; }
+        
+        .market-license-folder {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 14px;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 8px;
+            font-size: 12px;
+            color: #94a3b8;
+        }
+        
+        .market-license-folder code {
+            color: #4ade80;
+            font-family: 'Fira Code', monospace;
+        }
+        
+        .market-activation-card {
+            background: linear-gradient(135deg, rgba(251, 146, 60, 0.12), rgba(249, 115, 22, 0.08));
+            border: 1px solid rgba(251, 146, 60, 0.25);
+            border-radius: 16px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        
+        .market-activation-header {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            margin-bottom: 16px;
+        }
+        
+        .market-activation-icon {
+            width: 44px;
+            height: 44px;
+            border-radius: 12px;
+            background: rgba(251, 146, 60, 0.2);
+            color: #fb923c;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+        
+        .market-activation-title { font-size: 15px; font-weight: 600; color: #fb923c; }
+        .market-activation-subtitle { font-size: 12px; color: #fcd34d; margin-top: 2px; }
+        .market-activation-subtitle code { background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; }
+        
+        .market-activation-steps {
+            display: grid;
+            gap: 10px;
+            margin-bottom: 16px;
+        }
+        
+        .market-step {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 13px;
+            color: #fde68a;
+        }
+        
+        .market-step-num {
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            background: rgba(251, 146, 60, 0.2);
+            color: #fb923c;
+            font-size: 12px;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+        
+        .market-step code { background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; color: #fcd34d; }
+        .market-step strong { color: #fb923c; }
+        
+        .market-refresh-id-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 18px;
+            background: rgba(251, 146, 60, 0.15);
+            border: 1px solid rgba(251, 146, 60, 0.3);
+            border-radius: 10px;
+            color: #fcd34d;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .market-refresh-id-btn:hover {
+            background: rgba(251, 146, 60, 0.25);
+        }
+        
+        .market-controls {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+        
+        .market-search-wrap {
+            flex: 1;
+            max-width: 400px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(148, 163, 184, 0.15);
+            border-radius: 10px;
+            padding: 0 14px;
+        }
+        
+        .market-search-wrap:focus-within {
+            border-color: rgba(34, 197, 94, 0.5);
+        }
+        
+        .market-search-wrap svg { color: #64748b; flex-shrink: 0; }
+        
+        .market-search-input {
+            flex: 1;
+            background: transparent;
+            border: none;
+            outline: none;
+            padding: 12px 0;
+            color: #e5e7eb;
+            font-size: 13px;
+        }
+        
+        .market-filter-select {
+            border-color: rgba(34, 197, 94, 0.3);
+            background-image: url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%2322c55e' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+        }
+        
+        .market-filter-select:focus {
+            border-color: rgba(34, 197, 94, 0.5);
+            box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.1);
+        }
+        
+        .market-grid {
+            min-height: 200px;
+        }
+        
+        .market-empty {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 16px;
+            padding: 60px 24px;
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid rgba(148, 163, 184, 0.15);
+            border-radius: 20px;
+            text-align: center;
+        }
+        
+        .market-empty-title { font-size: 16px; font-weight: 600; color: #e5e7eb; }
+        .market-empty-text { font-size: 14px; color: #64748b; }
+        
+        /* ============================================
+           MODERNIZED CREDITS TAB STYLES
+           ============================================ */
+        
+        .credits-hero .dash-hero-orb-1,
+        .credits-orb-1 {
+            background: rgba(250, 204, 21, 0.3) !important;
+        }
+        
+        .credits-hero .dash-hero-orb-2,
+        .credits-orb-2 {
+            background: rgba(251, 113, 133, 0.25) !important;
+        }
+        
+        .credits-badge {
+            background: rgba(250, 204, 21, 0.15) !important;
+            border-color: rgba(250, 204, 21, 0.3) !important;
+            color: #fde047 !important;
+        }
+        
+        .credits-copyright-banner {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            padding: 14px 20px;
+            background: linear-gradient(135deg, rgba(250, 204, 21, 0.12), rgba(251, 113, 133, 0.08));
+            border: 1px solid rgba(250, 204, 21, 0.4);
+            border-radius: 50px;
+            margin-bottom: 20px;
+            box-shadow: 0 0 30px rgba(250, 204, 21, 0.2);
+        }
+        
+        .credits-crown-icon {
+            width: 28px;
+            height: 28px;
+            flex-shrink: 0;
+        }
+        
+        .credits-copyright-text {
+            font-size: 12px;
+            color: #e5e7eb;
+        }
+        
+        .credits-main-card {
+            display: grid;
+            grid-template-columns: 1fr 1.2fr;
+            gap: 0;
+            background: rgba(15, 23, 42, 0.7);
+            border: 1px solid rgba(250, 204, 21, 0.2);
+            border-radius: 24px;
+            overflow: hidden;
+            position: relative;
+        }
+        
+        .credits-main-card::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: 
+                radial-gradient(circle at 0% 0%, rgba(250, 204, 21, 0.15), transparent 50%),
+                radial-gradient(circle at 100% 100%, rgba(251, 113, 133, 0.1), transparent 50%);
+            pointer-events: none;
+        }
+        
+        .credits-creator-section {
+            padding: 28px;
+            border-right: 1px solid rgba(148, 163, 184, 0.1);
+            position: relative;
+        }
+        
+        .credits-creator-header {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+        
+        .credits-crown-large {
+            width: 56px;
+            height: 56px;
+            flex-shrink: 0;
+        }
+        
+        .credits-creator-name {
+            font-size: 22px;
+            font-weight: 700;
+            background: linear-gradient(135deg, #facc15, #fb7185);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        .credits-creator-role {
+            font-size: 13px;
+            color: #94a3b8;
+            margin-top: 2px;
+        }
+        
+        .credits-info-grid {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        
+        .credits-info-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 0;
+            border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+        }
+        
+        .credits-info-item:last-child { border-bottom: none; }
+        
+        .credits-info-label {
+            font-size: 13px;
+            color: #94a3b8;
+        }
+        
+        .credits-info-value {
+            font-size: 13px;
+            font-weight: 500;
+            color: #e5e7eb;
+        }
+        
+        .credits-info-link {
+            font-size: 13px;
+            color: #60a5fa;
+            text-decoration: none;
+            transition: color 0.2s ease;
+        }
+        
+        .credits-info-link:hover { color: #93c5fd; }
+        
+        .credits-features-section {
+            padding: 28px;
+            position: relative;
+        }
+        
+        .credits-features-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 16px;
+            font-weight: 600;
+            color: #e5e7eb;
+            margin-bottom: 12px;
+        }
+        
+        .credits-features-header svg { color: #facc15; }
+        
+        .credits-features-desc {
+            font-size: 13px;
+            color: #94a3b8;
+            line-height: 1.7;
+            margin-bottom: 20px;
+        }
+        
+        .credits-features-desc strong { color: #fde047; }
+        
+        .credits-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-bottom: 20px;
+        }
+        
+        .credits-tag {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 12px;
+            border-radius: 8px;
+            font-size: 11px;
+            font-weight: 600;
+            border: 1px solid;
+        }
+        
+        .credits-tag-backend { background: rgba(139, 92, 246, 0.15); border-color: rgba(139, 92, 246, 0.3); color: #a78bfa; }
+        .credits-tag-frontend { background: rgba(59, 130, 246, 0.15); border-color: rgba(59, 130, 246, 0.3); color: #60a5fa; }
+        .credits-tag-realtime { background: rgba(239, 68, 68, 0.15); border-color: rgba(239, 68, 68, 0.3); color: #f87171; }
+        .credits-tag-api { background: rgba(16, 185, 129, 0.15); border-color: rgba(16, 185, 129, 0.3); color: #34d399; }
+        .credits-tag-ui { background: rgba(236, 72, 153, 0.15); border-color: rgba(236, 72, 153, 0.3); color: #f472b6; }
+        .credits-tag-secure { background: rgba(251, 191, 36, 0.15); border-color: rgba(251, 191, 36, 0.3); color: #fbbf24; }
+        
+        .credits-feature-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        
+        .credits-feature-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 13px;
+            color: #94a3b8;
+        }
+        
+        .credits-feature-item svg { flex-shrink: 0; }
+        
+        .credits-support-note {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 12px 16px;
+            background: linear-gradient(135deg, rgba(251, 113, 133, 0.1), rgba(250, 204, 21, 0.08));
+            border-radius: 12px;
+            font-size: 12px;
+            color: #fde68a;
+        }
+        
+        .credits-support-note svg { color: #fb7185; flex-shrink: 0; }
+        
+        .credits-license-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: 12px;
+            padding: 10px 18px;
+            background: linear-gradient(135deg, rgba(99, 102, 241, 0.2), rgba(139, 92, 246, 0.15));
+            border: 1px solid rgba(99, 102, 241, 0.3);
+            border-radius: 10px;
+            color: #a5b4fc;
+            font-size: 13px;
+            font-weight: 500;
+            text-decoration: none;
+            transition: all 0.2s ease;
+        }
+        
+        .credits-license-btn:hover {
+            background: linear-gradient(135deg, rgba(99, 102, 241, 0.3), rgba(139, 92, 246, 0.25));
+            border-color: rgba(99, 102, 241, 0.5);
+            color: #c7d2fe;
+            transform: translateY(-1px);
+        }
+        
+        .credits-license-btn svg {
+            flex-shrink: 0;
+        }
+        
+        @media (max-width: 900px) {
+            .credits-main-card {
+                grid-template-columns: 1fr;
+            }
+            
+            .credits-creator-section {
+                border-right: none;
+                border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+            }
+        }
+        
+        @media (max-width: 600px) {
+            .credits-copyright-banner {
+                flex-direction: column;
+                text-align: center;
+                border-radius: 16px;
+            }
+            
+            .market-controls {
+                flex-direction: column;
+            }
+            
+            .market-search-wrap {
+                max-width: none;
+            }
         }
 
         .toggle-pill {
@@ -4991,27 +10140,15 @@ class LiveMonitor(commands.Cog):
 
         .tickets-select {
             width: 100%;
-            padding: 10px 36px 10px 12px;
-            background: rgba(15, 23, 42, 0.6);
-            border: 1px solid rgba(124, 58, 237, 0.3);
-            border-radius: 8px;
-            color: #e5e7eb;
-            font-size: 14px;
-            cursor: pointer;
-            transition: all 0.2s ease;
-            appearance: none;
+            border-color: rgba(124, 58, 237, 0.3);
             background-image: url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%23a855f7' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-            background-repeat: no-repeat;
-            background-position: right 12px center;
         }
         
         .tickets-select:hover {
             border-color: rgba(124, 58, 237, 0.5);
-            background: rgba(15, 23, 42, 0.8);
         }
         
         .tickets-select:focus {
-            outline: none;
             border-color: #7c3aed;
             box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.1);
         }
@@ -5025,37 +10162,63 @@ class LiveMonitor(commands.Cog):
 </head>
 <body>
     <div class="container">
-        <div class="header">
-    <div class="header-left">
-                <div class="header-title-row">
-                    <img src="assets/zoryx-framework.png" alt="Zoryx Framework" class="brand-logo">
-                    <h1>Live Monitor Dashboard</h1>
-                </div>
-                <div class="header-subtitle">
-                    <a href="https://github.com/TheHolyOneZ/discord-bot-framework" target="_blank" rel="noopener noreferrer">
-                        Zoryx Discord Bot Framework
-                    </a>
-                </div>
-                <div class="header-meta">
-                    <div class="header-status-group">
-                        <div id="status-badge" class="status-badge">Loading...</div>
-                        <button id="hero-info-button" class="header-info-button" onclick="toggleHeroInfo()">Details</button>
-                    </div>
-                    <div id="lm-user-pill" class="lm-user-pill"></div>
-                </div>
+        <!-- Modernized Header with Banner Background -->
+        <div class="main-header">
+            <div class="main-header-bg">
+                <img src="assets/banner.png" alt="" class="main-header-banner">
+                <div class="main-header-light main-header-light-left"></div>
+                <div class="main-header-light main-header-light-right"></div>
+                <div class="main-header-overlay"></div>
             </div>
-            <div class="system-hero-main">
-                <div class="system-hero-metric">
-                    <div class="system-hero-label">CPU</div>
-                    <div class="system-hero-value"><span id="cpu-value">0</span><span class="system-hero-unit">%</span></div>
+            <div class="main-header-content">
+                <div class="main-header-left">
+                    <div class="main-header-brand">
+                        <img src="assets/zoryx-framework.png" alt="Zoryx Framework" class="main-header-logo">
+                        <div class="main-header-titles">
+                            <h1 class="main-header-title">Live Monitor Dashboard</h1>
+                            <a href="https://github.com/TheHolyOneZ/discord-bot-framework" target="_blank" rel="noopener noreferrer" class="main-header-link">
+                                Zoryx Discord Bot Framework
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                            </a>
+                        </div>
+                    </div>
+                    <div class="main-header-status">
+                        <div id="status-badge" class="main-status-badge">Loading...</div>
+                        <button id="hero-info-button" class="main-header-details-btn" onclick="toggleHeroInfo()">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                            Details
+                        </button>
+                        <div id="lm-user-pill" class="lm-user-pill"></div>
+                    </div>
                 </div>
-                <div class="system-hero-metric">
-                    <div class="system-hero-label">Memory</div>
-                    <div class="system-hero-value" id="memory-value">0 MB</div>
-                </div>
-                <div class="system-hero-metric">
-                    <div class="system-hero-label">Latency</div>
-                    <div class="system-hero-value"><span id="latency-value">0</span><span class="system-hero-unit">ms</span></div>
+                <div class="main-header-metrics">
+                    <div class="main-metric">
+                        <div class="main-metric-icon main-metric-icon-cpu">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2" ry="2"/><rect x="9" y="9" width="6" height="6"/><line x1="9" y1="1" x2="9" y2="4"/><line x1="15" y1="1" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="23"/><line x1="15" y1="20" x2="15" y2="23"/><line x1="20" y1="9" x2="23" y2="9"/><line x1="20" y1="14" x2="23" y2="14"/><line x1="1" y1="9" x2="4" y2="9"/><line x1="1" y1="14" x2="4" y2="14"/></svg>
+                        </div>
+                        <div class="main-metric-content">
+                            <div class="main-metric-label">CPU</div>
+                            <div class="main-metric-value"><span id="cpu-value">0</span>%</div>
+                        </div>
+                    </div>
+                    <div class="main-metric">
+                        <div class="main-metric-icon main-metric-icon-memory">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 20V10"/><path d="M12 20V4"/><path d="M6 20v-6"/></svg>
+                        </div>
+                        <div class="main-metric-content">
+                            <div class="main-metric-label">Memory</div>
+                            <div class="main-metric-value" id="memory-value">0 MB</div>
+                        </div>
+                    </div>
+                    <div class="main-metric">
+                        <div class="main-metric-icon main-metric-icon-latency">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                        </div>
+                        <div class="main-metric-content">
+                            <div class="main-metric-label">Latency</div>
+                            <div class="main-metric-value"><span id="latency-value">0</span>ms</div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -5182,68 +10345,173 @@ class LiveMonitor(commands.Cog):
                 </div>
 
                 <div id="tab-dashboard" class="tab-content active">
-                    <div class="section-header">
-                        <div class="section-title">Dashboard Overview</div>
-                        <button class="button button-secondary" id="tour-trigger">Quick Tour</button>
+                    <!-- Dashboard Hero Header -->
+                    <div class="dash-hero">
+                        <div class="dash-hero-bg">
+                            <div class="dash-hero-orb dash-hero-orb-1"></div>
+                            <div class="dash-hero-orb dash-hero-orb-2"></div>
+                            <div class="dash-hero-grid"></div>
+                        </div>
+                        <div class="dash-hero-content">
+                            <div class="dash-hero-left">
+                                <div class="dash-hero-badge">
+                                    <span class="dash-hero-badge-dot"></span>
+                                    Live Dashboard
+                                </div>
+                                <h1 class="dash-hero-title">Dashboard Overview</h1>
+                                <p class="dash-hero-subtitle">Monitor your bot's health, performance, and activity in real-time</p>
+                            </div>
+                            <div class="dash-hero-right">
+                                <button class="dash-tour-btn" id="tour-trigger">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                                    Quick Tour
+                                </button>
+                            </div>
+                        </div>
                     </div>
 
                     <div id="alerts-bar"></div>
 
-                    <div class="stats-grid" id="overview-stats">
-                        <div class="stat-card stat-card-clickable" onclick="openDiagnosticsModal()">
-                            <div class="stat-label">Bot Health</div>
-                            <div class="overview-stat-value" id="overview-health-text">Checking...</div>
+                    <!-- Stats Grid - Modernized -->
+                    <div class="dash-stats-grid" id="overview-stats">
+                        <div class="dash-stat-card dash-stat-health" onclick="openDiagnosticsModal()">
+                            <div class="dash-stat-icon">
+                                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+                            </div>
+                            <div class="dash-stat-content">
+                                <div class="dash-stat-label">Bot Health</div>
+                                <div class="dash-stat-value" id="overview-health-text">Checking...</div>
+                            </div>
+                            <div class="dash-stat-arrow">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+                            </div>
+                            <div class="dash-stat-glow"></div>
                         </div>
-                        <div class="stat-card">
-                            <div class="stat-label">Uptime &amp; Reach</div>
-                            <div class="overview-stat-value" id="overview-uptime-guilds">--</div>
+                        <div class="dash-stat-card dash-stat-uptime">
+                            <div class="dash-stat-icon">
+                                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                            </div>
+                            <div class="dash-stat-content">
+                                <div class="dash-stat-label">Uptime &amp; Reach</div>
+                                <div class="dash-stat-value" id="overview-uptime-guilds">--</div>
+                            </div>
+                            <div class="dash-stat-glow"></div>
                         </div>
-                        <div class="stat-card">
-                            <div class="stat-label">Activity Snapshot</div>
-                            <div class="overview-stat-value" id="overview-activity">--</div>
+                        <div class="dash-stat-card dash-stat-activity">
+                            <div class="dash-stat-icon">
+                                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                            </div>
+                            <div class="dash-stat-content">
+                                <div class="dash-stat-label">Activity Snapshot</div>
+                                <div class="dash-stat-value" id="overview-activity">--</div>
+                            </div>
+                            <div class="dash-stat-glow"></div>
                         </div>
-                        <div class="stat-card">
-                            <div class="stat-label">Framework</div>
-                            <div class="overview-stat-value" id="overview-framework">Version: --</div>
+                        <div class="dash-stat-card dash-stat-framework">
+                            <div class="dash-stat-icon">
+                                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+                            </div>
+                            <div class="dash-stat-content">
+                                <div class="dash-stat-label">Framework</div>
+                                <div class="dash-stat-value" id="overview-framework">Version: --</div>
+                            </div>
+                            <div class="dash-stat-glow"></div>
                         </div>
                     </div>
 
-                    <div class="two-column-grid">
-                        <div class="column-card">
-                            <div class="column-header">
+                    <!-- Two Column Layout - Modernized -->
+                    <div class="dash-columns">
+                        <!-- Alerts Column -->
+                        <div class="dash-column-card dash-alerts-card">
+                            <div class="dash-column-header">
+                                <div class="dash-column-icon dash-column-icon-alerts">
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                                </div>
                                 <div>
-                                    <div class="column-title">Alerts</div>
-                                    <div class="column-subtitle">Key things you should know right now</div>
+                                    <div class="dash-column-title">Alerts</div>
+                                    <div class="dash-column-subtitle">Key things you should know right now</div>
                                 </div>
                             </div>
-                            <div id="overview-alert-list" class="list" style="padding:12px;"></div>
+                            <div id="overview-alert-list" class="dash-alert-list"></div>
                         </div>
-                        <div class="column-card">
-                            <div class="column-header">
+
+                        <!-- Quick Actions Column -->
+                        <div class="dash-column-card dash-actions-card">
+                            <div class="dash-column-header">
+                                <div class="dash-column-icon dash-column-icon-actions">
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                                </div>
                                 <div>
-                                    <div class="column-title">Quick Actions</div>
-                                    <div class="column-subtitle">Common operations for operators</div>
+                                    <div class="dash-column-title">Quick Actions</div>
+                                    <div class="dash-column-subtitle">Common operations for operators</div>
                                 </div>
                             </div>
-                            <div class="quick-actions-grid">
-                                <div class="quick-actions-column">
-                                    <div class="quick-actions-label">Lifecycle</div>
-                                    <div class="quick-actions-row">
-                                        <button class="button button-danger" onclick="confirmShutdownBot()">Shutdown Bot</button>
+                            <div class="dash-actions-container">
+                                <!-- Lifecycle Section -->
+                                <div class="dash-action-section dash-action-section-danger">
+                                    <div class="dash-action-section-header">
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+                                        Lifecycle
                                     </div>
-                                    <div style="font-size:11px;color:var(--text-secondary);margin-top:6px;">
-                                        Shutdown will cleanly close the bot process. Restart it again using your hosting panel or process manager.
+                                    <button class="dash-action-btn dash-action-btn-danger" onclick="confirmShutdownBot()">
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>
+                                        Shutdown Bot
+                                    </button>
+                                    <div class="dash-action-hint">Cleanly closes the bot process. Restart via your hosting panel.</div>
+                                </div>
+
+                                <!-- Diagnostics Section -->
+                                <div class="dash-action-section">
+                                    <div class="dash-action-section-header">
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                                        Diagnostics &amp; Files
+                                    </div>
+                                    <div class="dash-action-btn-grid">
+                                        <button class="dash-action-btn" onclick="sendCommand('clear_cache', {})">
+                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/></svg>
+                                            Clear Cache
+                                        </button>
+                                        <button class="dash-action-btn" onclick="switchTab('filesystem')">
+                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                                            File System
+                                        </button>
+                                        <button class="dash-action-btn" onclick="openMainConfig()">
+                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                                            config.json
+                                        </button>
+                                        <button class="dash-action-btn" onclick="openLiveMonitorConfig()">
+                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+                                            LM config
+                                        </button>
+                                        <button class="dash-action-btn" onclick="window.location='backup_dashboard.php'">
+                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                                            Dashboard Backup
+                                        </button>
+                                        <button class="dash-action-btn" onclick="requestBotBackup()">
+                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
+                                            Bot Backup
+                                        </button>
                                     </div>
                                 </div>
-                                <div class="quick-actions-column">
-                                    <div class="quick-actions-label">Diagnostics &amp; Files</div>
-                                    <div class="quick-actions-row">
-                                        <button class="button button-secondary" onclick="sendCommand('clear_cache', {})">Clear Cache</button>
-                                        <button class="button button-secondary" onclick="switchTab('filesystem')">View File System</button>
-                                        <button class="button button-secondary" onclick="openMainConfig()">Open config.json</button>
-                                        <button class="button button-secondary" onclick="openLiveMonitorConfig()">Open live_monitor_config.json</button>
-                                        <button class="button button-secondary" onclick="window.location='backup_dashboard.php'">Download dashboard backup</button>
-                                        <button class="button button-secondary" onclick="requestBotBackup()">Backup bot directory</button>
+
+                                <!-- Debug Section -->
+                                <div class="dash-action-section">
+                                    <div class="dash-action-section-header">
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+                                        Debug &amp; Logging
+                                    </div>
+                                    <div class="dash-action-btn-grid">
+                                        <button class="dash-action-btn dash-action-btn-toggle" id="toggle-verbose-btn" onclick="toggleVerboseLogging()">
+                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                                            Verbose Logging: OFF
+                                        </button>
+                                        <button class="dash-action-btn dash-action-btn-toggle" id="toggle-debug-packages-btn" onclick="toggleDebugPackages()">
+                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+                                            Debug Packages: OFF
+                                        </button>
+                                    </div>
+                                    <div class="dash-action-hint">
+                                        <strong>Verbose:</strong> Hides "Data sent successfully" spam &nbsp;|&nbsp; <strong>Debug:</strong> Shows pip/npm install output
                                     </div>
                                 </div>
                             </div>
@@ -5252,422 +10520,576 @@ class LiveMonitor(commands.Cog):
                 </div>
 
                 <div id="tab-commands" class="tab-content">
-                    <div class="section-header">
-                        <div style="display:flex;align-items:center;gap:8px;">
-                            <div class="section-title">Commands Overview</div>
-                            <button class="header-info-button" onclick="openSectionHelp('commands')">?</button>
+                    <!-- Commands Hero Header -->
+                    <div class="dash-hero cmd-hero">
+                        <div class="dash-hero-bg">
+                            <div class="dash-hero-orb cmd-orb-1"></div>
+                            <div class="dash-hero-orb cmd-orb-2"></div>
+                            <div class="dash-hero-grid"></div>
                         </div>
-                        <button class="button button-secondary" onclick="refreshCommands()">Refresh</button>
-                    </div>
-                    
-                    <div class="card" style="margin-bottom: 20px;">
-                        <div class="card-header">
-                            <div class="card-title">System Metrics</div>
-                        </div>
-                        <div class="stats-grid">
-                            <div class="stat">
-                                <span class="stat-label">Total Commands</span>
-                                <span class="stat-value" id="cmd-total">0</span>
+                        <div class="dash-hero-content">
+                            <div class="dash-hero-left">
+                                <div class="dash-hero-badge cmd-badge">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+                                    Command Registry
+                                </div>
+                                <h1 class="dash-hero-title">Commands Overview</h1>
+                                <p class="dash-hero-subtitle">Browse and monitor all registered bot commands, usage statistics, and error rates</p>
                             </div>
-                            <div class="stat">
-                                <span class="stat-label">Slash Commands</span>
-                                <span class="stat-value" id="cmd-slash">0</span>
-                            </div>
-                            <div class="stat">
-                                <span class="stat-label">Prefix Commands</span>
-                                <span class="stat-value" id="cmd-prefix">0</span>
-                            </div>
-                            <div class="stat">
-                                <span class="stat-label">Hybrid Commands</span>
-                                <span class="stat-value" id="cmd-hybrid">0</span>
-                            </div>
-                            <div class="stat">
-                                <span class="stat-label">Total Cogs</span>
-                                <span class="stat-value" id="cmd-cogs">0</span>
-                            </div>
-                            <div class="stat">
-                                <span class="stat-label">Total Usage</span>
-                                <span class="stat-value" id="cmd-usage">0</span>
-                            </div>
-                            <div class="stat">
-                                <span class="stat-label">Total Errors</span>
-                                <span class="stat-value" id="cmd-errors">0</span>
-                            </div>
-                            <div class="stat">
-                                <span class="stat-label">Success Rate</span>
-                                <span class="stat-value" id="cmd-success">100%</span>
+                            <div class="dash-hero-right" style="display:flex;gap:10px;">
+                                <button class="dash-tour-btn" onclick="openSectionHelp('commands')">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                                    Help
+                                </button>
+                                <button class="dash-action-btn" onclick="refreshCommands()" style="padding:10px 18px;">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/></svg>
+                                    Refresh
+                                </button>
                             </div>
                         </div>
                     </div>
 
-                    <div class="explorer-unit">
-                        <div class="file-pane" style="width: 100%; max-width: 100%;">
-                            <div class="dir-header">
-                                <div class="breadcrumb">
-                                    <span class="crumb">Registered Commands</span>
-                                </div>
-                                <div class="view-controls">
-                                    <button class="view-btn active" data-view="all">All</button>
-                                    <button class="view-btn" data-view="slash">Slash</button>
-                                    <button class="view-btn" data-view="prefix">Prefix</button>
-                                    <button class="view-btn" data-view="hybrid">Hybrid</button>
-                                </div>
+                    <!-- Commands Stats Grid -->
+                    <div class="cmd-stats-grid">
+                        <div class="cmd-stat-card cmd-stat-total">
+                            <div class="cmd-stat-icon">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
                             </div>
-                            
-                            <div class="dir-header" style="border-top: none;">
-                                <input
-                                    id="cmd-search"
-                                    class="input-text"
-                                    type="text"
-                                    placeholder="Search by name, description, or cog..."
-                                    style="flex: 1; margin-right: 12px;"
-                                />
-                                <select id="cmd-sort" class="select">
-                                    <option value="name">Sort by Name</option>
-                                    <option value="usage">Sort by Usage</option>
-                                    <option value="errors">Sort by Errors</option>
-                                    <option value="cog">Sort by Cog</option>
-                                </select>
-                            </div>
-
-                            <div class="list" id="commands-list" style="padding: 12px;"></div>
+                            <div class="cmd-stat-value" id="cmd-total">0</div>
+                            <div class="cmd-stat-label">Total Commands</div>
                         </div>
+                        <div class="cmd-stat-card cmd-stat-slash">
+                            <div class="cmd-stat-icon">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="7" y1="20" x2="17" y2="4"/></svg>
+                            </div>
+                            <div class="cmd-stat-value" id="cmd-slash">0</div>
+                            <div class="cmd-stat-label">Slash</div>
+                        </div>
+                        <div class="cmd-stat-card cmd-stat-prefix">
+                            <div class="cmd-stat-icon">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M4 12h16M4 17h10"/></svg>
+                            </div>
+                            <div class="cmd-stat-value" id="cmd-prefix">0</div>
+                            <div class="cmd-stat-label">Prefix</div>
+                        </div>
+                        <div class="cmd-stat-card cmd-stat-hybrid">
+                            <div class="cmd-stat-icon">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 1v6m0 6v10"/><path d="M21 12h-6m-6 0H1"/></svg>
+                            </div>
+                            <div class="cmd-stat-value" id="cmd-hybrid">0</div>
+                            <div class="cmd-stat-label">Hybrid</div>
+                        </div>
+                        <div class="cmd-stat-card cmd-stat-cogs">
+                            <div class="cmd-stat-icon">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                            </div>
+                            <div class="cmd-stat-value" id="cmd-cogs">0</div>
+                            <div class="cmd-stat-label">Cogs</div>
+                        </div>
+                        <div class="cmd-stat-card cmd-stat-usage">
+                            <div class="cmd-stat-icon">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                            </div>
+                            <div class="cmd-stat-value" id="cmd-usage">0</div>
+                            <div class="cmd-stat-label">Total Usage</div>
+                        </div>
+                        <div class="cmd-stat-card cmd-stat-errors">
+                            <div class="cmd-stat-icon">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+                            </div>
+                            <div class="cmd-stat-value" id="cmd-errors">0</div>
+                            <div class="cmd-stat-label">Errors</div>
+                        </div>
+                        <div class="cmd-stat-card cmd-stat-success">
+                            <div class="cmd-stat-icon">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                            </div>
+                            <div class="cmd-stat-value" id="cmd-success">100%</div>
+                            <div class="cmd-stat-label">Success Rate</div>
+                        </div>
+                    </div>
+
+                    <!-- Commands Explorer -->
+                    <div class="cmd-explorer">
+                        <div class="cmd-explorer-header">
+                            <div class="cmd-explorer-title">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+                                Registered Commands
+                            </div>
+                            <div class="cmd-view-controls">
+                                <button class="cmd-view-btn active" data-view="all">All</button>
+                                <button class="cmd-view-btn" data-view="slash">Slash</button>
+                                <button class="cmd-view-btn" data-view="prefix">Prefix</button>
+                                <button class="cmd-view-btn" data-view="hybrid">Hybrid</button>
+                            </div>
+                        </div>
+                        <div class="cmd-explorer-toolbar">
+                            <div class="cmd-search-wrap">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                                <input id="cmd-search" class="cmd-search-input" type="text" placeholder="Search by name, description, or cog..."/>
+                            </div>
+                            <select id="cmd-sort" class="cmd-sort-select">
+                                <option value="name">Sort by Name</option>
+                                <option value="usage">Sort by Usage</option>
+                                <option value="errors">Sort by Errors</option>
+                                <option value="cog">Sort by Cog</option>
+                            </select>
+                        </div>
+                        <div class="cmd-list" id="commands-list"></div>
                     </div>
                 </div>
 
                 <div id="tab-plugins" class="tab-content">
-                    <div class="section-header">
-                        <div style="display:flex;align-items:center;gap:8px;">
-                            <div class="section-title">Plugins &amp; Extensions</div>
-                            <button class="header-info-button" onclick="openSectionHelp('plugins')">?</button>
+                    <!-- Plugins Hero Header -->
+                    <div class="dash-hero plug-hero">
+                        <div class="dash-hero-bg">
+                            <div class="dash-hero-orb plug-orb-1"></div>
+                            <div class="dash-hero-orb plug-orb-2"></div>
+                            <div class="dash-hero-grid"></div>
                         </div>
-                        <button class="button button-secondary" onclick="refreshPlugins()">Refresh</button>
-                    </div>
-
-                    <div class="card" id="plugins-stats-card" style="margin-bottom: 20px;">
-                        <div class="card-header" style="justify-content: space-between; align-items: center;">
-                            <div>
-                                <div class="card-title">System Overview</div>
-                                <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">
-                                    Summary of plugin and extension health. Toggle this on when you need a quick snapshot.
+                        <div class="dash-hero-content">
+                            <div class="dash-hero-left">
+                                <div class="dash-hero-badge plug-badge">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
+                                    Extension Manager
                                 </div>
+                                <h1 class="dash-hero-title">Plugins &amp; Extensions</h1>
+                                <p class="dash-hero-subtitle">Manage your bot's modular functionality, monitor health status, and discover new extensions</p>
                             </div>
-                            <div style="display:flex;align-items:center;gap:8px;">
-                                <span style="font-size:11px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.08em;">Show Stats</span>
-                                <button type="button" class="toggle-pill" id="plugins-stats-toggle" aria-pressed="false" aria-label="Toggle plugin stats overview">
-                                    <span class="toggle-pill-knob"></span>
+                            <div class="dash-hero-right" style="display:flex;gap:10px;">
+                                <button class="dash-tour-btn" onclick="openSectionHelp('plugins')">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                                    Help
+                                </button>
+                                <button class="dash-action-btn" onclick="refreshPlugins()" style="padding:10px 18px;">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/></svg>
+                                    Refresh
                                 </button>
                             </div>
                         </div>
-                        <div class="stats-grid" id="plugins-stats-body">
-                            <div class="stat">
-                                <span class="stat-label">Total Plugins</span>
-                                <span class="stat-value" id="total-plugins">0</span>
+                    </div>
+
+                    <!-- Plugins Stats Card (Collapsible) -->
+                    <div class="plug-stats-card" id="plugins-stats-card">
+                        <div class="plug-stats-header">
+                            <div class="plug-stats-header-left">
+                                <div class="plug-stats-icon">
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 20V10"/><path d="M12 20V4"/><path d="M6 20v-6"/></svg>
+                                </div>
+                                <div>
+                                    <div class="plug-stats-title">System Overview</div>
+                                    <div class="plug-stats-subtitle">Summary of plugin and extension health</div>
+                                </div>
                             </div>
-                            <div class="stat">
-                                <span class="stat-label">Loaded</span>
-                                <span class="stat-value" id="loaded-plugins">0</span>
+                            <div class="plug-stats-toggle-wrap">
+                                <span class="plug-stats-toggle-label">Show Stats</span>
+                                <button type="button" class="plug-toggle-pill" id="plugins-stats-toggle" aria-pressed="false" aria-label="Toggle plugin stats overview">
+                                    <span class="plug-toggle-knob"></span>
+                                </button>
                             </div>
-                            <div class="stat">
-                                <span class="stat-label">Healthy</span>
-                                <span class="stat-value" id="healthy-plugins">0</span>
+                        </div>
+                        <div class="plug-stats-grid" id="plugins-stats-body">
+                            <div class="plug-stat-item">
+                                <div class="plug-stat-icon plug-stat-icon-total">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/></svg>
+                                </div>
+                                <div class="plug-stat-value" id="total-plugins">0</div>
+                                <div class="plug-stat-label">Total Plugins</div>
                             </div>
-                            <div class="stat">
-                                <span class="stat-label">With Issues</span>
-                                <span class="stat-value" id="issues-plugins">0</span>
+                            <div class="plug-stat-item">
+                                <div class="plug-stat-icon plug-stat-icon-loaded">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                                </div>
+                                <div class="plug-stat-value" id="loaded-plugins">0</div>
+                                <div class="plug-stat-label">Loaded</div>
                             </div>
-                            <div class="stat">
-                                <span class="stat-label">Total Commands</span>
-                                <span class="stat-value" id="total-commands">0</span>
+                            <div class="plug-stat-item">
+                                <div class="plug-stat-icon plug-stat-icon-healthy">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+                                </div>
+                                <div class="plug-stat-value" id="healthy-plugins">0</div>
+                                <div class="plug-stat-label">Healthy</div>
                             </div>
-                            <div class="stat">
-                                <span class="stat-label">Total Cogs</span>
-                                <span class="stat-value" id="total-cogs">0</span>
+                            <div class="plug-stat-item">
+                                <div class="plug-stat-icon plug-stat-icon-issues">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                                </div>
+                                <div class="plug-stat-value" id="issues-plugins">0</div>
+                                <div class="plug-stat-label">With Issues</div>
                             </div>
-                            <div class="stat">
-                                <span class="stat-label">Available Extensions</span>
-                                <span class="stat-value" id="total-extensions">0</span>
+                            <div class="plug-stat-item">
+                                <div class="plug-stat-icon plug-stat-icon-commands">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+                                </div>
+                                <div class="plug-stat-value" id="total-commands">0</div>
+                                <div class="plug-stat-label">Commands</div>
                             </div>
-                            <div class="stat">
-                                <span class="stat-label">Avg Load Time</span>
-                                <span class="stat-value" id="avg-load-time">0ms</span>
+                            <div class="plug-stat-item">
+                                <div class="plug-stat-icon plug-stat-icon-cogs">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                                </div>
+                                <div class="plug-stat-value" id="total-cogs">0</div>
+                                <div class="plug-stat-label">Cogs</div>
+                            </div>
+                            <div class="plug-stat-item">
+                                <div class="plug-stat-icon plug-stat-icon-extensions">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+                                </div>
+                                <div class="plug-stat-value" id="total-extensions">0</div>
+                                <div class="plug-stat-label">Extensions</div>
+                            </div>
+                            <div class="plug-stat-item">
+                                <div class="plug-stat-icon plug-stat-icon-time">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                                </div>
+                                <div class="plug-stat-value" id="avg-load-time">0ms</div>
+                                <div class="plug-stat-label">Avg Load</div>
                             </div>
                         </div>
                     </div>
 
-                    <div class="card" id="plugins-promo-card" style="margin-bottom: 20px; cursor: default;">
-                        <div class="card-header">
-                            <div>
-                                <div class="card-title">Discover More Extensions</div>
-                                <div class="card-subtitle">Browse the official ZygnalBot Extension Portal for additional extensions and plugins.</div>
+                    <!-- Discover Extensions Promo -->
+                    <div class="plug-promo-card" id="plugins-promo-card">
+                        <div class="plug-promo-bg">
+                            <div class="plug-promo-orb plug-promo-orb-1"></div>
+                            <div class="plug-promo-orb plug-promo-orb-2"></div>
+                        </div>
+                        <div class="plug-promo-content">
+                            <div class="plug-promo-icon">
+                                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
                             </div>
-                            <div style="display:flex;gap:10px;flex-wrap:wrap;">
-                                <a href="https://zygnalbot.com/extension/" target="_blank" rel="noreferrer noopener" class="button button-primary" style="text-decoration:none;display:inline-flex;align-items:center;gap:6px;">
-                                    <span>Open Extension Portal</span>
+                            <div class="plug-promo-text">
+                                <div class="plug-promo-title">Discover More Extensions</div>
+                                <div class="plug-promo-subtitle">Browse the official ZygnalBot Extension Portal for additional extensions and plugins</div>
+                            </div>
+                            <div class="plug-promo-actions">
+                                <a href="https://zygnalbot.com/extension/" target="_blank" rel="noreferrer noopener" class="plug-promo-btn plug-promo-btn-primary">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                                    Extension Portal
                                 </a>
-                                <button class="button button-secondary" onclick="switchTab('marketplace')" style="display:inline-flex;align-items:center;gap:6px;">
-                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:inline-block;vertical-align:middle;">
-                                        <circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/>
-                                    </svg>
-                                    <span>Try Beta Marketplace</span>
+                                <button class="plug-promo-btn plug-promo-btn-secondary" onclick="switchTab('marketplace')">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>
+                                    Beta Marketplace
                                 </button>
                             </div>
                         </div>
                     </div>
 
-                    <div class="explorer-unit">
-                        <div class="file-pane" style="width: 100%; max-width: 100%;">
-                            <div class="dir-header">
-                                <div class="breadcrumb">
-                                    <span class="crumb">Plugins & Extensions</span>
-                                </div>
-                                <div class="view-controls">
-                                    <button class="view-btn active" data-view="plugins">Plugins & Extensions</button>
-                                </div>
+                    <!-- Plugins Explorer -->
+                    <div class="plug-explorer">
+                        <div class="plug-explorer-header">
+                            <div class="plug-explorer-title">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
+                                Plugins &amp; Extensions
                             </div>
-                            
-                            <div class="dir-header" style="border-top: none;">
-                                <input
-                                    id="plugin-search"
-                                    class="input-text"
-                                    type="text"
-                                    placeholder="Search by name, description, or command..."
-                                    style="flex: 1; margin-right: 12px;"
-                                />
-                                <select id="plugin-filter" class="select">
-                                    <option value="all">All</option>
-                                    <option value="loaded">Loaded Only</option>
-                                    <option value="not_loaded">Not Loaded Only</option>
-                                    <option value="healthy">Healthy Only</option>
-                                    <option value="issues">With Issues</option>
-                                </select>
-                            </div>
-
-                            <div class="list" id="plugins-extensions-list" style="padding: 12px;"></div>
                         </div>
+                        <div class="plug-explorer-toolbar">
+                            <div class="plug-search-wrap">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                                <input id="plugin-search" class="plug-search-input" type="text" placeholder="Search by name, description, or command..."/>
+                            </div>
+                            <select id="plugin-filter" class="plug-filter-select">
+                                <option value="all">All</option>
+                                <option value="loaded">Loaded Only</option>
+                                <option value="not_loaded">Not Loaded Only</option>
+                                <option value="healthy">Healthy Only</option>
+                                <option value="issues">With Issues</option>
+                            </select>
+                        </div>
+                        <div class="plug-list" id="plugins-extensions-list"></div>
                     </div>
                 </div>
 
                 <div id="tab-hooks" class="tab-content">
-                    <div class="section-header">
-                        <div style="display:flex;align-items:center;gap:8px;">
-                            <div class="section-title">Event Hooks System</div>
-                            <button class="header-info-button" onclick="openSectionHelp('hooks')">?</button>
+                    <!-- Hooks Hero Header -->
+                    <div class="dash-hero hooks-hero">
+                        <div class="dash-hero-bg">
+                            <div class="dash-hero-orb hooks-orb-1"></div>
+                            <div class="dash-hero-orb hooks-orb-2"></div>
+                            <div class="dash-hero-grid"></div>
                         </div>
-                        <button class="button button-secondary" onclick="refreshHooks()">Refresh</button>
-                    </div>
-                    
-                    <div class="card" style="margin-bottom: 20px;">
-                        <div class="card-header">
-                            <div class="card-title">System Metrics</div>
-                        </div>
-                        <div class="stats-grid">
-                            <div class="stat">
-                                <span class="stat-label">Total Emissions</span>
-                                <span class="stat-value" id="hooks-emissions">0</span>
+                        <div class="dash-hero-content">
+                            <div class="dash-hero-left">
+                                <div class="dash-hero-badge hooks-badge">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+                                    Event System
+                                </div>
+                                <h1 class="dash-hero-title">Event Hooks System</h1>
+                                <p class="dash-hero-subtitle">Monitor event emissions, executions, and hook performance in real-time</p>
                             </div>
-                            <div class="stat">
-                                <span class="stat-label">Total Executions</span>
-                                <span class="stat-value" id="hooks-executions">0</span>
-                            </div>
-                            <div class="stat">
-                                <span class="stat-label">Total Failures</span>
-                                <span class="stat-value" id="hooks-failures">0</span>
-                            </div>
-                            <div class="stat">
-                                <span class="stat-label">Queue Size</span>
-                                <span class="stat-value" id="hooks-queue-size">0</span>
-                            </div>
-                            <div class="stat">
-                                <span class="stat-label">Queue Full Count</span>
-                                <span class="stat-value" id="hooks-queue-full">0</span>
-                            </div>
-                            <div class="stat">
-                                <span class="stat-label">Worker Restarts</span>
-                                <span class="stat-value" id="hooks-worker-restarts">0</span>
-                            </div>
-                            <div class="stat">
-                                <span class="stat-label">Disabled Hooks</span>
-                                <span class="stat-value" id="hooks-disabled">0</span>
-                            </div>
-                            <div class="stat">
-                                <span class="stat-label">Circuit Open</span>
-                                <span class="stat-value" id="hooks-circuit-open">0</span>
+                            <div class="dash-hero-right" style="display:flex;gap:10px;">
+                                <button class="dash-tour-btn" onclick="openSectionHelp('hooks')">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                                    Help
+                                </button>
+                                <button class="dash-action-btn" onclick="refreshHooks()" style="padding:10px 18px;">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/></svg>
+                                    Refresh
+                                </button>
                             </div>
                         </div>
                     </div>
 
-                    <div class="explorer-unit">
-                        <div class="file-pane" style="width: 100%; max-width: 100%;">
-                            <div class="dir-header">
-                                <div class="breadcrumb">
-                                    <span class="crumb">Registered Event Hooks</span>
-                                </div>
-                                <div class="view-controls">
-                                    <button class="view-btn active" data-view="all">All Hooks</button>
-                                    <button class="view-btn" data-view="active">Active</button>
-                                    <button class="view-btn" data-view="disabled">Disabled</button>
-                                    <button class="view-btn" data-view="issues">With Issues</button>
-                                </div>
+                    <!-- Hooks Stats Grid -->
+                    <div class="hooks-stats-grid">
+                        <div class="hooks-stat-card hooks-stat-emissions">
+                            <div class="hooks-stat-icon">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
                             </div>
-                            
-                            <div class="dir-header" style="border-top: none;">
-                                <input
-                                    id="hooks-search"
-                                    class="input-text"
-                                    type="text"
-                                    placeholder="Search by event name or callback..."
-                                    style="flex: 1; margin-right: 12px;"
-                                />
-                                <select id="hooks-sort" class="select">
-                                    <option value="priority">Sort by Priority</option>
-                                    <option value="executions">Sort by Executions</option>
-                                    <option value="failures">Sort by Failures</option>
-                                    <option value="time">Sort by Avg Time</option>
-                                </select>
-                            </div>
-
-                            <div class="list" id="hooks-list" style="padding: 12px;"></div>
+                            <div class="hooks-stat-value" id="hooks-emissions">0</div>
+                            <div class="hooks-stat-label">Emissions</div>
                         </div>
+                        <div class="hooks-stat-card hooks-stat-executions">
+                            <div class="hooks-stat-icon">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                            </div>
+                            <div class="hooks-stat-value" id="hooks-executions">0</div>
+                            <div class="hooks-stat-label">Executions</div>
+                        </div>
+                        <div class="hooks-stat-card hooks-stat-failures">
+                            <div class="hooks-stat-icon">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+                            </div>
+                            <div class="hooks-stat-value" id="hooks-failures">0</div>
+                            <div class="hooks-stat-label">Failures</div>
+                        </div>
+                        <div class="hooks-stat-card hooks-stat-queue">
+                            <div class="hooks-stat-icon">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+                            </div>
+                            <div class="hooks-stat-value" id="hooks-queue-size">0</div>
+                            <div class="hooks-stat-label">Queue Size</div>
+                        </div>
+                        <div class="hooks-stat-card hooks-stat-queuefull">
+                            <div class="hooks-stat-icon">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                            </div>
+                            <div class="hooks-stat-value" id="hooks-queue-full">0</div>
+                            <div class="hooks-stat-label">Queue Full</div>
+                        </div>
+                        <div class="hooks-stat-card hooks-stat-restarts">
+                            <div class="hooks-stat-icon">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/></svg>
+                            </div>
+                            <div class="hooks-stat-value" id="hooks-worker-restarts">0</div>
+                            <div class="hooks-stat-label">Restarts</div>
+                        </div>
+                        <div class="hooks-stat-card hooks-stat-disabled">
+                            <div class="hooks-stat-icon">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
+                            </div>
+                            <div class="hooks-stat-value" id="hooks-disabled">0</div>
+                            <div class="hooks-stat-label">Disabled</div>
+                        </div>
+                        <div class="hooks-stat-card hooks-stat-circuit">
+                            <div class="hooks-stat-icon">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>
+                            </div>
+                            <div class="hooks-stat-value" id="hooks-circuit-open">0</div>
+                            <div class="hooks-stat-label">Circuit Open</div>
+                        </div>
+                    </div>
+
+                    <!-- Hooks Explorer -->
+                    <div class="hooks-explorer">
+                        <div class="hooks-explorer-header">
+                            <div class="hooks-explorer-title">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+                                Registered Event Hooks
+                            </div>
+                            <div class="hooks-view-controls">
+                                <button class="hooks-view-btn active" data-view="all">All Hooks</button>
+                                <button class="hooks-view-btn" data-view="active">Active</button>
+                                <button class="hooks-view-btn" data-view="disabled">Disabled</button>
+                                <button class="hooks-view-btn" data-view="issues">With Issues</button>
+                            </div>
+                        </div>
+                        <div class="hooks-explorer-toolbar">
+                            <div class="hooks-search-wrap">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                                <input id="hooks-search" class="hooks-search-input" type="text" placeholder="Search by event name or callback..."/>
+                            </div>
+                            <select id="hooks-sort" class="hooks-sort-select">
+                                <option value="priority">Sort by Priority</option>
+                                <option value="executions">Sort by Executions</option>
+                                <option value="failures">Sort by Failures</option>
+                                <option value="time">Sort by Avg Time</option>
+                            </select>
+                        </div>
+                        <div class="hooks-list" id="hooks-list"></div>
                     </div>
                 </div>
 
-                <!-- Event Hooks Creator Tab - Enhanced Version -->
-<!-- This replaces the tab-hook-creator section in live_monitor.py -->
-
+                <!-- Event Hooks Creator Tab - Modernized Version -->
 <div id="tab-hook-creator" class="tab-content">
-    <div class="section-header">
-        <div style="display:flex;align-items:center;gap:8px;">
-            <div class="section-title">🎯 Advanced Hook Creator</div>
-            <button class="header-info-button" onclick="openSectionHelp('hook-creator')">?</button>
+    <!-- Hook Creator Hero Header -->
+    <div class="dash-hero hc-hero">
+        <div class="dash-hero-bg">
+            <div class="dash-hero-orb hc-orb-1"></div>
+            <div class="dash-hero-orb hc-orb-2"></div>
+            <div class="dash-hero-grid"></div>
         </div>
-        <div style="display: flex; gap: 8px;">
-            <button class="button button-secondary" onclick="refreshHookCreator()">
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg> Refresh
-            </button>
-            <button class="button" onclick="exportHooksJSON()" id="export-hooks-btn">
-                <span style="margin-right: 6px;">📤</span> Export
-            </button>
-        </div>
-    </div>
-    
-    <div class="card" style="margin-bottom: 20px; background: linear-gradient(135deg, rgba(124, 58, 237, 0.1) 0%, rgba(168, 85, 247, 0.1) 100%); border: 1px solid rgba(168, 85, 247, 0.3);">
-        <div class="card-header">
-            <div class="card-title">📊 Statistics Dashboard</div>
-        </div>
-        <div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));">
-            <div class="stat">
-                <span class="stat-label">Total Hooks</span>
-                <span class="stat-value" id="hc-total">0</span>
+        <div class="dash-hero-content">
+            <div class="dash-hero-left">
+                <div class="dash-hero-badge hc-badge">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+                    Builder Studio
+                </div>
+                <h1 class="dash-hero-title">Advanced Hook Creator</h1>
+                <p class="dash-hero-subtitle">Create, configure, and manage custom event hooks with templates</p>
             </div>
-            <div class="stat">
-                <span class="stat-label">Active</span>
-                <span class="stat-value" style="color: #10b981;" id="hc-enabled">0</span>
-            </div>
-            <div class="stat">
-                <span class="stat-label">Disabled</span>
-                <span class="stat-value" style="color: #64748b;" id="hc-disabled">0</span>
-            </div>
-            <div class="stat">
-                <span class="stat-label">Templates Available</span>
-                <span class="stat-value" id="hc-templates">0</span>
-            </div>
-            <div class="stat">
-                <span class="stat-label">Total Executions</span>
-                <span class="stat-value" id="hc-executions">0</span>
-            </div>
-            <div class="stat">
-                <span class="stat-label">Success Rate</span>
-                <span class="stat-value" id="hc-success-rate">100%</span>
+            <div class="dash-hero-right" style="display:flex;gap:10px;">
+                <button class="dash-tour-btn" onclick="openSectionHelp('hook-creator')">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                    Help
+                </button>
+                <button class="dash-action-btn" onclick="refreshHookCreator()" style="padding:10px 18px;">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/></svg>
+                    Refresh
+                </button>
+                <button class="dash-action-btn hc-export-btn" onclick="exportHooksJSON()" id="export-hooks-btn" style="padding:10px 18px;">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                    Export
+                </button>
             </div>
         </div>
     </div>
 
-    <div style="display: grid; grid-template-columns: 400px 1fr; gap: 20px; margin-bottom: 20px;">
-        <div class="card" style="position: sticky; top: 20px; max-height: calc(100vh - 140px); overflow-y: auto;">
-            <div class="card-header">
-                <div class="card-title"> Template Library</div>
+    <!-- Hook Creator Stats Grid -->
+    <div class="hc-stats-grid">
+        <div class="hc-stat-card hc-stat-total">
+            <div class="hc-stat-icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
             </div>
-            <div style="padding: 12px;">
-                <div style="margin-bottom: 12px;">
-                    <input 
-                        type="text" 
-                        id="template-search" 
-                        class="input-text" 
-                        placeholder="Search templates..." 
-                        style="width: 100%;"
-                        oninput="filterTemplates()"
-                    />
+            <div class="hc-stat-value" id="hc-total">0</div>
+            <div class="hc-stat-label">Total Hooks</div>
+        </div>
+        <div class="hc-stat-card hc-stat-active">
+            <div class="hc-stat-icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+            </div>
+            <div class="hc-stat-value" id="hc-enabled">0</div>
+            <div class="hc-stat-label">Active</div>
+        </div>
+        <div class="hc-stat-card hc-stat-disabled">
+            <div class="hc-stat-icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
+            </div>
+            <div class="hc-stat-value" id="hc-disabled">0</div>
+            <div class="hc-stat-label">Disabled</div>
+        </div>
+        <div class="hc-stat-card hc-stat-templates">
+            <div class="hc-stat-icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
+            </div>
+            <div class="hc-stat-value" id="hc-templates">0</div>
+            <div class="hc-stat-label">Templates</div>
+        </div>
+        <div class="hc-stat-card hc-stat-executions">
+            <div class="hc-stat-icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+            </div>
+            <div class="hc-stat-value" id="hc-executions">0</div>
+            <div class="hc-stat-label">Executions</div>
+        </div>
+        <div class="hc-stat-card hc-stat-success">
+            <div class="hc-stat-icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+            </div>
+            <div class="hc-stat-value" id="hc-success-rate">100%</div>
+            <div class="hc-stat-label">Success Rate</div>
+        </div>
+    </div>
+
+    <!-- Hook Creator Main Layout -->
+    <div class="hc-main-layout">
+        <!-- Template Library Sidebar -->
+        <div class="hc-sidebar">
+            <div class="hc-sidebar-header">
+                <div class="hc-sidebar-icon">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
                 </div>
-                <div style="margin-bottom: 12px;">
-                    <select id="category-filter" class="select" style="width: 100%;" onchange="filterTemplates()">
-                        <option value="">All Categories</option>
-                    </select>
+                <div class="hc-sidebar-title">Template Library</div>
+            </div>
+            <div class="hc-sidebar-content">
+                <div class="hc-search-wrap">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                    <input type="text" id="template-search" class="hc-search-input" placeholder="Search templates..." oninput="filterTemplates()"/>
                 </div>
-                <div id="hc-templates-list"></div>
+                <select id="category-filter" class="hc-category-select" onchange="filterTemplates()">
+                    <option value="">All Categories</option>
+                </select>
+                <div id="hc-templates-list" class="hc-templates-list"></div>
             </div>
         </div>
 
-        <div>
-            <div class="card" style="margin-bottom: 20px;">
-                <div class="card-header">
-                    <div class="card-title"> Create New Hook</div>
+        <!-- Main Content Area -->
+        <div class="hc-content">
+            <!-- Create New Hook Card -->
+            <div class="hc-create-card">
+                <div class="hc-card-header">
+                    <div class="hc-card-icon hc-card-icon-create">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+                    </div>
+                    <div class="hc-card-title">Create New Hook</div>
                 </div>
-                <div style="padding: 20px;">
-                    <div style="margin-bottom: 16px;">
-                        <label style="display: block; margin-bottom: 8px; font-size: 13px; font-weight: 600; color: #94a3b8;">
-                            Select Template <span style="color: #ef4444;">*</span>
-                        </label>
-                        <select id="hc-template-select" class="select" style="width: 100%;" onchange="loadTemplateParams()">
+                <div class="hc-card-body">
+                    <div class="hc-form-group">
+                        <label class="hc-label">Select Template <span class="hc-required">*</span></label>
+                        <select id="hc-template-select" class="hc-select" onchange="loadTemplateParams()">
                             <option value="">Choose a template...</option>
                         </select>
                     </div>
                     
-                    <div id="hc-template-info" style="display: none; padding: 16px; background: linear-gradient(135deg, rgba(124, 58, 237, 0.1), rgba(168, 85, 247, 0.1)); border: 1px solid rgba(124, 58, 237, 0.3); border-radius: 8px; margin-bottom: 16px;">
-                        <div style="display: flex; align-items: start; gap: 12px; margin-bottom: 8px;">
-                            <span id="hc-template-icon" style="font-size: 24px;"></span>
-                            <div style="flex: 1;">
-                                <div style="font-size: 14px; color: #a855f7; font-weight: 700; margin-bottom: 4px;">
-                                    <span id="hc-template-name"></span>
-                                </div>
-                                <div id="hc-template-description" style="font-size: 12px; color: #cbd5e1;"></div>
+                    <div id="hc-template-info" class="hc-template-info" style="display: none;">
+                        <div class="hc-template-info-header">
+                            <span id="hc-template-icon" class="hc-template-info-icon"></span>
+                            <div class="hc-template-info-text">
+                                <div class="hc-template-info-name" id="hc-template-name"></div>
+                                <div class="hc-template-info-desc" id="hc-template-description"></div>
                             </div>
                         </div>
-                        <div id="hc-template-event" style="font-size: 11px; color: #94a3b8; padding: 6px 12px; background: rgba(15, 23, 42, 0.5); border-radius: 4px; display: inline-block;"></div>
+                        <div class="hc-template-info-event" id="hc-template-event"></div>
                     </div>
 
                     <div id="hc-params-container"></div>
 
-                    <div style="margin-top: 20px; display: flex; gap: 8px;">
-                        <button class="button" onclick="createCustomHook()" style="flex: 1;">
-                            <span style="margin-right: 6px;"></span> Create Hook
+                    <div class="hc-form-actions">
+                        <button class="hc-btn hc-btn-primary" onclick="createCustomHook(this)">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+                            Create Hook
                         </button>
-                        <button class="button button-secondary" onclick="clearHookForm()">
-                            <span style="margin-right: 6px;"></span> Clear
+                        <button class="hc-btn hc-btn-secondary" onclick="clearHookForm()">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/></svg>
+                            Clear
                         </button>
                     </div>
                 </div>
             </div>
 
-            <div class="card">
-                <div class="card-header">
-                    <div class="card-title"> Created Hooks</div>
-                    <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-                        <select id="hc-filter-guild" class="select" onchange="filterCreatedHooks()" style="min-width: 150px;">
+            <!-- Created Hooks Card -->
+            <div class="hc-hooks-card">
+                <div class="hc-card-header">
+                    <div class="hc-card-icon hc-card-icon-list">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+                    </div>
+                    <div class="hc-card-title">Created Hooks</div>
+                    <div class="hc-card-filters">
+                        <select id="hc-filter-guild" class="hc-filter-select" onchange="filterCreatedHooks()">
                             <option value="">All Guilds</option>
                         </select>
-                        <select id="hc-filter-template" class="select" onchange="filterCreatedHooks()" style="min-width: 150px;">
+                        <select id="hc-filter-template" class="hc-filter-select" onchange="filterCreatedHooks()">
                             <option value="">All Templates</option>
                         </select>
-                        <select id="hc-filter-status" class="select" onchange="filterCreatedHooks()" style="min-width: 120px;">
+                        <select id="hc-filter-status" class="hc-filter-select" onchange="filterCreatedHooks()">
                             <option value="">All Status</option>
                             <option value="enabled">Active Only</option>
                             <option value="disabled">Disabled Only</option>
                         </select>
                     </div>
                 </div>
-                <div style="padding: 12px;">
-                    <div id="hc-created-hooks-list"></div>
+                <div class="hc-card-body">
+                    <div id="hc-created-hooks-list" class="hc-created-list"></div>
                 </div>
             </div>
         </div>
@@ -6032,7 +11454,7 @@ function loadTemplateParams() {
             `;
         }
         else if (param.type === 'select') {
-            inputHtml = `<select id="param-${param.name}" class="select" style="width: 100%;">`;
+            inputHtml = `<select id="param-${param.name}" class="hc-select">`;
             (param.options || []).forEach(opt => {
                 const selected = opt === defaultValue ? 'selected' : '';
                 inputHtml += `<option value="${opt}" ${selected}>${opt}</option>`;
@@ -6077,7 +11499,7 @@ function loadTemplateParams() {
             <label class="param-label">
                 Guild / Server<span class="required">*</span>
             </label>
-            <select id="param-guild-id" class="select" style="width: 100%;">
+            <select id="param-guild-id" class="hc-select">
                 <option value="">Select a guild...</option>
             </select>
         </div>
@@ -6123,7 +11545,7 @@ function validateJSON(inputId) {
     }
 }
 
-function createCustomHook() {
+function createCustomHook(btn) {
     const templateId = document.getElementById('hc-template-select').value;
     if (!templateId) {
         showNotification('Please select a template', 'error');
@@ -6178,6 +11600,14 @@ function createCustomHook() {
 
     if (hasError) return;
 
+    // Handle button waiting state
+    const originalHTML = btn ? btn.innerHTML : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="btn-spinner"></span> Creating...';
+        btn.classList.add('btn-waiting');
+    }
+
     sendCommand('create_custom_hook', {
         template_id: templateId,
         params: params,
@@ -6189,6 +11619,12 @@ function createCustomHook() {
     setTimeout(() => {
         clearHookForm();
         refreshHookCreator();
+        // Restore button
+        if (btn && btn.parentNode) {
+            btn.disabled = false;
+            btn.innerHTML = originalHTML;
+            btn.classList.remove('btn-waiting');
+        }
     }, 1000);
 }
 
@@ -6199,19 +11635,34 @@ function clearHookForm() {
     renderTemplatesList(hookCreatorData.templates || []);
 }
 
-function deleteCustomHook(hookId) {
-    if (!confirm('Are you sure you want to delete this hook? This action cannot be undone.')) return;
-
-    sendCommand('delete_custom_hook', { hook_id: hookId });
-
-    showNotification(' Deleting hook...', 'info');
-    setTimeout(refreshHookCreator, 500);
-}
-
-function toggleCustomHook(hookId) {
+function toggleCustomHook(btn, hookId) {
+    // Store original button state
+    const originalText = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="btn-spinner"></span> Waiting...';
+    btn.classList.add('btn-waiting');
+    
     sendCommand('toggle_custom_hook', { hook_id: hookId });
 
     showNotification('Toggling hook...', 'info');
+    setTimeout(() => {
+        refreshHookCreator();
+        // Button will be re-rendered anyway
+    }, 500);
+}
+
+function deleteCustomHook(btn, hookId) {
+    if (!confirm('Are you sure you want to delete this hook?')) return;
+    
+    // Store original button state
+    const originalText = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="btn-spinner"></span> Deleting...';
+    btn.classList.add('btn-waiting');
+    
+    sendCommand('delete_custom_hook', { hook_id: hookId });
+
+    showNotification(' Deleting hook...', 'info');
     setTimeout(refreshHookCreator, 500);
 }
 
@@ -6270,7 +11721,7 @@ function renderCreatedHooks(hooks) {
                         </div>
                     </div>
                     <div class="hook-actions">
-                        <button onclick="toggleCustomHook(this.getAttribute('data-hook-id'))" data-hook-id="${hook.hook_id}" class="hook-btn toggle">
+                        <button onclick="toggleCustomHook(this, this.getAttribute('data-hook-id'))" data-hook-id="${hook.hook_id}" class="hook-btn toggle">
                             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
                             ${hook.enabled ? 'Disable' : 'Enable'}
                         </button>
@@ -6278,7 +11729,7 @@ function renderCreatedHooks(hooks) {
                             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
                             Analytics
                         </button>
-                        <button onclick="deleteCustomHook(this.getAttribute('data-hook-id'))" data-hook-id="${hook.hook_id}" class="hook-btn delete">
+                        <button onclick="deleteCustomHook(this, this.getAttribute('data-hook-id'))" data-hook-id="${hook.hook_id}" class="hook-btn delete">
                             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
                             Delete
                         </button>
@@ -6421,78 +11872,136 @@ if (typeof window !== 'undefined') {
 </script>
 
                 <div id="tab-filesystem" class="tab-content">
-                    <div class="section-header">
-                        <div style="display:flex;align-items:center;gap:8px;">
-                            <div class="section-title">File System Overview</div>
-                            <button class="header-info-button" onclick="openSectionHelp('filesystem')">?</button>
+                    <!-- File System Hero Header -->
+                    <div class="dash-hero fs-hero">
+                        <div class="dash-hero-bg">
+                            <div class="dash-hero-orb fs-orb-1"></div>
+                            <div class="dash-hero-orb fs-orb-2"></div>
+                            <div class="dash-hero-grid"></div>
                         </div>
-                        <button class="button button-secondary" onclick="refreshFileSystem()">Refresh</button>
-                    </div>
-                    
-                    <div class="card" style="margin-bottom: 20px;">
-                        <div class="card-header">
-                            <div class="card-title">System Metrics</div>
-                        </div>
-                        <div class="stats-grid">
-                            <div class="stat">
-                                <span class="stat-label">Total Files</span>
-                                <span class="stat-value" id="fs-total-files">0</span>
-                            </div>
-                            <div class="stat">
-                                <span class="stat-label">Total Size</span>
-                                <span class="stat-value" id="fs-total-size">0 MB</span>
-                            </div>
-                            <div class="stat">
-                                <span class="stat-label">Data Dir Files</span>
-                                <span class="stat-value" id="fs-data-files">0</span>
-                            </div>
-                            <div class="stat">
-                                <span class="stat-label">Cogs Dir Files</span>
-                                <span class="stat-value" id="fs-cogs-files">0</span>
-                            </div>
-                            <div class="stat">
-                                <span class="stat-label">Extensions Files</span>
-                                <span class="stat-value" id="fs-ext-files">0</span>
-                            </div>
-                            <div class="stat">
-                                <span class="stat-label">Botlogs Files</span>
-                                <span class="stat-value" id="fs-logs-files">0</span>
-                            </div>
-                            <div class="stat">
-                                <span class="stat-label">Cache Hits</span>
-                                <span class="stat-value" id="fs-cache-hits">0</span>
-                            </div>
-                            <div class="stat">
-                                <span class="stat-label">Cache Misses</span>
-                                <span class="stat-value" id="fs-cache-misses">0</span>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="explorer-unit">
-                        <div class="file-pane" style="width: 100%; max-width: 100%;">
-                            <div class="dir-header">
-                                <div class="breadcrumb">
-                                    <span class="crumb">Directory Statistics</span>
+                        <div class="dash-hero-content">
+                            <div class="dash-hero-left">
+                                <div class="dash-hero-badge fs-badge">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                                    Storage Analytics
                                 </div>
+                                <h1 class="dash-hero-title">File System Overview</h1>
+                                <p class="dash-hero-subtitle">Monitor directory sizes, file counts, and cache performance</p>
                             </div>
-
-                            <div class="list" id="filesystem-content" style="padding: 12px;"></div>
+                            <div class="dash-hero-right" style="display:flex;gap:10px;">
+                                <button class="dash-tour-btn" onclick="openSectionHelp('filesystem')">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                                    Help
+                                </button>
+                                <button class="dash-action-btn" onclick="refreshFileSystem()" style="padding:10px 18px;">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/></svg>
+                                    Refresh
+                                </button>
+                            </div>
                         </div>
+                    </div>
+
+                    <!-- File System Stats Grid -->
+                    <div class="fs-stats-grid">
+                        <div class="fs-stat-card fs-stat-files">
+                            <div class="fs-stat-icon">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                            </div>
+                            <div class="fs-stat-value" id="fs-total-files">0</div>
+                            <div class="fs-stat-label">Total Files</div>
+                        </div>
+                        <div class="fs-stat-card fs-stat-size">
+                            <div class="fs-stat-icon">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
+                            </div>
+                            <div class="fs-stat-value" id="fs-total-size">0 MB</div>
+                            <div class="fs-stat-label">Total Size</div>
+                        </div>
+                        <div class="fs-stat-card fs-stat-data">
+                            <div class="fs-stat-icon">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+                            </div>
+                            <div class="fs-stat-value" id="fs-data-files">0</div>
+                            <div class="fs-stat-label">Data Files</div>
+                        </div>
+                        <div class="fs-stat-card fs-stat-cogs">
+                            <div class="fs-stat-icon">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                            </div>
+                            <div class="fs-stat-value" id="fs-cogs-files">0</div>
+                            <div class="fs-stat-label">Cogs Files</div>
+                        </div>
+                        <div class="fs-stat-card fs-stat-ext">
+                            <div class="fs-stat-icon">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+                            </div>
+                            <div class="fs-stat-value" id="fs-ext-files">0</div>
+                            <div class="fs-stat-label">Extensions</div>
+                        </div>
+                        <div class="fs-stat-card fs-stat-logs">
+                            <div class="fs-stat-icon">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+                            </div>
+                            <div class="fs-stat-value" id="fs-logs-files">0</div>
+                            <div class="fs-stat-label">Bot Logs</div>
+                        </div>
+                        <div class="fs-stat-card fs-stat-hits">
+                            <div class="fs-stat-icon">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                            </div>
+                            <div class="fs-stat-value" id="fs-cache-hits">0</div>
+                            <div class="fs-stat-label">Cache Hits</div>
+                        </div>
+                        <div class="fs-stat-card fs-stat-misses">
+                            <div class="fs-stat-icon">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+                            </div>
+                            <div class="fs-stat-value" id="fs-cache-misses">0</div>
+                            <div class="fs-stat-label">Cache Misses</div>
+                        </div>
+                    </div>
+
+                    <!-- File System Explorer -->
+                    <div class="fs-explorer">
+                        <div class="fs-explorer-header">
+                            <div class="fs-explorer-title">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                                Directory Statistics
+                            </div>
+                        </div>
+                        <div class="fs-list" id="filesystem-content"></div>
                     </div>
                 </div>
 
                 <div id="tab-files" class="tab-content">
-                    <div class="section-header">
-                        <div style="display:flex;align-items:center;gap:8px;">
-                            <div class="section-title">File Browser</div>
-                            <button class="header-info-button" onclick="openSectionHelp('files')">?</button>
+                    <!-- File Browser Hero Header -->
+                    <div class="dash-hero fb-hero">
+                        <div class="dash-hero-bg">
+                            <div class="dash-hero-orb fb-orb-1"></div>
+                            <div class="dash-hero-orb fb-orb-2"></div>
+                            <div class="dash-hero-grid"></div>
+                        </div>
+                        <div class="dash-hero-content">
+                            <div class="dash-hero-left">
+                                <div class="dash-hero-badge fb-badge">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>
+                                    Code Editor
+                                </div>
+                                <h1 class="dash-hero-title">File Browser</h1>
+                                <p class="dash-hero-subtitle">Browse, edit, and manage your bot's files directly from the dashboard</p>
+                            </div>
+                            <div class="dash-hero-right" style="display:flex;gap:10px;">
+                                <button class="dash-tour-btn" onclick="openSectionHelp('files')">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                                    Help
+                                </button>
+                            </div>
                         </div>
                     </div>
                     <div id="file-browser-content">
-                        <div class="explorer-unit">
+                        <div class="explorer-unit fb-explorer">
                             <div class="file-pane" id="pane">
-                                <div class="dir-header">
+                                <div class="dir-header fb-dir-header">
                                     <div class="breadcrumb" id="breadcrumb"></div>
                                     <div class="file-toolbar">
                                         <button class="file-toolbar-toggle" id="file-toolbar-toggle" aria-label="File actions" aria-haspopup="true" aria-expanded="false">⋮</button>
@@ -6509,17 +12018,17 @@ if (typeof window !== 'undefined') {
                                 <div class="scroll-area"><div class="file-grid list-mode" id="list"></div></div>
                             </div>
                             <div class="resizer" id="resize"></div>
-                            <div class="editor-pane">
-                                <div class="editor-header">
-                                    <span id="fileName" style="font-size:11px; font-weight:600">file.ts</span>
+                            <div class="editor-pane fb-editor-pane">
+                                <div class="editor-header fb-editor-header">
+                                    <span id="fileName" class="fb-filename">file.ts</span>
                                     <div class="action-group">
-                                        <button class="btn" onclick="jumpEditorScroll()">Jump to Bottom</button>
-                                        <button class="btn" onclick="closeEditor()">Close</button>
-                                        <button class="btn" onclick="promptRenameCurrentFile()">Rename</button>
-                                        <button class="btn btn-save" onclick="save()">Save</button>
+                                        <button class="btn fb-btn" onclick="jumpEditorScroll()">Jump to Bottom</button>
+                                        <button class="btn fb-btn" onclick="closeEditor()">Close</button>
+                                        <button class="btn fb-btn" onclick="promptRenameCurrentFile()">Rename</button>
+                                        <button class="btn btn-save fb-btn-save" onclick="save()">Save</button>
                                     </div>
                                 </div>
-                                <textarea id="fileContent"></textarea>
+                                <textarea id="fileContent" class="fb-textarea"></textarea>
                             </div>
                         </div>
                     </div>
@@ -6531,36 +12040,69 @@ if (typeof window !== 'undefined') {
                 </div>
 
                 <div id="tab-chat" class="tab-content">
-                    <div class="section-header">
-                        <div style="display:flex;align-items:center;gap:8px;">
-                            <div class="section-title">Chat Console (EXPERIMENTAL)</div>
-                            <button class="header-info-button" onclick="openSectionHelp('chat')">?</button>
+                    <!-- Chat Console Hero Header -->
+                    <div class="dash-hero chat-hero">
+                        <div class="dash-hero-bg">
+                            <div class="dash-hero-orb chat-orb-1"></div>
+                            <div class="dash-hero-orb chat-orb-2"></div>
+                            <div class="dash-hero-grid"></div>
+                        </div>
+                        <div class="dash-hero-content">
+                            <div class="dash-hero-left">
+                                <div class="dash-hero-badge chat-badge">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                                    Bot Messenger
+                                </div>
+                                <h1 class="dash-hero-title">Chat Console</h1>
+                                <p class="dash-hero-subtitle">Send messages as your bot to any server channel (Experimental Feature)</p>
+                            </div>
+                            <div class="dash-hero-right" style="display:flex;gap:10px;">
+                                <span class="chat-experimental-badge">EXPERIMENTAL</span>
+                                <button class="dash-tour-btn" onclick="openSectionHelp('chat')">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                                    Help
+                                </button>
+                            </div>
                         </div>
                     </div>
-                    <div class="two-column-grid" id="chat-console">
-                        <div class="column-card">
-                            <div class="column-header">
+                    <div class="chat-columns" id="chat-console">
+                        <!-- Servers Column -->
+                        <div class="chat-column-card chat-servers-card">
+                            <div class="chat-column-header">
+                                <div class="chat-column-icon chat-column-icon-servers">
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
+                                </div>
                                 <div>
-                                    <div class="column-title">Servers</div>
-                                    <div class="column-subtitle">Select a server to see its text channels</div>
+                                    <div class="chat-column-title">Servers</div>
+                                    <div class="chat-column-subtitle">Select a server to see its text channels</div>
                                 </div>
                             </div>
-                            <div id="chat-guilds" class="list" style="padding: 12px;"></div>
+                            <div id="chat-guilds" class="chat-guilds-list"></div>
                         </div>
-                        <div class="column-card">
-                            <div class="column-header">
+                        <!-- Channel & Conversation Column -->
+                        <div class="chat-column-card chat-conversation-card">
+                            <div class="chat-column-header">
+                                <div class="chat-column-icon chat-column-icon-channel">
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                                </div>
                                 <div>
-                                    <div class="column-title">Channel & Conversation</div>
-                                    <div class="column-subtitle" id="chat-channel-subtitle">No channel selected</div>
+                                    <div class="chat-column-title">Channel & Conversation</div>
+                                    <div class="chat-column-subtitle" id="chat-channel-subtitle">No channel selected</div>
                                 </div>
                             </div>
-                            <div class="list" style="padding: 12px; max-height: 260px; overflow-y: auto;" id="chat-channels"></div>
-                            <div style="margin-top: 16px;">
-                                <div id="chat-message-log" style="height: 200px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; padding: 10px; background: rgba(15,23,42,0.9);"></div>
-                                <div style="margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap;">
-                                    <input id="chat-message-input" class="input-text" type="text" placeholder="Type a message to send as the bot..." style="flex: 1; min-width: 180px;" />
-                                    <button class="button button-primary" onclick="sendChatMessage()">Send</button>
-                                    <button class="button" onclick="requestChatHistory()">Request chat data (BETA)</button>
+                            <div class="chat-channels-list" id="chat-channels"></div>
+                            <div class="chat-message-area">
+                                <div id="chat-message-log" class="chat-message-log"></div>
+                                <div class="chat-input-row">
+                                    <input id="chat-message-input" class="chat-input" type="text" placeholder="Type a message to send as the bot..." />
+                                    <button class="chat-send-btn" onclick="sendChatMessage()">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+                                        Send
+                                    </button>
+                                    <button class="chat-history-btn" onclick="requestChatHistory()">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                                        History
+                                    </button>
                                 </div>
                             </div>
                         </div>
@@ -6569,322 +12111,528 @@ if (typeof window !== 'undefined') {
 
 
                 <div id="tab-tickets" class="tab-content">
-                    <div class="section-header">
-                        <div style="display:flex;align-items:center;gap:8px;">
-                            <h2 style="font-size:22px;font-weight:700;margin:0;color:#e5e7eb;display:flex;align-items:center;gap:12px;">
-                                <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-                                    <path d="M3 7C3 5.89543 3.89543 5 5 5H19C20.1046 5 21 5.89543 21 7V10C19.8954 10 19 10.8954 19 12C19 13.1046 19.8954 14 21 14V17C21 18.1046 20.1046 19 19 19H5C3.89543 19 3 18.1046 3 17V14C4.10457 14 5 13.1046 5 12C5 10.8954 4.10457 10 3 10V7Z" stroke="#a855f7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                                    <path d="M9 9L9 15M12 9V15M15 9V15" stroke="#a855f7" stroke-width="2" stroke-linecap="round"/>
-                                </svg>
-                                Discord Tickets
-                            </h2>
+                    <!-- Tickets Hero Header -->
+                    <div class="dash-hero tickets-hero">
+                        <div class="dash-hero-bg">
+                            <div class="dash-hero-orb tickets-orb-1"></div>
+                            <div class="dash-hero-orb tickets-orb-2"></div>
+                            <div class="dash-hero-grid"></div>
                         </div>
-                    </div>
-
-                    <div class="card" style="margin-bottom:20px;background:linear-gradient(135deg, rgba(124, 58, 237, 0.1) 0%, rgba(168, 85, 247, 0.1) 100%);border:1px solid rgba(168, 85, 247, 0.3);">
-                        <div class="card-body" style="display:flex;align-items:center;gap:16px;padding:16px 20px;">
-                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" style="flex-shrink:0;">
-                                <path d="M12 16V12M12 8H12.01M22 12C22 17.5228 17.5228 22 12 22C6.47715 22 2 17.5228 2 12C2 6.47715 6.47715 2 12 2C17.5228 2 22 6.47715 22 12Z" stroke="#a855f7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                            </svg>
-                            <div style="flex:1;">
-                                <div style="font-size:14px;font-weight:600;color:#e5e7eb;margin-bottom:4px;">
-                                    Multi-Ticket System Required
+                        <div class="dash-hero-content">
+                            <div class="dash-hero-left">
+                                <div class="dash-hero-badge tickets-badge">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7C3 5.89543 3.89543 5 5 5H19C20.1046 5 21 5.89543 21 7V10C19.8954 10 19 10.8954 19 12C19 13.1046 19.8954 14 21 14V17C21 18.1046 20.1046 19 19 19H5C3.89543 19 3 18.1046 3 17V14C4.10457 14 5 13.1046 5 12C5 10.8954 4.10457 10 3 10V7Z"/></svg>
+                                    Support System
                                 </div>
-                                <div style="font-size:13px;color:#94a3b8;line-height:1.5;">
-                                    This dashboard integrates with <strong style="color:#a855f7;">Multi-Ticket System V4.0.0+</strong> from the ZygnalBot Marketplace. 
-                                    <a href="https://zygnalbot.com/extension/view.php?id=116" target="_blank" style="color:#a855f7;text-decoration:none;font-weight:600;margin-left:4px;">
-                                        Install Extension →
-                                    </a>
-                                </div>
+                                <h1 class="dash-hero-title">Discord Tickets</h1>
+                                <p class="dash-hero-subtitle">View, manage, and analyze support tickets across all your servers</p>
+                            </div>
+                            <div class="dash-hero-right" style="display:flex;gap:10px;">
+                                <button class="dash-action-btn" onclick="loadTickets()" style="padding:10px 18px;">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/></svg>
+                                    Refresh
+                                </button>
                             </div>
                         </div>
                     </div>
 
-                    <div class="card" style="margin-bottom:20px;">
-                        <div class="card-header">
-                            <div class="card-title">Ticket Filters & Controls</div>
+                    <!-- Extension Notice -->
+                    <div class="tickets-notice">
+                        <div class="tickets-notice-icon">
+                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
                         </div>
-                        <div class="card-body" style="display:flex;flex-direction:column;gap:16px;">
-                            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;">
-                                <div>
-                                    <label class="property-label" style="display:block;margin-bottom:8px;">Guild/Server</label>
-                                    <select id="tickets-guild-filter" class="tickets-select">
+                        <div class="tickets-notice-content">
+                            <div class="tickets-notice-title">Multi-Ticket System Required</div>
+                            <div class="tickets-notice-text">
+                                This dashboard integrates with <strong>Multi-Ticket System V4.0.0+</strong> from the ZygnalBot Marketplace.
+                            </div>
+                        </div>
+                        <a href="https://zygnalbot.com/extension/view.php?id=116" target="_blank" class="tickets-notice-btn">
+                            Install Extension
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                        </a>
+                    </div>
+
+                    <!-- Filters Card -->
+                    <div class="tickets-filters-card">
+                        <div class="tickets-filters-header">
+                            <div class="tickets-filters-icon">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+                            </div>
+                            <div class="tickets-filters-title">Filters & Controls</div>
+                        </div>
+                        <div class="tickets-filters-body">
+                            <div class="tickets-filters-grid">
+                                <div class="tickets-filter-group">
+                                    <label class="tickets-filter-label">Guild/Server</label>
+                                    <select id="tickets-guild-filter" class="tickets-filter-select">
                                         <option value="">All Guilds</option>
                                     </select>
                                 </div>
-                                <div>
-                                    <label class="property-label" style="display:block;margin-bottom:8px;">Category</label>
-                                    <select id="tickets-category-filter" class="tickets-select">
+                                <div class="tickets-filter-group">
+                                    <label class="tickets-filter-label">Category</label>
+                                    <select id="tickets-category-filter" class="tickets-filter-select">
                                         <option value="">All Categories</option>
                                     </select>
                                 </div>
-                                <div>
-                                    <label class="property-label" style="display:block;margin-bottom:8px;">Sort By</label>
-                                    <select id="tickets-sort" class="tickets-select">
-                                        <option value="closed_desc">Closed Date (Newest First)</option>
-                                        <option value="closed_asc">Closed Date (Oldest First)</option>
-                                        <option value="created_desc">Created Date (Newest First)</option>
-                                        <option value="created_asc">Created Date (Oldest First)</option>
-                                        <option value="number_desc">Ticket # (High to Low)</option>
-                                        <option value="number_asc">Ticket # (Low to High)</option>
+                                <div class="tickets-filter-group">
+                                    <label class="tickets-filter-label">Sort By</label>
+                                    <select id="tickets-sort" class="tickets-filter-select">
+                                        <option value="closed_desc">Closed (Newest)</option>
+                                        <option value="closed_asc">Closed (Oldest)</option>
+                                        <option value="created_desc">Created (Newest)</option>
+                                        <option value="created_asc">Created (Oldest)</option>
+                                        <option value="number_desc">Ticket # ↓</option>
+                                        <option value="number_asc">Ticket # ↑</option>
+                                    </select>
+                                </div>
+                                <div class="tickets-filter-group">
+                                    <label class="tickets-filter-label">Auto-Refresh</label>
+                                    <select id="tickets-autorefresh" class="tickets-filter-select">
+                                        <option value="0">Off</option>
+                                        <option value="5000">5 seconds</option>
+                                        <option value="10000">10 seconds</option>
+                                        <option value="20000">20 seconds</option>
                                     </select>
                                 </div>
                             </div>
-                            <div style="display:grid;grid-template-columns:1fr auto;gap:12px;align-items:end;">
-                                <div>
-                                    <label class="property-label" style="display:block;margin-bottom:8px;">Search</label>
-                                    <input type="text" id="tickets-search" class="input-text" placeholder="Search by ticket #, creator, or subject..." style="width:100%;padding:10px;background:rgba(0,0,0,0.3);border:1px solid rgba(148,163,184,0.3);border-radius:8px;color:#e5e7eb;">
-                                </div>
-                                <div style="display:flex;gap:12px;">
-                                    <div>
-                                        <label class="property-label" style="display:block;margin-bottom:8px;">Auto-Refresh</label>
-                                        <select id="tickets-autorefresh" class="tickets-select" style="width:140px;">
-                                            <option value="0">Off</option>
-                                            <option value="5000">5 seconds</option>
-                                            <option value="10000">10 seconds</option>
-                                            <option value="20000">20 seconds</option>
-                                        </select>
-                                    </div>
-                                    <button class="button button-primary" onclick="loadTickets()" style="padding:10px 20px;align-self:flex-end;">
-                                        🔄 Refresh
-                                    </button>
+                            <div class="tickets-search-row">
+                                <div class="tickets-search-wrap">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                                    <input type="text" id="tickets-search" class="tickets-search-input" placeholder="Search by ticket #, creator, or subject..."/>
                                 </div>
                             </div>
                         </div>
                     </div>
 
-                    <div class="card expanded">
-                        <div class="card-header">
-                            <div class="card-title">Tickets</div>
-                            <div id="tickets-count" style="color:#94a3b8;font-size:14px;">Loading...</div>
-                        </div>
-                        <div class="card-body" style="padding:0;overflow:hidden;">
-                            <div id="tickets-empty-state" style="display:none;padding:40px 24px;text-align:center;color:#94a3b8;">
-                                <div style="font-size:48px;margin-bottom:16px;">🎫</div>
-                                <div style="font-size:16px;font-weight:600;margin-bottom:8px;color:#e5e7eb;">No tickets exist yet across all guilds</div>
-                                <div style="font-size:14px;margin-bottom:16px;">If you need a good ticket system, check out:</div>
-                                <a href="https://zygnalbot.com/extension/view.php?id=116" target="_blank" style="color:#7c3aed;text-decoration:none;font-weight:600;">https://zygnalbot.com/extension/view.php?id=116</a>
-                                <div style="font-size:13px;margin-top:8px;color:#64748b;">Read the docs, then click back to all extensions and search for "multi-ticket" to find Multi-Ticket System</div>
+                    <!-- Tickets Table Card -->
+                    <div class="tickets-table-card">
+                        <div class="tickets-table-header">
+                            <div class="tickets-table-title">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                                Ticket Archive
                             </div>
-                            <div id="tickets-loading" style="padding:40px 24px;text-align:center;color:#94a3b8;">
-                                <div style="font-size:32px;margin-bottom:12px;">⏳</div>
+                            <div id="tickets-count" class="tickets-count">Loading...</div>
+                        </div>
+                        <div class="tickets-table-body">
+                            <div id="tickets-empty-state" class="tickets-empty" style="display:none;">
+                                <div class="tickets-empty-icon"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#a855f7" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7C3 5.89543 3.89543 5 5 5H19C20.1046 5 21 5.89543 21 7V10C19.8954 10 19 10.8954 19 12C19 13.1046 19.8954 14 21 14V17C21 18.1046 20.1046 19 19 19H5C3.89543 19 3 18.1046 3 17V14C4.10457 14 5 13.1046 5 12C5 10.8954 4.10457 10 3 10V7Z"/><line x1="9" y1="9" x2="9" y2="15"/><line x1="12" y1="9" x2="12" y2="15"/><line x1="15" y1="9" x2="15" y2="15"/></svg></div>
+                                <div class="tickets-empty-title">No tickets found</div>
+                                <div class="tickets-empty-text">No tickets exist yet or match your filters</div>
+                                <a href="https://zygnalbot.com/extension/view.php?id=116" target="_blank" class="tickets-empty-link">Get Multi-Ticket System →</a>
+                            </div>
+                            <div id="tickets-loading" class="tickets-loading">
+                                <div class="tickets-loading-spinner"></div>
                                 <div>Loading tickets...</div>
                             </div>
-                            <div id="tickets-table-container" style="display:none;overflow-x:auto;">
-                                <table class="data-table" style="width:100%;border-collapse:collapse;">
+                            <div id="tickets-table-container" style="display:none;">
+                                <table class="tickets-table">
                                     <thead>
-                                        <tr style="background:rgba(0,0,0,0.2);border-bottom:1px solid rgba(148,163,184,0.2);">
-                                            <th style="padding:12px 16px;text-align:left;font-weight:600;color:#94a3b8;font-size:13px;">Ticket #</th>
-                                            <th style="padding:12px 16px;text-align:left;font-weight:600;color:#94a3b8;font-size:13px;">Category</th>
-                                            <th style="padding:12px 16px;text-align:left;font-weight:600;color:#94a3b8;font-size:13px;">Creator</th>
-                                            <th style="padding:12px 16px;text-align:left;font-weight:600;color:#94a3b8;font-size:13px;">Status</th>
-                                            <th style="padding:12px 16px;text-align:left;font-weight:600;color:#94a3b8;font-size:13px;">Created</th>
-                                            <th style="padding:12px 16px;text-align:left;font-weight:600;color:#94a3b8;font-size:13px;">Closed</th>
-                                            <th style="padding:12px 16px;text-align:left;font-weight:600;color:#94a3b8;font-size:13px;">Actions</th>
+                                        <tr>
+                                            <th>Ticket #</th>
+                                            <th>Category</th>
+                                            <th>Creator</th>
+                                            <th>Status</th>
+                                            <th>Created</th>
+                                            <th>Closed</th>
+                                            <th>Actions</th>
                                         </tr>
                                     </thead>
-                                    <tbody id="tickets-tbody">
-                                    </tbody>
+                                    <tbody id="tickets-tbody"></tbody>
                                 </table>
                             </div>
                         </div>
-                        <div id="tickets-pagination" style="display:none;padding:16px 24px;border-top:1px solid rgba(148,163,184,0.2);justify-content:space-between;align-items:center;">
-                            <button class="button button-secondary" id="tickets-prev-btn" onclick="ticketsPreviousPage()" disabled>← Previous</button>
-                            <div id="tickets-page-info" style="color:#94a3b8;font-size:14px;">Page 1 of 1</div>
-                            <button class="button button-secondary" id="tickets-next-btn" onclick="ticketsNextPage()" disabled>Next →</button>
+                        <div id="tickets-pagination" class="tickets-pagination" style="display:none;">
+                            <button class="tickets-page-btn" id="tickets-prev-btn" onclick="ticketsPreviousPage()" disabled>
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+                                Previous
+                            </button>
+                            <div id="tickets-page-info" class="tickets-page-info">Page 1 of 1</div>
+                            <button class="tickets-page-btn" id="tickets-next-btn" onclick="ticketsNextPage()" disabled>
+                                Next
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+                            </button>
                         </div>
                     </div>
                 </div>
                 <div id="tab-guilds" class="tab-content">
-                    <div class="section-header">
-                        <div style="display:flex;align-items:center;gap:8px;">
-                            <div class="section-title">Guilds / Servers</div>
-                            <button class="header-info-button" onclick="openSectionHelp('guilds')">?</button>
+                    <!-- Guilds Hero Header -->
+                    <div class="dash-hero guilds-hero">
+                        <div class="dash-hero-bg">
+                            <div class="dash-hero-orb guilds-orb-1"></div>
+                            <div class="dash-hero-orb guilds-orb-2"></div>
+                            <div class="dash-hero-grid"></div>
+                        </div>
+                        <div class="dash-hero-content">
+                            <div class="dash-hero-left">
+                                <div class="dash-hero-badge guilds-badge">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
+                                    Server Network
+                                </div>
+                                <h1 class="dash-hero-title">Guilds / Servers</h1>
+                                <p class="dash-hero-subtitle">Overview of all Discord servers where your bot is currently active</p>
+                            </div>
+                            <div class="dash-hero-right" style="display:flex;gap:10px;">
+                                <button class="dash-tour-btn" onclick="openSectionHelp('guilds')">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                                    Help
+                                </button>
+                            </div>
                         </div>
                     </div>
-                    <div class="card" style="cursor: default;">
-                        <div class="card-header">
-                            <div class="card-title">Current Servers</div>
-                            <div class="card-subtitle">Overview of guilds the bot is currently in.</div>
+
+                    <!-- Guilds Explorer Card -->
+                    <div class="guilds-card">
+                        <div class="guilds-card-header">
+                            <div class="guilds-card-title">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                                Current Servers
+                            </div>
+                            <div class="guilds-card-subtitle">All guilds the bot is currently connected to</div>
                         </div>
-                        <div class="card-body" style="display:block;">
+                        <div class="guilds-card-body">
                             <div id="guilds-list" class="guilds-grid">
-                                <div class="loading">Loading...</div>
+                                <div class="guilds-loading">
+                                    <div class="guilds-loading-spinner"></div>
+                                    <span>Loading servers...</span>
+                                </div>
                             </div>
                         </div>
                     </div>
                 </div>
 
                 <div id="tab-events" class="tab-content">
-                    <div class="section-header">
-                        <div style="display:flex;align-items:center;gap:8px;">
-                            <div class="section-title">Recent Events</div>
-                            <button class="header-info-button" onclick="openSectionHelp('events')">?</button>
+                    <!-- Events Hero Header -->
+                    <div class="dash-hero events-hero">
+                        <div class="dash-hero-bg">
+                            <div class="dash-hero-orb events-orb-1"></div>
+                            <div class="dash-hero-orb events-orb-2"></div>
+                            <div class="dash-hero-grid"></div>
                         </div>
-                        <div id="events-count">0 Events</div>
+                        <div class="dash-hero-content">
+                            <div class="dash-hero-left">
+                                <div class="dash-hero-badge events-badge">
+                                    <span class="events-live-dot"></span>
+                                    Live Feed
+                                </div>
+                                <h1 class="dash-hero-title">Recent Events</h1>
+                                <p class="dash-hero-subtitle">Real-time stream of Discord events captured by your bot</p>
+                            </div>
+                            <div class="dash-hero-right" style="display:flex;gap:10px;align-items:center;">
+                                <div id="events-count" class="events-counter">0 Events</div>
+                                <button class="dash-tour-btn" onclick="openSectionHelp('events')">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                                    Help
+                                </button>
+                            </div>
+                        </div>
                     </div>
-                    <div id="events-list"></div>
+
+                    <!-- Events Timeline Card -->
+                    <div class="events-card">
+                        <div class="events-card-header">
+                            <div class="events-card-title">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                                Event Timeline
+                            </div>
+                            <div class="events-card-subtitle">Most recent events appear first</div>
+                        </div>
+                        <div id="events-list" class="events-timeline"></div>
+                    </div>
                 </div>
 
                 <div id="tab-system" class="tab-content">
-                    <div class="section-header">
-                        <div style="display:flex;align-items:center;gap:8px;">
-                            <div class="section-title">System Details</div>
-                            <button class="header-info-button" onclick="openSectionHelp('system')">?</button>
+                    <!-- System Hero Header -->
+                    <div class="dash-hero sys-hero">
+                        <div class="dash-hero-bg">
+                            <div class="dash-hero-orb sys-orb-1"></div>
+                            <div class="dash-hero-orb sys-orb-2"></div>
+                            <div class="dash-hero-grid"></div>
+                        </div>
+                        <div class="dash-hero-content">
+                            <div class="dash-hero-left">
+                                <div class="dash-hero-badge sys-badge">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2" ry="2"/><rect x="9" y="9" width="6" height="6"/><line x1="9" y1="1" x2="9" y2="4"/><line x1="15" y1="1" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="23"/><line x1="15" y1="20" x2="15" y2="23"/><line x1="20" y1="9" x2="23" y2="9"/><line x1="20" y1="14" x2="23" y2="14"/><line x1="1" y1="9" x2="4" y2="9"/><line x1="1" y1="14" x2="4" y2="14"/></svg>
+                                    Runtime Environment
+                                </div>
+                                <h1 class="dash-hero-title">System Details</h1>
+                                <p class="dash-hero-subtitle">Comprehensive view of bot configuration, resources, health metrics, and framework settings</p>
+                            </div>
+                            <div class="dash-hero-right" style="display:flex;gap:10px;">
+                                <button class="dash-tour-btn" onclick="openSectionHelp('system')">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                                    Help
+                                </button>
+                            </div>
                         </div>
                     </div>
-                    <div id="system-details"></div>
+                    
+                    <!-- System Content Container - Modern Dashboard Layout -->
+                    <div id="system-details" class="sys-dashboard"></div>
                 </div>
 
                 <div id="tab-invite" class="tab-content">
-                    <div class="section-header">
-                        <div style="display:flex;align-items:center;gap:8px;">
-                            <div class="section-title">Bot Invite Helper</div>
-                            <button class="header-info-button" onclick="openSectionHelp('invite')">?</button>
+                    <!-- Invite Hero Header -->
+                    <div class="dash-hero invite-hero">
+                        <div class="dash-hero-bg">
+                            <div class="dash-hero-orb invite-orb-1"></div>
+                            <div class="dash-hero-orb invite-orb-2"></div>
+                            <div class="dash-hero-grid"></div>
+                        </div>
+                        <div class="dash-hero-content">
+                            <div class="dash-hero-left">
+                                <div class="dash-hero-badge invite-badge">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+                                    OAuth2 Generator
+                                </div>
+                                <h1 class="dash-hero-title">Bot Invite Helper</h1>
+                                <p class="dash-hero-subtitle">Generate secure OAuth2 invite links with custom permissions</p>
+                            </div>
+                            <div class="dash-hero-right" style="display:flex;gap:10px;">
+                                <a href="https://discord.com/developers/applications" target="_blank" rel="noreferrer noopener" class="dash-action-btn invite-portal-btn">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                                    Developer Portal
+                                </a>
+                                <button class="dash-tour-btn" onclick="openSectionHelp('invite')">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                                    Help
+                                </button>
+                            </div>
                         </div>
                     </div>
-                    <div class="card invite-card">
-                        <div class="card-header invite-card-header" style="align-items:flex-start;">
+
+                    <!-- Invite Builder Card -->
+                    <div class="invite-builder-card">
+                        <div class="invite-builder-header">
+                            <div class="invite-builder-icon">
+                                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+                            </div>
                             <div>
-                                <div class="card-title">Generate a Discord bot invite link</div>
-                                <div class="card-subtitle">
-                                    Quickly build a correct OAuth2 invite URL for your bot. For advanced settings (redirects, more scopes, whitelists, etc.) use the official Discord Developer Portal for your application.
-                                </div>
+                                <div class="invite-builder-title">Generate Invite Link</div>
+                                <div class="invite-builder-subtitle">Build a correct OAuth2 invite URL for your bot</div>
                             </div>
-                            <a href="https://discord.com/developers/applications" target="_blank" rel="noreferrer noopener" class="button button-secondary button-compact" style="text-decoration:none;">
-                                Open Developer Portal
-                            </a>
                         </div>
-                        <div class="card-body invite-card-body" style="display:block;">
-                            <div class="property-group" style="margin-bottom:24px;display:grid;gap:20px;">
-                                <div class="property" style="display:flex;flex-direction:column;gap:10px;">
-                                    <span class="property-label" style="font-size:14px;font-weight:600;color:#60a5fa;">Application / Client ID</span>
-                                    <input id="invite-app-id" class="input-text" type="text" placeholder="Enter your bot application's client ID (numeric)" style="width:100%;font-size:14px;padding:14px 18px;border-radius:10px;background:rgba(0,0,0,0.3);border:1px solid rgba(59,130,246,0.3);transition:all 0.2s ease;" />
+                        <div class="invite-builder-body">
+                            <!-- Application ID -->
+                            <div class="invite-form-group invite-form-full">
+                                <label class="invite-label">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                                    Application / Client ID
+                                </label>
+                                <input id="invite-app-id" class="invite-input" type="text" placeholder="Enter your bot application's client ID (numeric)"/>
+                            </div>
+                            
+                            <div class="invite-form-row">
+                                <!-- OAuth2 Scopes -->
+                                <div class="invite-form-group">
+                                    <label class="invite-label">
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                                        OAuth2 Scopes
+                                    </label>
+                                    <div class="invite-scopes-box">
+                                        <label class="invite-scope-option">
+                                            <input id="invite-scope-bot" type="checkbox" checked class="invite-checkbox"/>
+                                            <span class="invite-scope-name">bot</span>
+                                            <span class="invite-scope-desc">Required for bot functionality</span>
+                                        </label>
+                                        <label class="invite-scope-option">
+                                            <input id="invite-scope-commands" type="checkbox" checked class="invite-checkbox"/>
+                                            <span class="invite-scope-name">applications.commands</span>
+                                            <span class="invite-scope-desc">Required for slash commands</span>
+                                        </label>
+                                    </div>
                                 </div>
-                                <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
-                                    <div class="property" style="display:flex;flex-direction:column;gap:10px;">
-                                        <span class="property-label" style="font-size:14px;font-weight:600;color:#60a5fa;">OAuth2 Scopes</span>
-                                        <div style="display:flex;flex-direction:column;gap:10px;padding:16px;background:rgba(0,0,0,0.2);border-radius:10px;border:1px solid rgba(59,130,246,0.2);">
-                                            <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;padding:8px;border-radius:6px;transition:background 0.2s ease;" onmouseover="this.style.background='rgba(59,130,246,0.1)'" onmouseout="this.style.background='transparent'">
-                                                <input id="invite-scope-bot" type="checkbox" checked style="width:18px;height:18px;cursor:pointer;" /> <span style="font-weight:500;">bot</span>
-                                            </label>
-                                            <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;padding:8px;border-radius:6px;transition:background 0.2s ease;" onmouseover="this.style.background='rgba(59,130,246,0.1)'" onmouseout="this.style.background='transparent'">
-                                                <input id="invite-scope-commands" type="checkbox" checked style="width:18px;height:18px;cursor:pointer;" /> <span style="font-weight:500;">applications.commands</span>
-                                            </label>
-                                        </div>
-                                        <div style="font-size:12px;color:var(--text-secondary);padding:0 4px;">
-                                            Most bot setups should have both enabled
-                                        </div>
-                                    </div>
-                                    <div class="property" style="display:flex;flex-direction:column;gap:10px;">
-                                        <span class="property-label" style="font-size:14px;font-weight:600;color:#60a5fa;">Permissions Bitmask</span>
-                                        <input id="invite-permissions" class="input-text" type="text" placeholder="e.g. 0 (no perms), 8 (admin)" style="width:100%;font-size:14px;padding:14px 18px;border-radius:10px;background:rgba(0,0,0,0.3);border:1px solid rgba(59,130,246,0.3);transition:all 0.2s ease;" />
-                                        <div style="font-size:12px;color:var(--text-secondary);padding:0 4px;">
-                                            Optional. Leave empty for full selector
-                                        </div>
-                                    </div>
+                                
+                                <!-- Permissions -->
+                                <div class="invite-form-group">
+                                    <label class="invite-label">
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                                        Permissions Bitmask
+                                    </label>
+                                    <input id="invite-permissions" class="invite-input" type="text" placeholder="e.g. 0 (no perms), 8 (admin)"/>
+                                    <div class="invite-hint">Leave empty for user-selectable permissions</div>
                                 </div>
                             </div>
-                            <div style="padding:20px;background:linear-gradient(135deg,rgba(37,99,235,0.08),rgba(139,92,246,0.08));border-radius:12px;border:1px solid rgba(59,130,246,0.3);margin-bottom:20px;">
-                                <div style="font-size:14px;font-weight:600;color:#60a5fa;margin-bottom:12px;">Generated Invite URL</div>
-                                <input id="invite-output-url" class="input-text invite-output" type="text" readonly placeholder="Click 'Generate invite link' to build a URL" style="width:100%;font-size:13px;padding:14px 18px;border-radius:10px;margin-bottom:12px;" />
-                                <div style="display:flex;gap:10px;flex-wrap:wrap;">
-                                    <button class="button button-primary" onclick="generateInviteLink()" style="padding:12px 24px;font-size:14px;font-weight:600;border-radius:10px;background:linear-gradient(135deg,#3b82f6,#8b5cf6);border:none;box-shadow:0 4px 12px rgba(59,130,246,0.4);">Generate invite link</button>
-                                    <button class="button button-secondary" onclick="openInviteLink()" style="padding:12px 24px;font-size:14px;font-weight:500;border-radius:10px;">Open in new tab</button>
-                                    <button class="button button-secondary" onclick="copyInviteLink()" style="padding:12px 24px;font-size:14px;font-weight:500;border-radius:10px;">Copy to clipboard</button>
+
+                            <!-- Generated URL Section -->
+                            <div class="invite-output-section">
+                                <div class="invite-output-label">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+                                    Generated Invite URL
+                                </div>
+                                <input id="invite-output-url" class="invite-output-input" type="text" readonly placeholder="Click 'Generate' to build your invite URL"/>
+                                <div class="invite-actions">
+                                    <button class="invite-generate-btn" onclick="generateInviteLink()">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                                        Generate Link
+                                    </button>
+                                    <button class="invite-secondary-btn" onclick="openInviteLink()">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                                        Open
+                                    </button>
+                                    <button class="invite-secondary-btn" onclick="copyInviteLink()">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                                        Copy
+                                    </button>
                                 </div>
                             </div>
-                            <div style="font-size:12px;color:var(--text-secondary);padding:12px 16px;background:rgba(59,130,246,0.05);border-radius:8px;border-left:3px solid rgba(59,130,246,0.5);">
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="margin-right:6px;display:inline-block;vertical-align:middle;">
-                                    <path d="M9 21c0 .55.45 1 1 1h4c.55 0 1-.45 1-1v-1H9v1zm3-19C8.14 2 5 5.14 5 9c0 2.38 1.19 4.47 3 5.74V17c0 .55.45 1 1 1h6c.55 0 1-.45 1-1v-2.26c1.81-1.27 3-3.36 3-5.74 0-3.86-3.14-7-7-7z"/>
-                                </svg> Tip: You can reuse the same Application ID and settings for multiple servers. Share the generated link only with people you trust.
+
+                            <!-- Tip -->
+                            <div class="invite-tip">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M9 21c0 .55.45 1 1 1h4c.55 0 1-.45 1-1v-1H9v1zm3-19C8.14 2 5 5.14 5 9c0 2.38 1.19 4.47 3 5.74V17c0 .55.45 1 1 1h6c.55 0 1-.45 1-1v-2.26c1.81-1.27 3-3.36 3-5.74 0-3.86-3.14-7-7-7z"/></svg>
+                                <span>Tip: You can reuse the same Application ID for multiple servers. Share the link only with trusted users.</span>
                             </div>
                         </div>
                     </div>
                 </div>
 
                 <div id="tab-marketplace" class="tab-content">
-                    <div class="section-header">
-                        <div style="display:flex;align-items:center;gap:8px;">
-                            <div class="section-title">Extension/Plugin Marketplace</div>
-                            <span style="font-size:11px;background:linear-gradient(135deg,#3b82f6,#8b5cf6);padding:4px 10px;border-radius:6px;font-weight:600;">BETA</span>
-                            <button class="header-info-button" onclick="openSectionHelp('marketplace')">?</button>
+                    <!-- Marketplace Hero Header -->
+                    <div class="dash-hero market-hero">
+                        <div class="dash-hero-bg">
+                            <div class="dash-hero-orb market-orb-1"></div>
+                            <div class="dash-hero-orb market-orb-2"></div>
+                            <div class="dash-hero-grid"></div>
+                        </div>
+                        <div class="dash-hero-content">
+                            <div class="dash-hero-left">
+                                <div class="dash-hero-badge market-badge">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>
+                                    Extension Store
+                                </div>
+                                <div style="display:flex;align-items:center;gap:12px;">
+                                    <h1 class="dash-hero-title">Marketplace</h1>
+                                    <span class="market-beta-tag">BETA</span>
+                                </div>
+                                <p class="dash-hero-subtitle">Browse and install extensions from the ZygnalBot ecosystem</p>
+                            </div>
+                            <div class="dash-hero-right" style="display:flex;gap:10px;">
+                                <button class="dash-action-btn" onclick="fetchMarketplaceExtensions()">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/></svg>
+                                    Refresh
+                                </button>
+                                <button class="dash-tour-btn" onclick="openSectionHelp('marketplace')">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                                    Help
+                                </button>
+                            </div>
                         </div>
                     </div>
-                    
-                    <div style="margin-bottom:16px;padding:12px 16px;background:rgba(59,130,246,0.08);border-radius:10px;border-left:3px solid rgba(59,130,246,0.6);font-size:12px;">
-                        <strong>📜 License Notice:</strong> Downloaded extensions may ONLY be used within ZygnalBot ecosystem. Do NOT remove or alter names: ZygnalBot, TheHolyOneZ, TheZ. Violations result in permanent ban.<br/>
-                        <strong>📁 Downloads:</strong> Extensions are saved directly to <code>./extensions/</code> folder.
+
+                    <!-- License Notice -->
+                    <div class="market-license-notice">
+                        <div class="market-license-icon">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                        </div>
+                        <div class="market-license-content">
+                            <div class="market-license-title">License Notice</div>
+                            <div class="market-license-text">Downloaded extensions may ONLY be used within ZygnalBot ecosystem. Do NOT remove or alter names: ZygnalBot, TheHolyOneZ, TheZ.</div>
+                        </div>
+                        <div class="market-license-folder">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                            <code>./extensions/</code>
+                        </div>
                     </div>
-                    
-                    <div id="zygnalid-activation-notice" style="margin-bottom:16px;padding:16px;background:linear-gradient(135deg,rgba(251,146,60,0.15),rgba(249,115,22,0.15));border-radius:10px;border:1px solid rgba(251,146,60,0.3);">
-                        <div style="font-size:14px;font-weight:600;color:#fb923c;margin-bottom:8px;display:flex;align-items:center;gap:8px;">
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-                                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
-                            </svg>
-                            ZygnalID Activation Required
+
+                    <!-- ZygnalID Activation -->
+                    <div id="zygnalid-activation-notice" class="market-activation-card">
+                        <div class="market-activation-header">
+                            <div class="market-activation-icon">
+                                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                            </div>
+                            <div>
+                                <div class="market-activation-title">ZygnalID Activation Required</div>
+                                <div class="market-activation-subtitle">Your ID is stored in <code>./data/marketplace/ZygnalID.txt</code></div>
+                            </div>
                         </div>
-                        <div style="font-size:13px;line-height:1.6;color:#fcd34d;margin-bottom:12px;">
-                            To download extensions, you need an activated ZygnalID. Your ZygnalID is stored in <code style="background:rgba(0,0,0,0.3);padding:2px 6px;border-radius:4px;">./data/marketplace/ZygnalID.txt</code>
+                        <div class="market-activation-steps">
+                            <div class="market-step"><span class="market-step-num">1</span>Copy your ZygnalID from the error message</div>
+                            <div class="market-step"><span class="market-step-num">2</span>Join support server: <code>discord.gg/sgZnXca5ts</code></div>
+                            <div class="market-step"><span class="market-step-num">3</span>Verify yourself and open a ticket with subject: <strong>"zygnal activation"</strong></div>
+                            <div class="market-step"><span class="market-step-num">4</span>Paste your ZygnalID in the ticket</div>
                         </div>
-                        <div style="font-size:12px;line-height:1.7;color:#fde68a;background:rgba(0,0,0,0.2);padding:12px;border-radius:8px;margin-bottom:12px;">
-                            <strong style="color:#fb923c;">Activation Steps:</strong><br/>
-                            1. Copy your ZygnalID from the error message when you try to download<br/>
-                            2. Join the ZygnalBot support server: <code style="background:rgba(0,0,0,0.3);padding:2px 6px;border-radius:4px;">discord.gg/sgZnXca5ts</code><br/>
-                            3. Verify yourself (enable all channels if you can't see verify channel)<br/>
-                            4. Go to "Create Ticket" channel and open a ticket with subject: <strong>"zygnal activation"</strong><br/>
-                            5. Paste your ZygnalID in the ticket
-                        </div>
-                        <button class="button button-secondary" onclick="refreshZygnalIDCache()" style="font-size:13px;padding:8px 16px;">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:6px;display:inline-block;vertical-align:middle;">
-                                <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
-                            </svg>
+                        <button class="market-refresh-id-btn" onclick="refreshZygnalIDCache()">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/></svg>
                             Refresh ZygnalID Cache
                         </button>
-                        <span style="font-size:11px;color:#fde68a;margin-left:12px;">Click this if you changed your ZygnalID file</span>
                     </div>
-                    
-                    <div style="display:flex;gap:12px;margin-bottom:20px;">
-                        <button class="button button-primary" onclick="fetchMarketplaceExtensions()" ${typeof LM_PERMS !== 'undefined' && !LM_PERMS.control_marketplace ? 'disabled title="You don\'t have permission to refresh marketplace"' : ''}>
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:6px;display:inline-block;vertical-align:middle;">
-                                <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
-                            </svg>
-                            Refresh Marketplace
-                        </button>
-                        <input type="text" id="marketplace-search" class="input-text" placeholder="Search extensions..." style="flex:1;max-width:400px;padding:10px 16px;" onkeyup="filterMarketplaceExtensions()" />
-                        <select id="marketplace-filter" class="input-text" style="padding:10px 16px;" onchange="filterMarketplaceExtensions()">
+
+                    <!-- Search & Filter Bar -->
+                    <div class="market-controls">
+                        <div class="market-search-wrap">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                            <input type="text" id="marketplace-search" class="market-search-input" placeholder="Search extensions..." onkeyup="filterMarketplaceExtensions()"/>
+                        </div>
+                        <select id="marketplace-filter" class="market-filter-select" onchange="filterMarketplaceExtensions()">
                             <option value="all">All Status</option>
                             <option value="working">Working</option>
                             <option value="beta">Beta</option>
                             <option value="broken">Broken</option>
                         </select>
                     </div>
-                    
-                    <div id="marketplace-content">
-                        <div class="loading">Click "Refresh Marketplace" to load extensions...</div>
+
+                    <!-- Extensions Grid -->
+                    <div id="marketplace-content" class="market-grid">
+                        <div class="market-empty">
+                            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#64748b" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>
+                            <div class="market-empty-title">Marketplace Ready</div>
+                            <div class="market-empty-text">Click "Refresh" to load available extensions</div>
+                        </div>
                     </div>
                 </div>
 
                 <div id="tab-roles" class="tab-content">
-                    <div class="section-header">
-                        <div style="display:flex;align-items:center;gap:8px;">
-                            <div class="section-title">Roles &amp; Access</div>
-                            <button class="header-info-button" onclick="openSectionHelp('roles')">?</button>
+                    <!-- Roles Hero Header -->
+                    <div class="dash-hero roles-hero">
+                        <div class="dash-hero-bg">
+                            <div class="dash-hero-orb roles-orb-1"></div>
+                            <div class="dash-hero-orb roles-orb-2"></div>
+                            <div class="dash-hero-grid"></div>
+                        </div>
+                        <div class="dash-hero-content">
+                            <div class="dash-hero-left">
+                                <div class="dash-hero-badge roles-badge">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                                    Access Control
+                                </div>
+                                <h1 class="dash-hero-title">Roles &amp; Access</h1>
+                                <p class="dash-hero-subtitle">Manage dashboard permissions and user access levels</p>
+                            </div>
+                            <div class="dash-hero-right" style="display:flex;gap:10px;">
+                                <button class="dash-tour-btn" onclick="openSectionHelp('roles')">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                                    Help
+                                </button>
+                            </div>
                         </div>
                     </div>
-                    <div id="roles-content">
-                        <div class="loading">Loading roles...</div>
+
+                    <!-- Roles Content Container -->
+                    <div id="roles-content" class="roles-container">
+                        <div class="roles-loading">
+                            <div class="roles-loading-spinner"></div>
+                            <span>Loading roles...</span>
+                        </div>
                     </div>
                 </div>
 
                 <div id="tab-security" class="tab-content">
+                    <div id="security-no-logs-warning" style="display:none;background:linear-gradient(135deg, rgba(251, 191, 36, 0.15), rgba(245, 158, 11, 0.1));border:1px solid rgba(251, 191, 36, 0.4);border-radius:12px;padding:16px 20px;margin-bottom:16px;">
+                        <div style="display:flex;align-items:center;gap:12px;">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fbbf24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                            <div>
+                                <div style="font-weight:600;color:#fbbf24;font-size:14px;">Limited Access</div>
+                                <div style="color:#fcd34d;font-size:13px;margin-top:2px;">You can view this tab but not its content. Ask the owner to grant you the <strong>View Audit Logs</strong> permission to see the logs.</div>
+                            </div>
+                        </div>
+                    </div>
         <div class="section-header">
                         <div style="display:flex;align-items:center;gap:8px;">
                             <div class="section-title">Security &amp; Logs</div>
                             <button class="header-info-button" onclick="openSectionHelp('security')">?</button>
                         </div>
                         <div style="display:flex;align-items:center;gap:8px;">
-                            <select id="logs-refresh-interval" onchange="setLogsAutoRefresh(this.value)" style="background:#1e293b;color:#e5e7eb;border:1px solid #334155;border-radius:4px;padding:6px 12px;font-size:13px;">
+                            <select id="logs-refresh-interval" class="lm-select lm-select-sm" onchange="setLogsAutoRefresh(this.value)">
                                 <option value="0">Auto-refresh: Off</option>
                                 <option value="5">Every 5s</option>
                                 <option value="10">Every 10s</option>
@@ -6900,167 +12648,248 @@ if (typeof window !== 'undefined') {
                 </div>
 
                 <div id="tab-database" class="tab-content">
-                    <div class="section-header">
-                        <div style="display:flex;align-items:center;gap:8px;">
-                            <div class="section-title">Database viewer</div>
-                            <button class="header-info-button" onclick="openSectionHelp('database')">?</button>
+                    <div class="section-header" style="margin-bottom: 0; padding-bottom: 16px; border-bottom: 1px solid rgba(148, 163, 184, 0.2);">
+                        <div style="display:flex;align-items:center;justify-content:space-between;width:100%;">
+                            <div style="display:flex;align-items:center;gap:8px;">
+                                <div class="section-title">Database Explorer</div>
+                                <button class="header-info-button" onclick="openSectionHelp('database')">?</button>
+                            </div>
+                            <div id="db-action-bar" style="display:flex;gap:8px;align-items:center;">
+                                <button id="db-refresh-btn" class="button button-secondary button-compact" onclick="refreshDatabaseView()" title="Refresh data" style="display:inline-flex;align-items:center;gap:6px;">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/></svg>
+                                    Refresh
+                                </button>
+                                <button id="db-export-btn" class="button button-secondary button-compact" onclick="exportTableData()" style="display:none;align-items:center;gap:6px;" title="Export table data">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                                    Export
+                                </button>
+                                <button id="db-create-btn" class="button button-primary button-compact" onclick="openCreateRecordForm()" style="display:none;align-items:center;gap:6px;" title="Create new record">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                                    Create Record
+                                </button>
+                            </div>
                         </div>
                     </div>
-                    <div class="two-column-grid">
-                        <div class="column-card">
-                            <div class="column-header">
-                                <div>
-                                    <div class="column-title">Tables</div>
-                                    <div class="column-subtitle">dashboard.sqlite (local dashboard database)</div>
-                                </div>
+                    
+                    <div style="display:grid;grid-template-columns:280px 1fr;gap:0;height:calc(100vh - 200px);margin-top:16px;border-radius:12px;overflow:hidden;border:1px solid rgba(148, 163, 184, 0.2);">
+                        
+                        <div id="db-sidebar" style="background:rgba(15, 23, 42, 0.6);border-right:1px solid rgba(148, 163, 184, 0.2);display:flex;flex-direction:column;">
+                            <div style="padding:16px;border-bottom:1px solid rgba(148, 163, 184, 0.2);">
+                                <input type="text" id="db-search-tables" placeholder="Search tables..." onkeyup="filterDatabaseTables()" style="width:100%;padding:10px 12px;background:rgba(15, 23, 42, 0.8);border:1px solid rgba(148, 163, 184, 0.3);border-radius:8px;color:#e2e8f0;font-size:13px;">
                             </div>
-                            <div id="db-tables" class="list" style="padding:12px;max-height:70vh;min-height:500px;overflow:auto;"></div>
+                            
+                            <div style="padding:12px 16px;font-size:11px;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:0.5px;">
+                                Schema Navigator
+                            </div>
+                            
+                            <div id="db-tables-list" style="flex:1;overflow-y:auto;padding:0 12px 12px 12px;">
+                                <div class="loading" style="padding:20px;text-align:center;color:#94a3b8;">Loading tables...</div>
+                            </div>
                         </div>
-                        <div class="column-card">
-                            <div class="column-header">
-                                <div>
-                                    <div class="column-title" id="db-selected-title">No table selected</div>
-                                    <div class="column-subtitle" id="db-selected-subtitle"></div>
+                        
+                        <div id="db-main-content" style="background:rgba(10, 15, 30, 0.4);display:flex;flex-direction:column;min-width:0;overflow:hidden;">
+                            <div id="db-content-header" style="padding:16px 20px;border-bottom:1px solid rgba(148, 163, 184, 0.2);background:rgba(15, 23, 42, 0.4);display:none;">
+                                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                                    <div>
+                                        <div id="db-current-table-name" style="font-size:18px;font-weight:600;color:#a855f7;"></div>
+                                        <div id="db-current-table-info" style="font-size:13px;color:#94a3b8;margin-top:4px;"></div>
+                                    </div>
+                                    <div id="db-selected-count" style="display:none;padding:8px 16px;background:rgba(168, 85, 247, 0.2);border:1px solid rgba(168, 85, 247, 0.3);border-radius:8px;font-size:13px;color:#a855f7;font-weight:600;">
+                                        <span id="db-selected-count-text">0 selected</span>
+                                    </div>
+                                </div>
+                                
+                                <div id="db-filters-bar" style="display:flex;gap:8px;flex-wrap:wrap;"></div>
+                            </div>
+                            
+                            <div id="db-data-grid" style="flex:1;overflow:hidden;padding:0;min-width:0;">
+                                <div style="display:flex;align-items:center;justify-content:center;height:100%;color:#94a3b8;font-size:14px;flex-direction:column;gap:12px;">
+                                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.5"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+                                    <div>Select a table from the sidebar to begin</div>
                                 </div>
                             </div>
-                            <div id="db-rows" class="list" style="padding:12px;max-height:70vh;min-height:500px;overflow:auto;"></div>
+                            
+                            <div id="db-pagination" style="padding:12px 20px;border-top:1px solid rgba(148, 163, 184, 0.2);background:rgba(15, 23, 42, 0.4);display:none;">
+                                <div style="display:flex;justify-content:space-between;align-items:center;">
+                                    <div style="font-size:13px;color:#94a3b8;">
+                                        <span id="db-pagination-info">Showing 0-0 of 0 records</span>
+                                    </div>
+                                    <div style="display:flex;gap:12px;margin-left:24px;">
+                                        <button id="db-prev-page" class="button button-secondary button-compact" onclick="loadDatabasePage('prev')" disabled>
+                                            ← Previous
+                                        </button>
+                                        <button id="db-next-page" class="button button-secondary button-compact" onclick="loadDatabasePage('next')" disabled>
+                                            Next →
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
 
                 <div id="tab-credits" class="tab-content">
-                    <div style="
-                        position: sticky;
-                        top: 0;
-                        z-index: 5;
-                        margin-bottom: 18px;
-                        padding: 10px 16px;
-                        border-radius: 999px;
-                        border: 1px solid rgba(250, 204, 21, 0.7);
-                        background:
-                            radial-gradient(circle at 0 0, rgba(250, 204, 21, 0.22), transparent 60%),
-                            radial-gradient(circle at 100% 100%, rgba(251, 113, 133, 0.18), transparent 55%),
-                            rgba(15, 23, 42, 0.98);
-                        box-shadow: 0 0 25px rgba(250, 204, 21, 0.35);
-                        display: flex;
-                        align-items: center;
-                        gap: 10px;
-                        font-size: 12px;
-                        color: var(--text-primary);
-                    ">
-                        <span style="display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;">
-                            <svg viewBox="0 0 24 24" aria-hidden="true">
-                                <defs>
-                                    <linearGradient id="credfits-banner-gradient" x1="0" y1="0" x2="1" y2="1">
-                                        <stop offset="0%" stop-color="#facc15">
-                                            <animate attributeName="stop-color" values="#facc15;#fde047;#facc15" dur="5s" repeatCount="indefinite" />
-                                        </stop>
-                                        <stop offset="100%" stop-color="#fb923c">
-                                            <animate attributeName="stop-color" values="#fb923c;#f97316;#fb923c" dur="5s" repeatCount="indefinite" />
-                                        </stop>
-                                    </linearGradient>
-                                </defs>
-                                <path fill="url(#credfits-banner-gradient)" d="M4 18h16l-1.5-9-4 3-2.5-6-2.5 6-4-3L4 18z" />
-                            </svg>
-                        </span>
-                        <span>
-                            <strong>Credits &amp; Design Copyright &copy; 2025 TheHolyOneZ.</strong>
-                            This dedicated Credits tab (layout, wording, SVG crown artwork) is <strong>NOT</strong> part of the framework's MIT license and MUST remain clearly visible at all times in any use or modification of this dashboard.
-                        </span>
-                    </div>
-
-                    <div class="section-header">
-                        <div class="section-title">👑 Credits</div>
-                        <div class="badge badge-secondary" style="font-size: 11px;">Zoryx Discord Bot Framework</div>
-                    </div>
-
-                    <div class="card" style="cursor: default; overflow: hidden; position: relative;">
-                        <div style="position:absolute;inset:-1px;border-radius:18px;padding:1px;background:
-                            radial-gradient(circle at 0 0, rgba(250,204,21,0.55), transparent 60%),
-                            radial-gradient(circle at 100% 100%, rgba(251,113,133,0.45), transparent 55%);
-                            opacity:0.9;"></div>
-                        <div style="position:absolute;inset:0;border-radius:18px;background:
-                            radial-gradient(circle at 10% 0%, rgba(59,130,246,0.4), transparent 60%),
-                            radial-gradient(circle at 100% 100%, rgba(139,92,246,0.35), transparent 55%),
-                            rgba(15,23,42,0.96);
-                            filter:blur(0px);"></div>
-                        <div style="position:relative;border-radius:16px;padding:20px 22px;display:grid;grid-template-columns:minmax(0,2.1fr) minmax(0,1.9fr);gap:20px;">
-                            <div>
-                                <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
-                                    <div style="width:40px;height:40px;display:inline-flex;align-items:center;justify-content:center;">
-                                        <svg viewBox="0 0 24 24" aria-hidden="true">
-                                            <defs>
-                                                <linearGradient id="credfits-hero-gradient" x1="0" y1="0" x2="1" y2="1">
-                                                    <stop offset="0%" stop-color="#facc15">
-                                                        <animate attributeName="stop-color" values="#facc15;#fde047;#facc15" dur="6s" repeatCount="indefinite" />
-                                                    </stop>
-                                                    <stop offset="100%" stop-color="#fb7185">
-                                                        <animate attributeName="stop-color" values="#fb7185;#f97316;#fb7185" dur="6s" repeatCount="indefinite" />
-                                                    </stop>
-                                                </linearGradient>
-                                            </defs>
-                                            <g>
-                                                <path fill="url(#credfits-hero-gradient)" d="M4 18h16l-1.5-9-4 3-2.5-6-2.5 6-4-3L4 18z" />
-                                                <circle cx="6" cy="7" r="1.6" fill="#facc15">
-                                                    <animate attributeName="r" values="1.6;2.0;1.6" dur="3.2s" repeatCount="indefinite" />
-                                                </circle>
-                                                <circle cx="12" cy="5" r="1.8" fill="#facc15">
-                                                    <animate attributeName="r" values="1.8;2.4;1.8" dur="2.7s" repeatCount="indefinite" />
-                                                </circle>
-                                                <circle cx="18" cy="7" r="1.6" fill="#facc15">
-                                                    <animate attributeName="r" values="1.6;2.0;1.6" dur="3.5s" repeatCount="indefinite" />
-                                                </circle>
-                                            </g>
-                                        </svg>
-                                    </div>
-                                    <div>
-                                        <div style="font-size:15px;font-weight:700;color:var(--text-primary);">Creator &amp; Framework</div>
-                                        <div style="font-size:12px;color:var(--text-secondary);">Zoryx is one piece of the wider ZygnalBot ecosystem.</div>
-                                    </div>
+                    <!-- Credits Hero Header -->
+                    <div class="dash-hero credits-hero">
+                        <div class="dash-hero-bg">
+                            <div class="dash-hero-orb credits-orb-1"></div>
+                            <div class="dash-hero-orb credits-orb-2"></div>
+                            <div class="dash-hero-grid"></div>
+                        </div>
+                        <div class="dash-hero-content">
+                            <div class="dash-hero-left">
+                                <div class="dash-hero-badge credits-badge">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                                    Recognition
                                 </div>
-
-                                <div class="property">
-                                    <span class="property-label">Creator</span>
-                                    <span class="property-value">TheHolyOneZ</span>
-                                </div>
-                                <div class="property">
-                                    <span class="property-label">Framework</span>
-                                    <span class="property-value">Zoryx Discord Bot Framework</span>
-                                </div>
-                                <div class="property">
-                                    <span class="property-label">Ecosystem</span>
-                                    <span class="property-value">Part of the ZygnalBot ecosystem</span>
-                                </div>
-                                <div class="property">
-                                    <span class="property-label">Overview</span>
-                                    <span class="property-value"><a href="https://zygnalbot.com/bot-framework/" target="_blank" rel="noreferrer noopener">zygnalbot.com/bot-framework</a></span>
-                                </div>
-                                <div class="property">
-                                    <span class="property-label">Repository</span>
-                                    <span class="property-value"><a href="https://github.com/TheHolyOneZ/discord-bot-framework" target="_blank" rel="noreferrer noopener">github.com/TheHolyOneZ/discord-bot-framework</a></span>
-                                </div>
-                            </div>
-
-                            <div>
-                                <div style="font-size:13px;color:var(--text-secondary);margin-bottom:10px;">
-                                    This dashboard, live monitoring system, and framework tooling are built to give you serious power over your bot while staying beautiful and readable in real-world production use.
-                                </div>
-                                <ul style="margin-left:18px;font-size:13px;color:var(--text-secondary);list-style:disc;margin-bottom:10px;">
-                                    <li>Deep control over plugins, extensions, and hooks</li>
-                                    <li>Safe atomic file operations &amp; per-guild data handling</li>
-                                    <li>Clean monitoring UX for long-running self-hosted bots</li>
-                                    <li>Self-host friendly design with full data ownership</li>
-                                </ul>
-                                <div style="font-size:13px;color:var(--text-secondary);margin-bottom:10px;">
-                                    If this framework powers your bot, a star on the repo or a small bit of support goes a long way.
-                                </div>
-                                <div class="property" style="border-bottom:none;">
-                                    <span class="property-label">Support</span>
-                                    <span class="property-value"><a href="https://zygnalbot.com/support.html" target="_blank" rel="noreferrer noopener">zygnalbot.com/support.html</a></span>
-                                </div>
+                                <h1 class="dash-hero-title">Credits</h1>
+                                <p class="dash-hero-subtitle">Acknowledging the creator and the ZygnalBot ecosystem</p>
                             </div>
                         </div>
                     </div>
+
+                    <!-- Copyright Notice Banner -->
+                    <div class="credits-copyright-banner">
+                        <div class="credits-crown-icon">
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <defs>
+                                    <linearGradient id="credits-crown-grad" x1="0" y1="0" x2="1" y2="1">
+                                        <stop offset="0%" stop-color="#facc15"><animate attributeName="stop-color" values="#facc15;#fde047;#facc15" dur="5s" repeatCount="indefinite"/></stop>
+                                        <stop offset="100%" stop-color="#fb923c"><animate attributeName="stop-color" values="#fb923c;#f97316;#fb923c" dur="5s" repeatCount="indefinite"/></stop>
+                                    </linearGradient>
+                                </defs>
+                                <path fill="url(#credits-crown-grad)" d="M4 18h16l-1.5-9-4 3-2.5-6-2.5 6-4-3L4 18z"/>
+                            </svg>
+                        </div>
+                        <div class="credits-copyright-text">
+                            <strong>Credits &amp; Design Copyright &copy; 2025 TheHolyOneZ.</strong>
+                            This Credits tab must remain visible in all uses or modifications of this dashboard.
+                        </div>
+                    </div>
+
+                    <!-- Main Credits Card -->
+                    <div class="credits-main-card">
+                        <!-- Left Column: Creator Info -->
+                        <div class="credits-creator-section">
+                            <div class="credits-creator-header">
+                                <div class="credits-crown-large">
+                                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                                        <defs>
+                                            <linearGradient id="credits-hero-grad" x1="0" y1="0" x2="1" y2="1">
+                                                <stop offset="0%" stop-color="#facc15"><animate attributeName="stop-color" values="#facc15;#fde047;#facc15" dur="6s" repeatCount="indefinite"/></stop>
+                                                <stop offset="100%" stop-color="#fb7185"><animate attributeName="stop-color" values="#fb7185;#f97316;#fb7185" dur="6s" repeatCount="indefinite"/></stop>
+                                            </linearGradient>
+                                        </defs>
+                                        <g>
+                                            <path fill="url(#credits-hero-grad)" d="M4 18h16l-1.5-9-4 3-2.5-6-2.5 6-4-3L4 18z"/>
+                                            <circle cx="6" cy="7" r="1.6" fill="#facc15"><animate attributeName="r" values="1.6;2.0;1.6" dur="3.2s" repeatCount="indefinite"/></circle>
+                                            <circle cx="12" cy="5" r="1.8" fill="#facc15"><animate attributeName="r" values="1.8;2.4;1.8" dur="2.7s" repeatCount="indefinite"/></circle>
+                                            <circle cx="18" cy="7" r="1.6" fill="#facc15"><animate attributeName="r" values="1.6;2.0;1.6" dur="3.5s" repeatCount="indefinite"/></circle>
+                                        </g>
+                                    </svg>
+                                </div>
+                                <div>
+                                    <div class="credits-creator-name">TheHolyOneZ</div>
+                                    <div class="credits-creator-role">Creator &amp; Lead Developer</div>
+                                </div>
+                            </div>
+
+                            <div class="credits-info-grid">
+                                <div class="credits-info-item">
+                                    <span class="credits-info-label">Framework</span>
+                                    <span class="credits-info-value">Zoryx Discord Bot Framework</span>
+                                </div>
+                                <div class="credits-info-item">
+                                    <span class="credits-info-label">Ecosystem</span>
+                                    <span class="credits-info-value">ZygnalBot</span>
+                                </div>
+                                <div class="credits-info-item">
+                                    <span class="credits-info-label">Overview</span>
+                                    <a href="https://zygnalbot.com/bot-framework/" target="_blank" class="credits-info-link">zygnalbot.com/bot-framework</a>
+                                </div>
+                                <div class="credits-info-item">
+                                    <span class="credits-info-label">Repository</span>
+                                    <a href="https://github.com/TheHolyOneZ/discord-bot-framework" target="_blank" class="credits-info-link">github.com/TheHolyOneZ</a>
+                                </div>
+                                <div class="credits-info-item">
+                                    <span class="credits-info-label">Support</span>
+                                    <a href="https://zygnalbot.com/support.html" target="_blank" class="credits-info-link">zygnalbot.com/support</a>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Right Column: Dashboard Features -->
+                        <div class="credits-features-section">
+                            <div class="credits-features-header">
+                                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
+                                <span>Built This Dashboard</span>
+                            </div>
+                            <p class="credits-features-desc">
+                                Designed and developed by <strong>TheHolyOneZ</strong> — a comprehensive control center for Discord bots with real-time monitoring, deep plugin management, and production-ready tooling.
+                            </p>
+
+                            <!-- Capability Tags -->
+                            <div class="credits-tags">
+                                <span class="credits-tag credits-tag-backend">
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
+                                    Backend
+                                </span>
+                                <span class="credits-tag credits-tag-frontend">
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+                                    Frontend
+                                </span>
+                                <span class="credits-tag credits-tag-realtime">
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                                    Real-time
+                                </span>
+                                <span class="credits-tag credits-tag-api">
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+                                    WebSocket API
+                                </span>
+                                <span class="credits-tag credits-tag-ui">
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/></svg>
+                                    Modern UI
+                                </span>
+                                <span class="credits-tag credits-tag-secure">
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                                    Secure
+                                </span>
+                            </div>
+
+                            <!-- Feature List -->
+                            <div class="credits-feature-list">
+                                <div class="credits-feature-item">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                                    Plugin &amp; extension lifecycle management
+                                </div>
+                                <div class="credits-feature-item">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                                    Atomic file operations with per-guild data
+                                </div>
+                                <div class="credits-feature-item">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                                    Live event hooks &amp; custom automation
+                                </div>
+                                <div class="credits-feature-item">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                                    Role-based access control system
+                                </div>
+                                <div class="credits-feature-item">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                                    Self-host friendly with full data ownership
+                                </div>
+                            </div>
+
+                            <div class="credits-support-note">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
+                                <span>If this framework powers your bot, a star on the repo goes a long way!</span>
+                            </div>
+
+                            <a href="https://github.com/TheHolyOneZ/discord-bot-framework/blob/main/LICENSE" target="_blank" rel="noopener noreferrer" class="credits-license-btn">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+                                View License
+                            </a>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -7177,16 +13006,20 @@ if (typeof window !== 'undefined') {
             <div class="lm-drawer-group-label">Meta</div>
             <button class="lm-drawer-item" data-tab="credits">Credits 👑</button>
         </nav>
-
-        <div class="footer">
-            <p>Last Updated: <span id="last-update">Never</span></p>
-            <p style="margin-top: 4px; font-size: 12px; opacity: 0.85;">
-                <a href="https://github.com/TheHolyOneZ/discord-bot-framework" target="_blank" rel="noopener noreferrer">
-                    Zoryx Discord Bot Framework · Live Monitor
-                </a>
-            </p>
-        </div>
     </div>
+
+        <!-- Global Footer - Centered on page -->
+        <footer class="lm-global-footer">
+            <div class="lm-footer-content">
+                <p class="lm-footer-update">Last Updated: <span id="last-update">Never</span></p>
+                <p class="lm-footer-brand">
+                    <a href="https://github.com/TheHolyOneZ/discord-bot-framework" target="_blank" rel="noopener noreferrer">
+                        Zoryx Discord Bot Framework · Live Monitor
+                    </a>
+                </p>
+                <p class="lm-footer-credit">© 2026 <a href="https://github.com/TheHolyOneZ" target="_blank" rel="noopener noreferrer">TheHolyOneZ</a></p>
+            </div>
+        </footer>
 
         <div id="lm-tour-overlay" class="lm-nav-palette-overlay" style="display:none;">
             <div class="lm-nav-palette-dialog" style="max-width:720px;">
@@ -7221,18 +13054,47 @@ if (typeof window !== 'undefined') {
     <script>
 <?php
     $u = lm_current_user();
-    $roleName = $u['role'] ?? 'CUSTOM';
-    $tier = lm_resolve_role_tier($roleName);
-    $perms = lm_role_permissions($roleName, $tier);
-    $info = [
-        'display_name' => $u['display_name'] ?? '',
-        'discord_user_id' => $u['discord_user_id'] ?? '',
-        'avatar_url' => $u['avatar_url'] ?? '',
-        'role' => $roleName,
-    ];
-    echo 'const LM_CURRENT_USER = ' . json_encode($info, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . ';';
-    echo 'const LM_PERMS = ' . json_encode($perms, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . ';';
+    if (!$u) {
+        // User not logged in - redirect or show error
+        echo "console.error('[CRITICAL] User not logged in to index.php');";
+        echo "console.error('[CRITICAL] This should not happen - lm_require_auth should have caught this');";
+        echo "window.LM_PERMS = {}; window.LM_CURRENT_USER = {};";
+    } else {
+        $roleName = $u['role'] ?? 'CUSTOM';
+        $tier = lm_resolve_role_tier($roleName);
+        $perms = lm_role_permissions($roleName, $tier);
+        $info = [
+            'display_name' => $u['display_name'] ?? '',
+            'discord_user_id' => $u['discord_user_id'] ?? '',
+            'avatar_url' => $u['avatar_url'] ?? '',
+            'role' => $roleName,
+        ];
+        echo 'window.LM_CURRENT_USER = ' . json_encode($info, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . ';';
+        echo "\n";
+        echo 'window.LM_PERMS = ' . json_encode($perms, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . ';';
+        echo "\n";
+        echo "console.log('[PERMISSIONS] LM_PERMS successfully loaded');";
+        echo "\n";
+        echo "console.log('[PERMISSIONS] Role: {$roleName}, Tier: {$tier}');";
+        echo "\n";
+        echo "console.log('[PERMISSIONS] Database permissions:', {";
+        echo "'view_database': " . (isset($perms['view_database']) && $perms['view_database'] ? 'true' : 'false') . ",";
+        echo "'action_db_read': " . (isset($perms['action_db_read']) && $perms['action_db_read'] ? 'true' : 'false') . ",";
+        echo "'action_db_create': " . (isset($perms['action_db_create']) && $perms['action_db_create'] ? 'true' : 'false') . ",";
+        echo "'action_db_update': " . (isset($perms['action_db_update']) && $perms['action_db_update'] ? 'true' : 'false') . ",";
+        echo "'action_db_delete': " . (isset($perms['action_db_delete']) && $perms['action_db_delete'] ? 'true' : 'false');
+        echo "});";
+        echo "\n";
+    }
 ?>
+        // Fallback: Ensure LM_PERMS exists even if PHP failed
+        if (typeof window.LM_PERMS === 'undefined') {
+            console.error('[CRITICAL] LM_PERMS was not defined by PHP! This means the PHP code did not execute.');
+            console.error('[CRITICAL] Possible causes: 1) Bot did not regenerate index.php, 2) PHP error before this point, 3) File not uploaded');
+            window.LM_PERMS = {};
+            window.LM_CURRENT_USER = {};
+        }
+        
         const DEFAULT_PREFIX = '{{PREFIX}}';
         let currentTab = 'dashboard';
         let currentData = null;
@@ -7315,6 +13177,11 @@ if (typeof window !== 'undefined') {
             }
         }
         
+        window.hasPermission = function(permissionKey) {
+            if (!window.LM_PERMS) return false;
+            return window.LM_PERMS[permissionKey] || false;
+        };
+        
         function applyPermissionVisibility(tabName) {
             if (!window.LM_PERMS) return;
             const perms = window.LM_PERMS;
@@ -7343,7 +13210,7 @@ if (typeof window !== 'undefined') {
             if (tabName === 'dashboard') {
                 disableButton('button[onclick*="clear_cache"]', 'action_clear_cache', 'control_core');
                 disableButton('button[onclick*="toggle_verbose_logging"]', 'action_toggle_logging', 'control_core');
-                disableButton('button[onclick*="toggle_debug_packages"]', 'action_toggle_debug', 'control_core');
+                disableButton('button[onclick*="toggle_debug_packages"]', 'action_toggle_debug_packages', 'control_core');
                 disableButton('button[onclick*="backup_bot_directory"]', 'action_backup_bot', 'control_backup');
                 
                 // Backup Dashboard button (uses window.location onclick)
@@ -7549,21 +13416,80 @@ if (typeof window !== 'undefined') {
                     }
                 }
                 
-                // User assignment buttons (save-role and delete-user)
+                // Role profile buttons
                 disableButton('button[data-action="save-role"]', 'action_save_role', 'control_roles');
-                disableButton('button[data-action="delete-user"]', 'action_delete_role', 'control_roles');
+                
+                // User management buttons
+                document.querySelectorAll('button[data-action="delete-user"]').forEach(btn => {
+                    const allowed = hasPermission('action_remove_user', 'control_roles');
+                    btn.disabled = !allowed;
+                    btn.style.opacity = allowed ? '1' : '0.5';
+                    btn.style.cursor = allowed ? 'pointer' : 'not-allowed';
+                    if (!allowed) btn.title = 'Requires action_remove_user permission';
+                });
+                
+                document.querySelectorAll('select.role-select').forEach(sel => {
+                    const allowed = hasPermission('action_change_user_role', 'control_roles');
+                    sel.disabled = !allowed;
+                    sel.style.opacity = allowed ? '1' : '0.5';
+                    if (!allowed) sel.title = 'Requires action_change_user_role permission';
+                });
+                
+                // Save role change buttons (for user role assignments)
+                document.querySelectorAll('button[data-action="save-role"][data-user-id]').forEach(btn => {
+                    const allowed = hasPermission('action_change_user_role', 'control_roles');
+                    btn.disabled = !allowed;
+                    btn.style.opacity = allowed ? '1' : '0.5';
+                    btn.style.cursor = allowed ? 'pointer' : 'not-allowed';
+                    if (!allowed) btn.title = 'Requires action_change_user_role permission';
+                });
+                
+                // Add user button and inputs
+                const addUserBtn = document.getElementById('roles-add-submit');
+                if (addUserBtn) {
+                    const allowed = hasPermission('action_add_user', 'control_roles');
+                    addUserBtn.disabled = !allowed;
+                    addUserBtn.style.opacity = allowed ? '1' : '0.5';
+                    addUserBtn.style.cursor = allowed ? 'pointer' : 'not-allowed';
+                    if (!allowed) addUserBtn.title = 'Requires action_add_user permission';
+                }
+                
+                if (!hasPermission('action_add_user', 'control_roles')) {
+                    ['roles-add-discord', 'roles-add-name', 'roles-add-role'].forEach(id => {
+                        const el = document.getElementById(id);
+                        if (el) {
+                            el.disabled = true;
+                            el.style.opacity = '0.5';
+                        }
+                    });
+                }
             }
             
             // SECURITY & LOGS TAB
-            if (tabName === 'logs') {
+            if (tabName === 'security') {
+                const warningEl = document.getElementById('security-no-logs-warning');
+                const iframeContainer = document.querySelector('#tab-security iframe');
+                const hasViewLogs = hasPermission('action_view_logs', 'view_logs');
+                
+                if (warningEl) {
+                    warningEl.style.display = hasViewLogs ? 'none' : 'block';
+                }
+                if (iframeContainer) {
+                    iframeContainer.style.display = hasViewLogs ? '' : 'none';
+                }
+                
                 disableButton('button[onclick*="exportLogs"]', 'action_export_logs', 'export_logs');
                 disableButton('button[onclick*="export_logs"]', 'action_export_logs', 'export_logs');
+                disableButton('button[onclick*="refreshSecurityLogs"]', 'action_view_logs', 'view_logs');
             }
             
             // DATABASE TAB
             if (tabName === 'database') {
                 disableButton('button[onclick*="executeQuery"]', 'action_execute_query', 'control_database');
                 disableButton('button[onclick*="execute_query"]', 'action_execute_query', 'control_database');
+                disableButton('button[onclick*="createRecord"]', 'action_db_create', 'control_database');
+                disableButton('button[onclick*="updateRecord"]', 'action_db_update', 'control_database');
+                disableButton('button[onclick*="deleteRecord"]', 'action_db_delete', 'control_database');
             }
         }
 
@@ -7652,16 +13578,18 @@ if (typeof window !== 'undefined') {
                 commands: 'view_commands',
                 plugins: 'view_plugins',
                 hooks: 'view_hooks',
+                'hook-creator': 'view_hooks',
                 filesystem: 'view_filesystem',
                 files: 'view_files',
                 chat: 'view_chat',
                 events: 'view_events',
                 system: 'view_system',
-                invite: 'view_system',
-                roles: 'view_security',
+                invite: 'view_bot_invite',
+                roles: 'view_roles',
                 security: 'view_security',
                 guilds: 'view_guilds',
                 database: 'view_database',
+                marketplace: 'view_marketplace',
                 tickets: 'view_tickets',
                 credits: null,
             };
@@ -7671,7 +13599,7 @@ if (typeof window !== 'undefined') {
         }
 
         function applyPermissionsToUI() {
-            if (typeof LM_PERMS === 'undefined') {
+            if (typeof window.LM_PERMS === 'undefined') {
                 return;
             }
 
@@ -7797,7 +13725,7 @@ if (typeof window !== 'undefined') {
         }
 
         function generateInviteLink() {
-            if (!LM_PERMS.action_generate_invite && !LM_PERMS.view_bot_invite) {
+            if (!window.LM_PERMS?.action_generate_invite) {
                 showNotification('You do not have permission to generate invite links. Requires action_generate_invite permission.', 'error');
                 return;
             }
@@ -7812,7 +13740,7 @@ if (typeof window !== 'undefined') {
         }
 
         function openInviteLink() {
-            if (!LM_PERMS.action_open_invite && !LM_PERMS.view_bot_invite) {
+            if (!window.LM_PERMS?.action_open_invite) {
                 showNotification('You do not have permission to open invite links. Requires action_open_invite permission.', 'error');
                 return;
             }
@@ -7826,7 +13754,7 @@ if (typeof window !== 'undefined') {
         }
 
         async function copyInviteLink() {
-            if (!LM_PERMS.action_copy_invite && !LM_PERMS.view_bot_invite) {
+            if (!window.LM_PERMS?.action_copy_invite) {
                 showNotification('You do not have permission to copy invite links. Requires action_copy_invite permission.', 'error');
                 return;
             }
@@ -7853,7 +13781,7 @@ if (typeof window !== 'undefined') {
         let marketplaceExtensions = [];
 
         async function fetchMarketplaceExtensions() {
-            if (!LM_PERMS.action_refresh_marketplace && !LM_PERMS.action_fetch_marketplace && !LM_PERMS.view_marketplace) {
+            if (!window.LM_PERMS?.action_refresh_marketplace && !window.LM_PERMS?.action_fetch_marketplace) {
                 showNotification('You do not have permission to refresh marketplace. Requires action_refresh_marketplace permission.', 'error');
                 return;
             }
@@ -7876,7 +13804,7 @@ if (typeof window !== 'undefined') {
         let zygnalIDCache = null;
         
         function refreshZygnalIDCache() {
-            if (!LM_PERMS.action_refresh_zygnalid && !LM_PERMS.view_marketplace) {
+            if (!window.LM_PERMS?.action_refresh_zygnalid) {
                 showNotification('You do not have permission to refresh Zygnalid cache. Requires action_refresh_zygnalid permission.', 'error');
                 return;
             }
@@ -7921,7 +13849,7 @@ if (typeof window !== 'undefined') {
                             Type: ${ext.fileType.toUpperCase()} • ID: ${ext.id}
                         </div>
                         <div class="marketplace-ext-footer">
-                            <button class="button button-primary button-compact extension-download-btn" onclick="downloadExtension(${ext.id})" ${typeof LM_PERMS !== 'undefined' && !(LM_PERMS.action_download_extension || LM_PERMS.control_marketplace) ? 'disabled title="You do not have permission to download extensions"' : ''}>
+                            <button class="button button-primary button-compact extension-download-btn" onclick="downloadExtension(this, ${ext.id})" ${typeof LM_PERMS !== 'undefined' && !(LM_PERMS.action_download_extension || LM_PERMS.control_marketplace) ? 'disabled title="You do not have permission to download extensions"' : ''}>
                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:4px;display:inline-block;vertical-align:middle;">
                                     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>
                                 </svg>
@@ -7960,10 +13888,27 @@ if (typeof window !== 'undefined') {
             renderMarketplaceExtensions(filtered);
         }
 
-        async function downloadExtension(extensionId) {
+        async function downloadExtension(btn, extensionId) {
+            // Handle button state
+            const originalHTML = btn ? btn.innerHTML : '';
+            if (btn) {
+                btn.disabled = true;
+                btn.innerHTML = '<span class="btn-spinner"></span> Downloading...';
+                btn.classList.add('btn-waiting');
+            }
+            
+            const restoreButton = () => {
+                if (btn && btn.parentNode) {
+                    btn.disabled = false;
+                    btn.innerHTML = originalHTML;
+                    btn.classList.remove('btn-waiting');
+                }
+            };
+            
             const extension = marketplaceExtensions.find(e => e.id === extensionId);
             if (!extension) {
                 showNotification('Extension not found', 'error');
+                restoreButton();
                 return;
             }
             
@@ -7987,6 +13932,7 @@ if (typeof window !== 'undefined') {
                     '3. Bot has read permissions\\n\\n' +
                     'Error: ' + (zygnalIdResult?.error || 'File not accessible')
                 );
+                restoreButton();
                 return;
             }
             
@@ -7999,6 +13945,7 @@ if (typeof window !== 'undefined') {
                     'Current length: ' + (zygnalId ? zygnalId.length : 0) + ' characters\\n' +
                     'Content preview: ' + (zygnalId ? zygnalId.substring(0, 20) : 'empty')
                 );
+                restoreButton();
                 return;
             }
             
@@ -8018,6 +13965,7 @@ if (typeof window !== 'undefined') {
                         'Status: ' + validationResp.status + '\\n\\n' +
                         'Please try again later.'
                     );
+                    restoreButton();
                     return;
                 }
                 
@@ -8038,6 +13986,7 @@ if (typeof window !== 'undefined') {
                         '6. Paste your ZygnalID in the ticket\\n\\n' +
                         '⏰ Activation usually takes 1-24 hours after submission.'
                     );
+                    restoreButton();
                     return;
                 }
                 
@@ -8049,6 +13998,7 @@ if (typeof window !== 'undefined') {
                     'Error: ' + err.message + '\\n\\n' +
                     'Please check your internet connection and try again.'
                 );
+                restoreButton();
                 return;
             }
             
@@ -8059,6 +14009,7 @@ if (typeof window !== 'undefined') {
             
             sendCommandWithResponse('download_marketplace_extension', { extension }, (response) => {
                 console.log('[MARKETPLACE] Download response:', response);
+                restoreButton();
                 
                 if (response && response.success) {
                     showNotification(`Downloaded ${extension.title} to ./extensions/`, 'success');
@@ -8078,7 +14029,8 @@ if (typeof window !== 'undefined') {
                     if (response.error_type === 'zygnal_id_not_activated') {
                         let formattedMsg = errorMsg
                             .replace(/\\*\\*(.+?)\\*\\*/g, '<strong>$1</strong>')
-                            .replace(/`(.+?)`/g, '<code style="background:rgba(0,0,0,0.3);padding:2px 6px;border-radius:4px;">$1</code>')
+                            // Use hex escape \\x60 for backtick to avoid syntax errors in generated code
+                            .replace(/\\x60(.+?)\\x60/g, '<code style="background:rgba(0,0,0,0.3);padding:2px 6px;border-radius:4px;">$1</code>')
                             .replace(/\\n\\n/g, '<br/><br/>')
                             .replace(/\\n/g, '<br/>');
                         
@@ -8217,6 +14169,71 @@ if (typeof window !== 'undefined') {
                 isCommandPending = false;
                 console.error('Command error:', err);
                 showNotification(err.message || 'Error while sending command.', 'error');
+            });
+        }
+
+        // Send command with button state management (disables button, shows "Waiting...")
+        function sendCommandWithButton(btn, command, params) {
+            if (isCommandPending) {
+                showNotification('Please wait, a command is already being processed...', 'info');
+                return;
+            }
+
+            // Store original button state
+            const originalText = btn.innerHTML;
+            const originalDisabled = btn.disabled;
+            
+            // Disable button and show waiting state
+            btn.disabled = true;
+            btn.innerHTML = '<span class="btn-spinner"></span> Waiting...';
+            btn.classList.add('btn-waiting');
+
+            isCommandPending = true;
+            showNotification('Sending command...', 'info');
+
+            fetch('./send_command.php', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                credentials: 'same-origin',
+                body: JSON.stringify({ command: command, params: params })
+            })
+            .then(async r => {
+                let payload = null;
+                try {
+                    payload = await r.json();
+                } catch (_) {
+                    // ignore JSON parse errors
+                }
+                if (!r.ok) {
+                    const msg = interpretHttpError(r.status, payload, 'command');
+                    throw new Error(msg);
+                }
+                return payload || {};
+            })
+            .then(data => {
+                isCommandPending = false;
+                showNotification('Command sent successfully', 'success');
+                // Keep button disabled until data refreshes
+                setTimeout(() => {
+                    loadData();
+                    // Restore button after data loads (the UI will re-render anyway)
+                    setTimeout(() => {
+                        if (btn && btn.parentNode) {
+                            btn.disabled = originalDisabled;
+                            btn.innerHTML = originalText;
+                            btn.classList.remove('btn-waiting');
+                        }
+                    }, 500);
+                }, 1000);
+            })
+            .catch(err => {
+                isCommandPending = false;
+                console.error('Command error:', err);
+                showNotification(err.message || 'Error while sending command.', 'error');
+                // Restore button on error
+                btn.disabled = originalDisabled;
+                btn.innerHTML = originalText;
+                btn.classList.remove('btn-waiting');
             });
         }
 
@@ -8579,11 +14596,11 @@ if (typeof window !== 'undefined') {
 
             content += `
                 <div class="button-group">
-                    <button class="button button-${hook.disabled ? 'success' : 'danger'}" onclick="sendCommand('${hook.disabled ? 'enable_hook' : 'disable_hook'}', {hook_id: this.getAttribute('data-hook-id')})" data-hook-id="${hook.hook_id}">
+                    <button class="button button-${hook.disabled ? 'success' : 'danger'}" onclick="sendCommandWithButton(this, '${hook.disabled ? 'enable_hook' : 'disable_hook'}', {hook_id: this.getAttribute('data-hook-id')})" data-hook-id="${hook.hook_id}">
                         ${hook.disabled ? 'Enable Hook' : 'Disable Hook'}
                     </button>
                     ${hook.circuit_open ? `
-                        <button class="button button-secondary" onclick="sendCommand('reset_circuit', {hook_id: this.getAttribute('data-hook-id')})" data-hook-id="${hook.hook_id}">
+                        <button class="button button-secondary" onclick="sendCommandWithButton(this, 'reset_circuit', {hook_id: this.getAttribute('data-hook-id')})" data-hook-id="${hook.hook_id}">
                             Reset Circuit
                         </button>
                     ` : ''}
@@ -8640,7 +14657,7 @@ if (typeof window !== 'undefined') {
             document.getElementById('cmd-errors').textContent = totalErrors;
             document.getElementById('cmd-success').textContent = successRate + '%';
             
-            const viewButtons = document.querySelectorAll('#tab-commands .view-btn');
+            const viewButtons = document.querySelectorAll('#tab-commands .cmd-view-btn');
             viewButtons.forEach(btn => {
                 btn.onclick = () => {
                     viewButtons.forEach(b => b.classList.remove('active'));
@@ -9150,15 +15167,15 @@ if (typeof window !== 'undefined') {
                                     <button class="button button-primary" onclick="viewPluginDetails(${JSON.stringify(plugin).replace(/"/g, '&quot;')})">
                                         Details
                                     </button>
-                                    <button class="button button-secondary" onclick="sendCommand('reload_extension', {extension: 'extensions.${plugin.name}'})">
+                                    <button class="button button-secondary" onclick="sendCommandWithButton(this, 'reload_extension', {extension: 'extensions.${plugin.name}'})">
                                         Reload
                                     </button>
                                     ${plugin.loaded ? `
-                                        <button class="button button-danger" onclick="sendCommand('unload_extension', {extension: 'extensions.${plugin.name}'})">
+                                        <button class="button button-danger" onclick="sendCommandWithButton(this, 'unload_extension', {extension: 'extensions.${plugin.name}'})">
                                             Unload
                                         </button>
                                     ` : `
-                                        <button class="button button-success" onclick="sendCommand('load_extension', {extension: 'extensions.${plugin.name}'})">
+                                        <button class="button button-success" onclick="sendCommandWithButton(this, 'load_extension', {extension: 'extensions.${plugin.name}'})">
                                             Load
                                         </button>
                                     `}
@@ -9190,7 +15207,7 @@ if (typeof window !== 'undefined') {
             document.getElementById('hooks-disabled').textContent = eventHooksData.disabled || 0;
             document.getElementById('hooks-circuit-open').textContent = eventHooksData.circuit_open || 0;
             
-            const viewButtons = document.querySelectorAll('#tab-hooks .view-btn');
+            const viewButtons = document.querySelectorAll('#tab-hooks .hooks-view-btn');
             viewButtons.forEach(btn => {
                 btn.onclick = () => {
                     viewButtons.forEach(b => b.classList.remove('active'));
@@ -9300,11 +15317,11 @@ if (typeof window !== 'undefined') {
                                 <button class="button button-primary" onclick="viewHookDetails(${JSON.stringify(hook).replace(/"/g, '&quot;')})">
                                     Details
                                 </button>
-                                <button class="button button-${hook.disabled ? 'success' : 'secondary'}" onclick="sendCommand('${hook.disabled ? 'enable_hook' : 'disable_hook'}', {hook_id: this.getAttribute('data-hook-id')})" data-hook-id="${hook.hook_id}">
+                                <button class="button button-${hook.disabled ? 'success' : 'secondary'}" onclick="sendCommandWithButton(this, '${hook.disabled ? 'enable_hook' : 'disable_hook'}', {hook_id: this.getAttribute('data-hook-id')})" data-hook-id="${hook.hook_id}">
                                     ${hook.disabled ? 'Enable' : 'Disable'}
                                 </button>
                                 ${hook.circuit_open ? `
-                                    <button class="button button-warning" onclick="sendCommand('reset_circuit', {hook_id: this.getAttribute('data-hook-id')})" data-hook-id="${hook.hook_id}">
+                                    <button class="button button-warning" onclick="sendCommandWithButton(this, 'reset_circuit', {hook_id: this.getAttribute('data-hook-id')})" data-hook-id="${hook.hook_id}">
                                         Reset Circuit
                                     </button>
                                 ` : ''}
@@ -9466,6 +15483,12 @@ if (typeof window !== 'undefined') {
         }
 
         function sendFileCommand(command, params = {}) {
+            // Check if we have a working connection first
+            if (typeof ws === 'undefined' || !ws || ws.readyState !== WebSocket.OPEN) {
+                console.warn('[FILE] WebSocket not ready, skipping file command:', command);
+                return null;
+            }
+            
             const requestId = generateRequestId();
             params.request_id = requestId;
 
@@ -9487,8 +15510,13 @@ if (typeof window !== 'undefined') {
                 return payload || {};
             })
             .catch(e => {
-                console.error('File command send error:', e);
-                showNotification(e.message || 'File operation failed.', 'error');
+                // Only show error notification if it's not a network/connection issue during init
+                if (e.message !== 'Failed to fetch') {
+                    console.error('File command error:', e);
+                    showNotification(e.message || 'File operation failed.', 'error');
+                } else {
+                    console.warn('[FILE] Network unavailable for command:', command);
+                }
             });
             
             return requestId;
@@ -9994,15 +16022,6 @@ if (typeof window !== 'undefined') {
             text.value = addLineNumbers(placeholder);
             
             console.log('[EDITOR] Adding editor-open class to:', unit);
-
-
-
-
-
-
-
-
-            console.log('[EDITOR] Adding editor-open class to:', unit);
             unit.classList.add('editor-open');
 
             // WAIT for the unit to have actual width before proceeding
@@ -10461,7 +16480,7 @@ if (typeof window !== 'undefined') {
         };
 
         window.requestChatHistory = () => {
-            if (!LM_PERMS.action_request_chat_data && !LM_PERMS.view_chat) {
+            if (!window.LM_PERMS?.action_request_chat_data) {
                 showNotification('You do not have permission to request chat data. Requires action_request_chat_data permission.', 'error');
                 return;
             }
@@ -10507,44 +16526,102 @@ if (typeof window !== 'undefined') {
             setTimeout(loadData, 1500);
         };
 
+        let localVerboseState = false;
+        let localDebugState = false;
+        
         window.toggleVerboseLogging = () => {
-            const current = currentData?.monitor_settings?.verbose_logging ? true : false;
-            const next = !current;
-            sendCommand('set_verbose_logging', { enabled: next });
-            showNotification(`Verbose logging ${next ? 'enabled' : 'disabled'}`, 'info');
-            setTimeout(loadData, 1500);
+            localVerboseState = !localVerboseState;
+            sendCommand('set_verbose_logging', { enabled: localVerboseState });
+            showNotification(`Verbose logging ${localVerboseState ? 'enabled' : 'disabled'}`, 'info');
+            
+            const btn = document.getElementById('toggle-verbose-btn');
+            if (btn) {
+                btn.textContent = `Verbose Logging: ${localVerboseState ? 'ON' : 'OFF'}`;
+                btn.className = localVerboseState ? 'button button-success' : 'button button-secondary';
+            }
         };
+
+        window.toggleDebugPackages = () => {
+            localDebugState = !localDebugState;
+            sendCommand('toggle_debug_packages', { enabled: localDebugState });
+            showNotification(`Debug packages ${localDebugState ? 'enabled' : 'disabled'}`, 'info');
+            
+            const btn = document.getElementById('toggle-debug-packages-btn');
+            if (btn) {
+                btn.textContent = `Debug Packages: ${localDebugState ? 'ON' : 'OFF'}`;
+                btn.className = localDebugState ? 'button button-success' : 'button button-secondary';
+            }
+        };
+
+        function updateDebugLoggingButtons() {
+            const verboseBtn = document.getElementById('toggle-verbose-btn');
+            const debugBtn = document.getElementById('toggle-debug-packages-btn');
+            
+            if (verboseBtn && currentData?.monitor_settings) {
+                const verboseOn = currentData.monitor_settings.verbose_logging || false;
+                localVerboseState = verboseOn;
+                verboseBtn.textContent = `Verbose Logging: ${verboseOn ? 'ON' : 'OFF'}`;
+                verboseBtn.className = verboseOn ? 'button button-success' : 'button button-secondary';
+                verboseBtn.title = verboseOn 
+                    ? 'Currently ON - Hides repetitive success messages from console logs to reduce noise'
+                    : 'Currently OFF - Shows all log messages including success notifications';
+            }
+            
+            if (debugBtn && currentData?.monitor_settings) {
+                const debugOn = currentData.monitor_settings.debug_packages || false;
+                localDebugState = debugOn;
+                debugBtn.textContent = `Debug Packages: ${debugOn ? 'ON' : 'OFF'}`;
+                debugBtn.className = debugOn ? 'button button-success' : 'button button-secondary';
+                debugBtn.title = debugOn
+                    ? 'Currently ON - Shows detailed package installation logs (pip install, npm install output)'
+                    : 'Currently OFF - Hides package installation details to keep logs cleaner';
+            }
+        }
 
         function renderEvents(events) {
             const container = document.getElementById('events-list');
-            document.getElementById('events-count').textContent = events.length + ' Events';
+            const countEl = document.getElementById('events-count');
+            if (countEl) countEl.textContent = events.length + ' Events';
             
             if (events.length === 0) {
-                container.innerHTML = '<div class="empty-state">No events recorded</div>';
+                container.innerHTML = '<div class="events-empty"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#64748b" stroke-width="1.5"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg><div class="events-empty-title">No events recorded</div><div class="events-empty-text">Events will appear here as they occur</div></div>';
                 return;
             }
 
-            container.innerHTML = events.slice().reverse().slice(0, 50).map((event, index) => `
-                <div class="card" style="cursor: default;">
-                    <div class="card-header">
-                        <div>
-                            <div class="card-title">${event.type}</div>
-                            <div class="card-subtitle">${formatTime(event.timestamp)}</div>
-                        </div>
-                        <span class="badge badge-info">${event.type}</span>
-                    </div>
-                    ${event.details && Object.keys(event.details).length > 0 ? `
-                    <div class="card-body" style="display: block;">
-                        ${Object.entries(event.details).map(([key, value]) => `
-                            <div class="property">
-                                <span class="property-label">${key}</span>
-                                <span class="property-value" style="font-size: 12px; word-break: break-all;">${JSON.stringify(value).substring(0, 100)}</span>
-                            </div>
-                        `).join('')}
-                    </div>
-                    ` : ''}
-                </div>
-            `).join('');
+            container.innerHTML = events.slice().reverse().slice(0, 50).map((event, index) => {
+                const eventColors = {
+                    'message': '#3b82f6',
+                    'guild_join': '#10b981',
+                    'guild_remove': '#ef4444',
+                    'member_join': '#22d3ee',
+                    'member_remove': '#f97316',
+                    'command': '#8b5cf6',
+                    'error': '#ef4444',
+                    'ready': '#10b981'
+                };
+                const color = eventColors[event.type.toLowerCase()] || '#6366f1';
+                
+                let detailsHtml = '';
+                if (event.details && Object.keys(event.details).length > 0) {
+                    detailsHtml = '<div class="event-details">' +
+                        Object.entries(event.details).map(([key, value]) => 
+                            '<div class="event-detail-row"><span class="event-detail-key">' + key + '</span><span class="event-detail-value">' + JSON.stringify(value).substring(0, 80) + '</span></div>'
+                        ).join('') +
+                    '</div>';
+                }
+                
+                return '<div class="event-item">' +
+                    '<div class="event-line" style="background: ' + color + ';"></div>' +
+                    '<div class="event-dot" style="background: ' + color + '; box-shadow: 0 0 10px ' + color + '50;"></div>' +
+                    '<div class="event-content">' +
+                        '<div class="event-header">' +
+                            '<span class="event-type" style="background: ' + color + '20; color: ' + color + '; border-color: ' + color + '40;">' + event.type + '</span>' +
+                            '<span class="event-time">' + formatTime(event.timestamp) + '</span>' +
+                        '</div>' +
+                        detailsHtml +
+                    '</div>' +
+                '</div>';
+            }).join('');
         }
 
         function toggleHeroInfo() {
@@ -10556,312 +16633,199 @@ if (typeof window !== 'undefined') {
         function renderSystemDetails(data) {
             const container = document.getElementById('system-details');
             
-            // LEFT COLUMN: overview cards
-            let left = `
-                <div class="card" style="cursor: default;">
-                    <div class="card-title">Bot Information</div>
-                    <div class="card-body" style="display: block;">
-                        <div class="property">
-                            <span class="property-label">User</span>
-                            <span class="property-value">${data.bot.user}</span>
-                        </div>
-                        <div class="property">
-                            <span class="property-label">Cogs Loaded</span>
-                            <span class="property-value">${data.bot.cogs_loaded}</span>
-                        </div>
-                        <div class="property">
-                            <span class="property-label">Extensions</span>
-                            <span class="property-value">${data.bot.extensions_loaded}</span>
-                        </div>
-                        <div class="property">
-                            <span class="property-label">User Extensions</span>
-                            <span class="property-value">${data.bot.user_extensions}</span>
-                        </div>
-                        <div class="property">
-                            <span class="property-label">Framework Cogs</span>
-                            <span class="property-value">${data.bot.framework_cogs}</span>
-                        </div>
+            // Helper for status colors
+            const getStatusColor = (status) => {
+                if (status === 'healthy' || status === 'safe' || status === true) return { bg: 'rgba(16, 185, 129, 0.15)', border: 'rgba(16, 185, 129, 0.3)', text: '#34d399', label: status === true ? 'On' : status };
+                if (status === 'degraded' || status === 'warning') return { bg: 'rgba(251, 191, 36, 0.15)', border: 'rgba(251, 191, 36, 0.3)', text: '#fbbf24', label: status };
+                if (status === false) return { bg: 'rgba(148, 163, 184, 0.15)', border: 'rgba(148, 163, 184, 0.3)', text: '#94a3b8', label: 'Off' };
+                return { bg: 'rgba(239, 68, 68, 0.15)', border: 'rgba(239, 68, 68, 0.3)', text: '#f87171', label: status };
+            };
+            
+            // Modern card builder
+            const buildCard = (icon, title, color, content, actions = '') => `
+                <div class="sys-card" style="--card-color: ${color};">
+                    <div class="sys-card-header">
+                        <div class="sys-card-icon">${icon}</div>
+                        <div class="sys-card-title">${title}</div>
                     </div>
-                </div>
-
-                <div class="card" style="cursor: default;">
-                    <div class="card-title">System Resources</div>
-                    <div class="card-body" style="display: block;">
-                        <div class="property">
-                            <span class="property-label">CPU User Time</span>
-                            <span class="property-value">${Math.round(data.system.cpu_user_time || 0)}s</span>
-                        </div>
-                        <div class="property">
-                            <span class="property-label">Memory Percent</span>
-                            <span class="property-value">${(data.system.memory_percent || 0).toFixed(2)}%</span>
-                        </div>
-                        <div class="property">
-                            <span class="property-label">Threads</span>
-                            <span class="property-value">${data.system.threads}</span>
-                        </div>
-                        <div class="property">
-                            <span class="property-label">Open Files</span>
-                            <span class="property-value">${data.system.open_files}</span>
-                        </div>
-                        <div class="property">
-                            <span class="property-label">Connections</span>
-                            <span class="property-value">${data.system.connections}</span>
-                        </div>
-                    </div>
+                    <div class="sys-card-body">${content}</div>
+                    ${actions ? '<div class="sys-card-actions">' + actions + '</div>' : ''}
                 </div>
             `;
-            // Framework health
+            
+            const buildProperty = (label, value, valueColor = '#e5e7eb') => `
+                <div class="sys-prop">
+                    <span class="sys-prop-label">${label}</span>
+                    <span class="sys-prop-value" style="color: ${valueColor};">${value}</span>
+                </div>
+            `;
+            
+            const buildBadge = (status) => {
+                const s = getStatusColor(status);
+                return '<span class="sys-badge" style="background:' + s.bg + ';border-color:' + s.border + ';color:' + s.text + ';">' + s.label + '</span>';
+            };
+            
+            const buildBtn = (text, onclick, variant = 'secondary') => 
+                '<button class="sys-btn sys-btn-' + variant + '" onclick="' + onclick + '">' + text + '</button>';
+            
+            let cards = '';
+            
+            // Bot Information Card
+            cards += buildCard(
+                '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>',
+                'Bot Information',
+                '#8b5cf6',
+                buildProperty('User', data.bot.user, '#c4b5fd') +
+                buildProperty('Cogs Loaded', data.bot.cogs_loaded) +
+                buildProperty('Extensions', data.bot.extensions_loaded) +
+                buildProperty('User Extensions', data.bot.user_extensions) +
+                buildProperty('Framework Cogs', data.bot.framework_cogs)
+            );
+            
+            // System Resources Card
+            cards += buildCard(
+                '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2" ry="2"/><rect x="9" y="9" width="6" height="6"/><line x1="9" y1="1" x2="9" y2="4"/><line x1="15" y1="1" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="23"/><line x1="15" y1="20" x2="15" y2="23"/><line x1="20" y1="9" x2="23" y2="9"/><line x1="20" y1="14" x2="23" y2="14"/><line x1="1" y1="9" x2="4" y2="9"/><line x1="1" y1="14" x2="4" y2="14"/></svg>',
+                'System Resources',
+                '#3b82f6',
+                buildProperty('CPU User Time', Math.round(data.system.cpu_user_time || 0) + 's') +
+                buildProperty('Memory %', (data.system.memory_percent || 0).toFixed(2) + '%') +
+                buildProperty('Threads', data.system.threads) +
+                buildProperty('Open Files', data.system.open_files) +
+                buildProperty('Connections', data.system.connections)
+            );
+            
+            // Framework Health Card
             if (data.health) {
-                const errorRate = data.health.error_rate ?? 0;
-                const statusLabel = data.health.status || 'unknown';
-                const statusBadgeClass = statusLabel === 'healthy' ? 'badge-success' : (statusLabel === 'degraded' ? 'badge-warning' : 'badge-danger');
-
-                left += `
-                    <div class="card" style="cursor: default;">
-                        <div class="card-title">Framework Health</div>
-                        <div class="card-body" style="display: block;">
-                            <div class="property">
-                                <span class="property-label">Status</span>
-                                <span class="property-value"><span class="badge ${statusBadgeClass}">${statusLabel}</span></span>
-                            </div>
-                            <div class="property">
-                                <span class="property-label">Error Rate</span>
-                                <span class="property-value">${errorRate.toFixed(2)}%</span>
-                            </div>
-                            <div class="property">
-                                <span class="property-label">Event Loop Lag</span>
-                                <span class="property-value">${(data.health.event_loop_lag_ms || 0).toFixed(2)} ms</span>
-                            </div>
-                            <div class="property">
-                                <span class="property-label">Consecutive Write Failures</span>
-                                <span class="property-value">${data.health.consecutive_write_failures || 0}</span>
-                            </div>
-                        </div>
-                    </div>
-                `;
+                const healthStatus = getStatusColor(data.health.status || 'unknown');
+                cards += buildCard(
+                    '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>',
+                    'Framework Health',
+                    healthStatus.text,
+                    buildProperty('Status', buildBadge(data.health.status || 'unknown')) +
+                    buildProperty('Error Rate', (data.health.error_rate ?? 0).toFixed(2) + '%') +
+                    buildProperty('Event Loop Lag', (data.health.event_loop_lag_ms || 0).toFixed(2) + ' ms') +
+                    buildProperty('Write Failures', data.health.consecutive_write_failures || 0)
+                );
             }
-
-            // Slash limiter card
-        if (data.slash_limiter) {
-            left += `
-                    <div class="card" style="cursor: default;">
-                        <div class="card-title">Slash Command Limiter</div>
-                        <div class="card-body" style="display: block;">
-                            <div class="property">
-                                <span class="property-label">Status</span>
-                                <span class="badge badge-${data.slash_limiter.status === 'safe' ? 'success' : data.slash_limiter.status === 'warning' ? 'warning' : 'danger'}">${data.slash_limiter.status}</span>
-                            </div>
-                            <div class="property">
-                                <span class="property-label">Current / Limit</span>
-                                <span class="property-value">${data.slash_limiter.current} / ${data.slash_limiter.limit}</span>
-                            </div>
-                            <div style="margin-top: 8px;">
-                                <div class="progress-bar">
-                                    <div class="progress-fill" style="width: ${data.slash_limiter.percentage}%"></div>
-                                </div>
-                            </div>
-                            <div class="property" style="margin-top: 8px;">
-                                <span class="property-label">Blocked</span>
-                                <span class="property-value">${data.slash_limiter.blocked}</span>
-                            </div>
-                            <div class="property">
-                                <span class="property-label">Converted</span>
-                                <span class="property-value">${data.slash_limiter.converted}</span>
-                            </div>
-                        </div>
-                    </div>
-                `;
+            
+            // Slash Command Limiter Card
+            if (data.slash_limiter) {
+                const slashStatus = getStatusColor(data.slash_limiter.status);
+                const pct = data.slash_limiter.percentage || 0;
+                const progressColor = pct > 80 ? '#ef4444' : pct > 60 ? '#fbbf24' : '#10b981';
+                cards += buildCard(
+                    '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 3a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3H6a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3V6a3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3h12a3 3 0 0 0 3-3 3 3 0 0 0-3-3z"/></svg>',
+                    'Slash Command Limiter',
+                    slashStatus.text,
+                    buildProperty('Status', buildBadge(data.slash_limiter.status)) +
+                    buildProperty('Usage', data.slash_limiter.current + ' / ' + data.slash_limiter.limit) +
+                    '<div class="sys-progress"><div class="sys-progress-bar" style="width:' + pct + '%;background:' + progressColor + ';"></div></div>' +
+                    buildProperty('Blocked', data.slash_limiter.blocked) +
+                    buildProperty('Converted', data.slash_limiter.converted)
+                );
             }
-
-            // Event hooks metrics
+            
+            // Event Hooks Metrics Card
             if (data.event_hooks && data.event_hooks.metrics) {
-                left += `
-                    <div class="card" style="cursor: default;">
-                        <div class="card-title">Event Hooks Metrics</div>
-                        <div class="card-body" style="display: block;">
-                            <div class="property">
-                                <span class="property-label">Total Emissions</span>
-                                <span class="property-value">${data.event_hooks.metrics.total_emissions || 0}</span>
-                            </div>
-                            <div class="property">
-                                <span class="property-label">Total Executions</span>
-                                <span class="property-value">${data.event_hooks.metrics.total_executions || 0}</span>
-                            </div>
-                            <div class="property">
-                                <span class="property-label">Total Failures</span>
-                                <span class="property-value">${data.event_hooks.metrics.total_failures || 0}</span>
-                            </div>
-                            <div class="property">
-                                <span class="property-label">Queue Size</span>
-                                <span class="property-value">${data.event_hooks.queue_size || 0}</span>
-                            </div>
-                        </div>
-                    </div>
-                `;
+                cards += buildCard(
+                    '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>',
+                    'Event Hooks Metrics',
+                    '#f97316',
+                    buildProperty('Emissions', data.event_hooks.metrics.total_emissions || 0) +
+                    buildProperty('Executions', data.event_hooks.metrics.total_executions || 0) +
+                    buildProperty('Failures', data.event_hooks.metrics.total_failures || 0, data.event_hooks.metrics.total_failures > 0 ? '#f87171' : '#e5e7eb') +
+                    buildProperty('Queue Size', data.event_hooks.queue_size || 0)
+                );
             }
-
-            // Core settings card (auto reload, auto load)
-            if (data.core_settings && (Object.keys(data.core_settings).length > 0)) {
-                left += `
-                    <div class="card" style="cursor: default;">
-                        <div class="card-title">Core Settings</div>
-                        <div class="card-body" style="display: block;">
-                            <div class="property">
-                                <span class="property-label">Auto Reload Extensions</span>
-                                <span class="property-value">
-                                    <span class="badge ${data.core_settings.auto_reload ? 'badge-success' : 'badge-warning'}">${data.core_settings.auto_reload ? 'On' : 'Off'}</span>
-                                </span>
-                            </div>
-                            <div class="property">
-                                <span class="property-label">Auto Load Extensions (Startup)</span>
-                                <span class="property-value">
-                                    <span class="badge ${data.core_settings.extensions_auto_load ? 'badge-success' : 'badge-warning'}">${data.core_settings.extensions_auto_load ? 'On' : 'Off'}</span>
-                                </span>
-                            </div>
-                            <div class="button-group">
-                                <button class="button button-secondary button-compact" onclick="toggleAutoReload()">Toggle Auto Reload</button>
-                                <button class="button button-secondary button-compact" onclick="toggleExtensionsAutoLoad()">Toggle Auto Load</button>
-                            </div>
-                        </div>
-                    </div>
-                `;
+            
+            // Core Settings Card
+            if (data.core_settings && Object.keys(data.core_settings).length > 0) {
+                cards += buildCard(
+                    '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
+                    'Core Settings',
+                    '#6366f1',
+                    buildProperty('Auto Reload', buildBadge(data.core_settings.auto_reload)) +
+                    buildProperty('Auto Load (Startup)', buildBadge(data.core_settings.extensions_auto_load)),
+                    buildBtn('Toggle Reload', 'toggleAutoReload()') + buildBtn('Toggle Auto Load', 'toggleExtensionsAutoLoad()')
+                );
             }
-
-            // Monitor Settings card
+            
+            // Monitor Settings Card
             if (data.monitor_settings) {
-                left += `
-                    <div class="card" style="cursor: default;">
-                        <div class="card-title">Monitor Settings</div>
-                        <div class="card-body" style="display: block;">
-                            <div class="property">
-                                <span class="property-label">Verbose Logging</span>
-                                <span class="property-value">
-                                    <span class="badge ${data.monitor_settings.verbose_logging ? 'badge-success' : 'badge-warning'}">${data.monitor_settings.verbose_logging ? 'On' : 'Off'}</span>
-                                </span>
-                            </div>
-                            <div class="property">
-                                <span class="property-label">Debug Package Logs</span>
-                                <span class="property-value">
-                                    <span class="badge ${data.monitor_settings.debug_packages ? 'badge-success' : 'badge-warning'}">${data.monitor_settings.debug_packages ? 'On' : 'Off'}</span>
-                                </span>
-                            </div>
-                            <div class="button-group">
-                                <button class="button button-secondary button-compact" onclick="toggleVerboseLogging()">Toggle Verbose Logging</button>
-                                <button class="button button-secondary button-compact" onclick="sendCommand('toggle_debug_packages', {enabled: !(data.monitor_settings.debug_packages || false)})">Toggle Debug Packages</button>
-                            </div>
-                            <div style="margin-top: 12px; font-size: 12px; color: var(--text-secondary);">
-                                <i class="fas fa-info-circle"></i> Verbose hides "Data sent successfully" logs • Debug shows package installation details
-                            </div>
-                        </div>
-                    </div>
-                `;
+                cards += buildCard(
+                    '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>',
+                    'Monitor Settings',
+                    '#06b6d4',
+                    buildProperty('Verbose Logging', buildBadge(data.monitor_settings.verbose_logging)) +
+                    buildProperty('Debug Packages', buildBadge(data.monitor_settings.debug_packages)) +
+                    '<div class="sys-hint">Verbose hides repetitive logs • Debug shows package details</div>',
+                    buildBtn('Toggle Verbose', 'toggleVerboseLogging()') + buildBtn('Toggle Debug', 'toggleDebugPackages()')
+                );
             }
-
-            // RIGHT COLUMN: dedicated Atomic FS / Active Locks card
-            let right = '';
+            
+            // Atomic FS Card (spans full width)
+            let atomicCard = '';
             if (data.atomic_fs) {
-                const locks = (data.atomic_fs && data.atomic_fs.locks) ? data.atomic_fs.locks : [];
-                const lockSummary = (data.atomic_fs && data.atomic_fs.lock_summary) ? data.atomic_fs.lock_summary : {};
+                const locks = data.atomic_fs.locks || [];
+                const lockSummary = data.atomic_fs.lock_summary || {};
                 const hitRate = data.atomic_fs.hit_rate || 0;
                 const cacheSize = data.atomic_fs.cache_size || 0;
                 const maxCache = data.atomic_fs.max_cache_size || 1000;
                 const activeLocks = locks.filter(l => l.locked).length || lockSummary.active || data.atomic_fs.active_locks || 0;
                 
-                let locksHtml = '';
+                let locksContent = '';
                 if (locks.length > 0) {
-                    locksHtml = `
-                        <div class="af-locks-header">
-                            <span>Path</span>
-                            <span>Status</span>
-                            <span>Last Op</span>
-                            <span>Last Used</span>
-                            <span style="text-align:right;">Actions</span>
-                        </div>
-                        ${locks.map(lock => {
-                            const statusClass = lock.locked ? 'af-lock-status-locked' : 'af-lock-status-idle';
-                            const statusText = lock.locked ? 'Locked' : 'Idle';
-                            return `
-                            <div class="af-lock-row">
-                                <div class="af-lock-path" title="${lock.path}">${lock.path}</div>
-                                <div>
-                                    <span class="af-lock-status-chip ${statusClass}">
-                                        ${statusText}
-                                    </span>
-                                </div>
-                                <div>${lock.last_operation || 'n/a'}</div>
-                                <div style="font-size: 11px; color: var(--text-secondary);">
-                                    ${lock.last_used ? formatTime(lock.last_used) : 'n/a'}
-                                </div>
-                                <div class="af-lock-actions">
-                                    <button class="button button-secondary button-compact af-invalidate-lock" data-path="${lock.path}">Invalidate</button>
-                                    <button class="button button-danger button-compact af-release-lock" data-path="${lock.path}">Force</button>
-                                </div>
-                            </div>
-                            `;
-                        }).join('')}
-                    `;
+                    locksContent = '<div class="sys-locks-table">' +
+                        '<div class="sys-locks-header"><span>Path</span><span>Status</span><span>Last Op</span><span>Last Used</span><span>Actions</span></div>' +
+                        locks.map(lock => {
+                            const isLocked = lock.locked;
+                            return '<div class="sys-locks-row">' +
+                                '<div class="sys-lock-path" title="' + lock.path + '">' + lock.path + '</div>' +
+                                '<div><span class="sys-lock-chip ' + (isLocked ? 'locked' : 'idle') + '">' + (isLocked ? 'Locked' : 'Idle') + '</span></div>' +
+                                '<div>' + (lock.last_operation || 'n/a') + '</div>' +
+                                '<div class="sys-lock-time">' + (lock.last_used ? formatTime(lock.last_used) : 'n/a') + '</div>' +
+                                '<div class="sys-lock-actions">' +
+                                    '<button class="sys-btn-sm af-invalidate-lock" data-path="' + lock.path + '">Invalidate</button>' +
+                                    '<button class="sys-btn-sm sys-btn-danger af-release-lock" data-path="' + lock.path + '">Force</button>' +
+                                '</div>' +
+                            '</div>';
+                        }).join('') +
+                    '</div>';
                 } else if (activeLocks > 0) {
-                    // Bot reports active locks but didn't send lock details
-                    locksHtml = `
-                        <div style="padding: 20px; text-align: center; color: var(--text-secondary);">
-                            <div style="margin-bottom: 12px; font-size: 16px; color: #f59e0b;">⚠️</div>
-                            <div style="margin-bottom: 8px;">Lock count available but details not provided by bot</div>
-                            <div style="font-size: 12px; opacity: 0.7;">
-                                The Atomic FS cog reports ${activeLocks} active lock${activeLocks > 1 ? 's' : ''} but is not sending lock details.<br>
-                                This may indicate a cog configuration issue or data collection error.
-                            </div>
-                        </div>
-                    `;
+                    locksContent = '<div class="sys-empty-locks"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fbbf24" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg><div>Lock count available but details not provided</div><div class="sys-empty-sub">' + activeLocks + ' active lock(s) reported</div></div>';
                 } else {
-                    locksHtml = '<div style="padding: 20px; text-align: center; color: var(--text-secondary);">No file lock instances</div>';
+                    locksContent = '<div class="sys-empty-locks"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#64748b" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg><div>No active file locks</div></div>';
                 }
                 
-                right = `
-                    <div class="card" style="cursor: default;">
-                        <div class="card-title">Active File Locks</div>
-                        <div class="card-subtitle" style="margin-top: 4px; font-size: 12px; color: var(--text-secondary);">
-                            Hit rate ${hitRate}% • Cache ${cacheSize}/${maxCache} • Active locks ${activeLocks}
-                        </div>
-                        <div class="card-body" style="display: block; max-height: 520px; overflow-y: auto;">
-                            ${locksHtml}
-                        </div>
-                    </div>
-                `;
+                atomicCard = '<div class="sys-card sys-card-wide" style="--card-color: #ec4899;">' +
+                    '<div class="sys-card-header">' +
+                        '<div class="sys-card-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></div>' +
+                        '<div class="sys-card-title">Active File Locks</div>' +
+                        '<div class="sys-card-stats">' +
+                            '<span class="sys-mini-stat"><strong>' + hitRate + '%</strong> hit rate</span>' +
+                            '<span class="sys-mini-stat"><strong>' + cacheSize + '/' + maxCache + '</strong> cache</span>' +
+                            '<span class="sys-mini-stat"><strong>' + activeLocks + '</strong> active</span>' +
+                        '</div>' +
+                    '</div>' +
+                    '<div class="sys-card-body sys-locks-body">' + locksContent + '</div>' +
+                '</div>';
             }
-
-            const html = `
-                <div class="system-grid">
-                    <div class="system-main">
-                        ${left}
-                    </div>
-                    <div class="system-locks">
-                        ${right || '<div class="empty-state">Atomic file system metrics are not available.</div>'}
-                    </div>
-                </div>
-            `;
-
-            container.innerHTML = html;
-
-            // Attach Atomic FS lock controls after rendering
-            const invalidateButtons = container.querySelectorAll('.af-invalidate-lock');
-            invalidateButtons.forEach(btn => {
+            
+            container.innerHTML = '<div class="sys-grid">' + cards + '</div>' + atomicCard;
+            
+            // Attach lock control handlers
+            container.querySelectorAll('.af-invalidate-lock').forEach(btn => {
                 btn.addEventListener('click', (e) => {
                     e.stopPropagation();
                     const path = btn.getAttribute('data-path');
-                    if (path) {
-                        sendCommand('af_invalidate_cache_entry', { path });
-                    }
+                    if (path) sendCommand('af_invalidate_cache_entry', { path });
                 });
             });
-
-            const releaseButtons = container.querySelectorAll('.af-release-lock');
-            releaseButtons.forEach(btn => {
+            container.querySelectorAll('.af-release-lock').forEach(btn => {
                 btn.addEventListener('click', (e) => {
                     e.stopPropagation();
                     const path = btn.getAttribute('data-path');
-                    if (path) {
-                        sendCommand('af_force_release_lock', { path });
-                    }
+                    if (path) sendCommand('af_force_release_lock', { path });
                 });
             });
         }
@@ -10946,39 +16910,80 @@ if (typeof window !== 'undefined') {
             openModal(info.title, `<p style="font-size:13px;color:var(--text-secondary);">${info.body}</p>`);
         }
 
+        // Notification system with stacking support
+        const activeNotifications = [];
+        
         function showNotification(message, type = 'info') {
             const notification = document.createElement('div');
+            notification.className = 'lm-toast-notification';
+            
+            // Calculate vertical position based on existing notifications
+            let topOffset = 20;
+            activeNotifications.forEach(n => {
+                if (n && n.offsetHeight) {
+                    topOffset += n.offsetHeight + 12;
+                }
+            });
+            
             notification.style.cssText = `
                 position: fixed;
-                top: 20px;
+                top: ${topOffset}px;
                 right: 20px;
                 padding: 16px 24px;
-                background: ${type === 'success' ? 'var(--success)' : type === 'error' ? 'var(--danger)' : 'var(--primary)'};
+                background: ${type === 'success' ? 'linear-gradient(135deg, rgba(16, 185, 129, 0.95), rgba(5, 150, 105, 0.95))' : type === 'error' ? 'linear-gradient(135deg, rgba(239, 68, 68, 0.95), rgba(185, 28, 28, 0.95))' : 'linear-gradient(135deg, rgba(59, 130, 246, 0.95), rgba(37, 99, 235, 0.95))'};
                 color: white;
-                border-radius: 8px;
-                box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+                border-radius: 12px;
+                box-shadow: 0 8px 24px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.1) inset;
                 z-index: 10000;
-                animation: slideIn 0.3s ease;
+                animation: toastSlideIn 0.3s ease;
                 font-weight: 600;
+                font-size: 14px;
+                max-width: 400px;
+                backdrop-filter: blur(8px);
+                border: 1px solid rgba(255,255,255,0.15);
             `;
             notification.textContent = message;
             document.body.appendChild(notification);
             
+            // Track this notification
+            activeNotifications.push(notification);
+            
+            // Function to reposition remaining notifications
+            function repositionNotifications() {
+                let offset = 20;
+                activeNotifications.forEach(n => {
+                    if (n && n.parentNode) {
+                        n.style.top = offset + 'px';
+                        offset += n.offsetHeight + 12;
+                    }
+                });
+            }
+            
             setTimeout(() => {
-                notification.style.animation = 'slideOut 0.3s ease';
-                setTimeout(() => notification.remove(), 300);
+                notification.style.animation = 'toastSlideOut 0.3s ease forwards';
+                setTimeout(() => {
+                    // Remove from tracking array
+                    const idx = activeNotifications.indexOf(notification);
+                    if (idx > -1) activeNotifications.splice(idx, 1);
+                    notification.remove();
+                    // Reposition remaining notifications
+                    repositionNotifications();
+                }, 300);
             }, 3000);
         }
         
         const style = document.createElement('style');
         style.textContent = `
-            @keyframes slideIn {
+            @keyframes toastSlideIn {
                 from { transform: translateX(400px); opacity: 0; }
                 to { transform: translateX(0); opacity: 1; }
             }
-            @keyframes slideOut {
+            @keyframes toastSlideOut {
                 from { transform: translateX(0); opacity: 1; }
                 to { transform: translateX(400px); opacity: 0; }
+            }
+            .lm-toast-notification {
+                transition: top 0.3s ease;
             }
         `;
         document.head.appendChild(style);
@@ -10996,9 +17001,19 @@ if (typeof window !== 'undefined') {
             fetch('owner_roles.php?format=json', { credentials: 'include' })
                 .then(async r => {
                     let data = null;
+                    const contentType = r.headers.get('content-type');
                     try {
-                        data = await r.json();
-                    } catch (_) {}
+                        if (contentType && contentType.includes('application/json')) {
+                            data = await r.json();
+                        } else {
+                            const text = await r.text();
+                            console.error('Roles API returned non-JSON response:', text.substring(0, 500));
+                            throw new Error('Server returned invalid response');
+                        }
+                    } catch (parseErr) {
+                        console.error('Failed to parse roles response:', parseErr);
+                        throw new Error('Failed to parse server response');
+                    }
                     if (!r.ok) {
                         const msg = interpretHttpError(r.status, data, 'roles');
                         showNotification(msg, 'error');
@@ -11012,7 +17027,11 @@ if (typeof window !== 'undefined') {
                 })
                 .catch(err => {
                     console.error('Roles load error:', err);
-                    container.innerHTML = '<div class="empty-state">Unable to load roles. Make sure you are logged in as the dashboard owner.</div>';
+                    if (err.message === 'Failed to fetch') {
+                        container.innerHTML = '<div class="empty-state">Network error: Could not connect to roles API. Please refresh the page.</div>';
+                    } else {
+                        container.innerHTML = '<div class="empty-state">Unable to load roles: ' + (err.message || 'Unknown error') + '</div>';
+                    }
                 });
         }
 
@@ -11032,8 +17051,7 @@ if (typeof window !== 'undefined') {
                 { key: 'view_tickets', label: 'Discord Tickets' },
                 { key: 'view_events', label: 'Events' },
                 { key: 'view_system', label: 'System Details' },
-                { key: 'view_security', label: 'Security & Logs' },
-                { key: 'view_logs', label: 'Audit Logs' },
+                { key: 'view_security', label: 'Security & Logs (tab only - requires action_view_logs for content)' },
                 { key: 'view_guilds', label: 'Guilds / Servers' },
                 { key: 'view_database', label: 'Database Viewer' },
                 { key: 'view_marketplace', label: 'Extension Marketplace' },
@@ -11043,76 +17061,86 @@ if (typeof window !== 'undefined') {
 
             const CONTROL_PERM_DEFS = [
                 // Dashboard Actions
-                { key: 'action_clear_cache', label: '🧹 Clear Cache' },
-                { key: 'action_toggle_logging', label: '🔊 Toggle Verbose Logging' },
-                { key: 'action_toggle_debug', label: '🐛 Toggle Debug Packages' },
-                { key: 'action_backup_dashboard', label: '💾 Backup Dashboard' },
-                { key: 'action_backup_bot', label: '💾 Backup Bot Directory' },
+                { key: 'action_clear_cache', label: 'Clear Cache' },
+                { key: 'action_toggle_logging', label: 'Toggle Verbose Logging' },
+                { key: 'action_toggle_debug_packages', label: 'Toggle Debug Packages' },
+                { key: 'action_backup_dashboard', label: 'Backup Dashboard' },
+                { key: 'action_backup_bot', label: 'Backup Bot Directory' },
                 
                 // Plugin Actions
-                { key: 'action_reload_extension', label: '🔄 Reload Extension' },
-                { key: 'action_load_extension', label: '📥 Load Extension' },
-                { key: 'action_unload_extension', label: '📤 Unload Extension' },
-                { key: 'action_set_auto_reload', label: '⚙️ Set Auto Reload' },
-                { key: 'action_set_auto_load', label: '⚙️ Set Auto Load Extensions' },
-                { key: 'action_set_enforcement', label: '🔒 Set Plugin Enforcement' },
+                { key: 'action_reload_extension', label: 'Reload Extension' },
+                { key: 'action_load_extension', label: 'Load Extension' },
+                { key: 'action_unload_extension', label: 'Unload Extension' },
+                { key: 'action_set_auto_reload', label: 'Set Auto Reload' },
+                { key: 'action_set_auto_load', label: 'Set Auto Load Extensions' },
+                { key: 'action_set_enforcement', label: 'Set Plugin Enforcement' },
                 
                 // Hook Actions
-                { key: 'action_enable_hook', label: '✅ Enable Event Hook' },
-                { key: 'action_disable_hook', label: '❌ Disable Event Hook' },
-                { key: 'action_reset_circuit', label: '🔄 Reset Circuit Breaker' },
-                { key: 'action_create_hook', label: '➕ Create Event Hook' },
-                { key: 'action_delete_hook', label: '🗑️ Delete Event Hook' },
-                { key: 'action_export_hooks', label: '📦 Export Hooks JSON' },
+                { key: 'action_enable_hook', label: 'Enable Event Hook' },
+                { key: 'action_disable_hook', label: 'Disable Event Hook' },
+                { key: 'action_reset_circuit', label: 'Reset Circuit Breaker' },
+                { key: 'action_create_hook', label: 'Create Event Hook' },
+                { key: 'action_delete_hook', label: 'Delete Event Hook' },
+                { key: 'action_export_hooks', label: 'Export Hooks JSON' },
                 
                 // File Actions
-                { key: 'action_upload_file', label: '📤 Upload File' },
-                { key: 'action_rename_file', label: '✏️ Rename File' },
-                { key: 'action_delete_file', label: '🗑️ Delete File/Folder' },
-                { key: 'action_create_folder', label: '📁 Create Folder' },
-                { key: 'action_edit_file', label: '📝 Edit File' },
-                { key: 'action_save_file', label: '💾 Save File' },
+                { key: 'action_upload_file', label: 'Upload File' },
+                { key: 'action_rename_file', label: 'Rename File' },
+                { key: 'action_delete_file', label: 'Delete File/Folder' },
+                { key: 'action_create_folder', label: 'Create Folder' },
+                { key: 'action_edit_file', label: 'Edit File' },
+                { key: 'action_save_file', label: 'Save File' },
                 
                 // System Actions
-                { key: 'action_shutdown_bot', label: '🔴 Shutdown Bot (DANGEROUS)' },
-                { key: 'action_generate_diagnostics', label: '📊 Generate Diagnostics' },
-                { key: 'action_invalidate_cache', label: '🧹 Invalidate Cache Entry' },
-                { key: 'action_force_release_lock', label: '🔓 Force Release Lock (DANGEROUS)' },
+                { key: 'action_shutdown_bot', label: 'Shutdown Bot (DANGEROUS)' },
+                { key: 'action_generate_diagnostics', label: 'Generate Diagnostics' },
+                { key: 'action_invalidate_cache', label: 'Invalidate Cache Entry' },
+                { key: 'action_force_release_lock', label: 'Force Release Lock (DANGEROUS)' },
                 
                 // Chat Actions
-                { key: 'action_send_message', label: '💬 Send Chat Message' },
-                { key: 'action_request_chat_data', label: '📊 Request Chat History Data' },
+                { key: 'action_send_message', label: 'Send Chat Message' },
+                { key: 'action_request_chat_data', label: 'Request Chat History Data' },
                 
                 // Ticket Actions
-                { key: 'action_view_ticket', label: '👁️ View Ticket Transcript' },
-                { key: 'action_download_ticket', label: '📥 Download Ticket Transcript' },
-                { key: 'action_delete_ticket', label: '🗑️ Delete Ticket' },
+                { key: 'action_view_ticket', label: 'View Ticket Transcript' },
+                { key: 'action_download_ticket', label: 'Download Ticket Transcript' },
+                { key: 'action_delete_ticket', label: 'Delete Ticket' },
                 
                 // Guild Actions
-                { key: 'action_leave_guild', label: '🚪 Leave Guild (DANGEROUS)' },
+                { key: 'action_leave_guild', label: 'Leave Guild (DANGEROUS)' },
                 
                 // Bot Invite Actions
-                { key: 'action_generate_invite', label: '🔗 Generate Bot Invite' },
-                { key: 'action_open_invite', label: '🌐 Open Bot Invite' },
-                { key: 'action_copy_invite', label: '📋 Copy Bot Invite' },
+                { key: 'action_generate_invite', label: 'Generate Bot Invite' },
+                { key: 'action_open_invite', label: 'Open Bot Invite' },
+                { key: 'action_copy_invite', label: 'Copy Bot Invite' },
                 
                 // Marketplace Actions
-                { key: 'action_fetch_marketplace', label: '🔄 Fetch Marketplace Extensions' },
-                { key: 'action_download_extension', label: '📥 Download Extension' },
-                { key: 'action_load_marketplace_extension', label: '🚀 Load Marketplace Extension' },
-                { key: 'action_refresh_zygnalid', label: '🔄 Refresh Zygnalid Cache' },
-                { key: 'action_refresh_marketplace', label: '🔄 Refresh Marketplace Data' },
+                { key: 'action_fetch_marketplace', label: 'Fetch Marketplace Extensions' },
+                { key: 'action_download_extension', label: 'Download Extension' },
+                { key: 'action_load_marketplace_extension', label: 'Load Marketplace Extension' },
+                { key: 'action_refresh_zygnalid', label: 'Refresh Zygnalid Cache' },
+                { key: 'action_refresh_marketplace', label: 'Refresh Marketplace Data' },
                 
                 // Role Management Actions
-                { key: 'action_save_role', label: '💾 Save Role Changes' },
-                { key: 'action_delete_role', label: '🗑️ Delete Role (DANGEROUS)' },
-                { key: 'action_create_role', label: '➕ Create Role' },
+                { key: 'action_save_role', label: 'Save Role Changes' },
+                { key: 'action_delete_role', label: 'Delete Role (DANGEROUS)' },
+                { key: 'action_create_role', label: 'Create Role' },
+                
+                // User Management Actions
+                { key: 'action_add_user', label: 'Add User to Whitelist' },
+                { key: 'action_remove_user', label: 'Remove User from Whitelist' },
+                { key: 'action_change_user_role', label: 'Change User Role' },
                 
                 // Log Actions
-                { key: 'action_export_logs', label: '📊 Export Audit Logs' },
+                { key: 'action_view_logs', label: 'View Audit Logs' },
+                { key: 'action_export_logs', label: 'Export Audit Logs' },
                 
                 // Database Actions
-                { key: 'action_execute_query', label: '💾 Execute Database Query (DANGEROUS)' },
+                { key: 'action_execute_query', label: 'Execute Database Query (DANGEROUS)' },
+                { key: 'action_db_create', label: 'Create Database Records' },
+                { key: 'action_db_read', label: 'Read Database Records' },
+                { key: 'action_db_update', label: 'Update Database Records' },
+                { key: 'action_db_delete', label: 'Delete Database Records' },
             ];
 
             const OTHER_PERM_DEFS = [];
@@ -11126,78 +17154,95 @@ if (typeof window !== 'undefined') {
                 const allRoleNames = Array.from(new Set([...rolesOptions, u.role].filter(Boolean)));
                 const roleOptionsHtml = allRoleNames.map(name => `<option value="${name}" ${u.role === name ? 'selected' : ''}>${name}</option>`).join('');
                 const roleSelect = `
-                    <select data-user-id="${u.id}" class="select role-select" ${disableRoleChange ? 'disabled' : ''}>
+                    <select data-user-id="${u.id}" class="roles-form-select role-select" ${disableRoleChange ? 'disabled' : ''}>
                         ${roleOptionsHtml}
                     </select>`;
                 return `
                     <tr>
-                        <td>${u.id}</td>
-                        <td>${u.discord_user_id}</td>
-                        <td>${u.display_name}</td>
+                        <td><span class="roles-user-id">${u.id}</span></td>
+                        <td><span class="roles-user-discord">${u.discord_user_id}</span></td>
+                        <td><span class="roles-user-name">${u.display_name}</span></td>
                         <td>${roleSelect}</td>
                         <td>
-                            <button class="button button-secondary button-compact" data-action="save-role" data-user-id="${u.id}" ${disableRoleChange ? 'disabled' : ''}>Save</button>
-                            <button class="button button-danger button-compact" data-action="delete-user" data-user-id="${u.id}" ${disableDelete ? 'disabled' : ''}>Remove</button>
+                            <div class="roles-table-actions">
+                                <button class="roles-btn-save" data-action="save-role" data-user-id="${u.id}" ${disableRoleChange ? 'disabled' : ''}>Save</button>
+                                <button class="roles-btn-remove" data-action="delete-user" data-user-id="${u.id}" ${disableDelete ? 'disabled' : ''}>Remove</button>
+                            </div>
                         </td>
                     </tr>`;
             }).join('');
 
             container.innerHTML = `
-                <div class="two-column-grid" style="align-items:flex-start;">
-                    <div class="column-card">
-                        <div class="column-header">
+                <div class="roles-grid">
+                    <!-- Users & Access Section -->
+                    <div class="roles-section">
+                        <div class="roles-section-header">
+                            <div class="roles-section-icon users">
+                                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                            </div>
                             <div>
-                                <div class="column-title">Users & Access</div>
-                                <div class="column-subtitle">Assign Discord IDs to roles that can log in.</div>
+                                <div class="roles-section-title">Users &amp; Access</div>
+                                <div class="roles-section-subtitle">Manage who can access the dashboard</div>
                             </div>
                         </div>
-                        <div class="card" style="cursor: default; margin-bottom: 16px;">
-                            <div class="card-header">
-                                <div class="card-title">Add User</div>
-                            </div>
-                            <div class="card-body" style="display:block;">
-                                <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
-                                    <input id="roles-add-discord" class="input-text" type="text" placeholder="Discord User ID (e.g. 123456789012345678)" style="flex:1;min-width:200px;" />
-                                    <input id="roles-add-name" class="input-text" type="text" placeholder="Display name (optional)" style="flex:1;min-width:160px;" />
-                                    <select id="roles-add-role" class="select">
+                        <div class="roles-section-body">
+                            <!-- Add User Form -->
+                            <div class="roles-add-form">
+                                <div class="roles-form-group">
+                                    <label class="roles-form-label">Discord ID</label>
+                                    <input id="roles-add-discord" class="roles-form-input" type="text" placeholder="e.g. 123456789012345678"/>
+                                </div>
+                                <div class="roles-form-group">
+                                    <label class="roles-form-label">Display Name</label>
+                                    <input id="roles-add-name" class="roles-form-input" type="text" placeholder="Optional"/>
+                                </div>
+                                <div class="roles-form-group" style="min-width:140px;">
+                                    <label class="roles-form-label">Role</label>
+                                    <select id="roles-add-role" class="roles-form-select">
                                         ${rolesOptions.map(name => `<option value="${name}">${name}</option>`).join('')}
                                     </select>
-                                    <button class="button button-primary button-compact" id="roles-add-submit">Add</button>
                                 </div>
-                                <p class="hint" style="margin-top:8px;">OWNER is assigned on first claim and cannot be added here.</p>
+                                <button class="roles-add-btn" id="roles-add-submit">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                                    Add User
+                                </button>
                             </div>
-                        </div>
-                        <div class="card" style="cursor: default;">
-                            <div class="card-header">
-                                <div class="card-title">Existing Users</div>
-                            </div>
-                            <div class="card-body" style="display:block;overflow-x:auto;">
-                                <table style="width:100%;border-collapse:collapse;font-size:12px;">
+                            <p class="roles-form-hint">OWNER role is assigned on first claim and cannot be added manually.</p>
+                            
+                            <!-- Users Table -->
+                            <div class="roles-table-wrap">
+                                <table class="roles-table">
                                     <thead>
                                         <tr>
-                                            <th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border);">ID</th>
-                                            <th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border);">Discord ID</th>
-                                            <th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border);">Name</th>
-                                            <th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border);">Role</th>
-                                            <th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border);">Actions</th>
+                                            <th>ID</th>
+                                            <th>Discord ID</th>
+                                            <th>Name</th>
+                                            <th>Role</th>
+                                            <th>Actions</th>
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        ${rolesHtml || '<tr><td colspan="5" style="padding:10px 8px;color:var(--text-secondary);">No users registered yet. Use the form above to add one.</td></tr>'}
+                                        ${rolesHtml || '<tr><td colspan="5" class="roles-table-empty">No users registered yet. Use the form above to add one.</td></tr>'}
                                     </tbody>
                                 </table>
                             </div>
                         </div>
                     </div>
 
-                    <div class="column-card">
-                        <div class="column-header">
+                    <!-- Role Profiles Section -->
+                    <div class="roles-section">
+                        <div class="roles-section-header">
+                            <div class="roles-section-icon profiles">
+                                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                            </div>
                             <div>
-                                <div class="column-title">Role Profiles</div>
-                                <div class="column-subtitle">Create custom roles and fine-tune what they can do.</div>
+                                <div class="roles-section-title">Role Profiles</div>
+                                <div class="roles-section-subtitle">Create and customize permission sets</div>
                             </div>
                         </div>
-                        <div id="roles-profiles"></div>
+                        <div class="roles-section-body">
+                            <div id="roles-profiles"></div>
+                        </div>
                     </div>
                 </div>
             `;
@@ -11205,6 +17250,10 @@ if (typeof window !== 'undefined') {
             const addBtn = document.getElementById('roles-add-submit');
             if (addBtn) {
                 addBtn.addEventListener('click', () => {
+                    if (!window.LM_PERMS?.action_add_user) {
+                        showNotification('You do not have permission to add users. Requires action_add_user permission.', 'error');
+                        return;
+                    }
                     const did = (document.getElementById('roles-add-discord') || {}).value?.trim();
                     const name = (document.getElementById('roles-add-name') || {}).value?.trim();
                     const roleSel = document.getElementById('roles-add-role');
@@ -11219,6 +17268,10 @@ if (typeof window !== 'undefined') {
 
             container.querySelectorAll('button[data-action="save-role"]').forEach(btn => {
                 btn.addEventListener('click', () => {
+                    if (!window.LM_PERMS?.action_change_user_role) {
+                        showNotification('You do not have permission to change user roles. Requires action_change_user_role permission.', 'error');
+                        return;
+                    }
                     const userId = btn.getAttribute('data-user-id');
                     const sel = container.querySelector(`select.role-select[data-user-id="${userId}"]`);
                     if (!sel) return;
@@ -11229,6 +17282,10 @@ if (typeof window !== 'undefined') {
 
             container.querySelectorAll('button[data-action="delete-user"]').forEach(btn => {
                 btn.addEventListener('click', () => {
+                    if (!window.LM_PERMS?.action_remove_user) {
+                        showNotification('You do not have permission to remove users. Requires action_remove_user permission.', 'error');
+                        return;
+                    }
                     const userId = btn.getAttribute('data-user-id');
                     if (!confirm('Remove this user from dashboard access?')) return;
                     rolesApiRequest({ action: 'delete', user_id: parseInt(userId, 10) });
@@ -11245,36 +17302,36 @@ if (typeof window !== 'undefined') {
             let html = '';
             if (builtin.length) {
                 html += `
-                    <div class="card" style="cursor: default; margin-bottom: 12px;">
-                        <div class="card-header">
-                            <div class="card-title">Built-in Roles</div>
+                    <div class="roles-builtin-card">
+                        <div class="roles-builtin-title">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+                            Built-in Roles
                         </div>
-                        <div class="card-body" style="display:block;">
-                            <ul style="font-size:13px;color:var(--text-secondary);padding-left:18px;">
-                                ${builtin.map(r => `<li><strong>${r.name}</strong> — ${r.description || ''}</li>`).join('')}
-                            </ul>
-                            <p style="font-size:11px;color:var(--text-secondary);margin-top:6px;">These roles define the base behavior. Custom roles inherit from them.</p>
+                        <div class="roles-builtin-list">
+                            ${builtin.map(r => `<div class="roles-builtin-item"><strong>${r.name}</strong> — ${r.description || 'No description'}</div>`).join('')}
                         </div>
+                        <p class="roles-builtin-note">Built-in roles define base permissions. Custom roles extend them.</p>
                     </div>
                 `;
             }
 
             html += `
-                <div class="card" style="cursor: default; margin-bottom: 12px;">
-                    <div class="card-header">
-                        <div class="card-title">Create Role</div>
+                <div class="roles-create-form">
+                    <div class="roles-form-group">
+                        <label class="roles-create-label">Role Name</label>
+                        <input id="role-new-name" class="roles-form-input" type="text" placeholder="e.g. LOGS_ONLY"/>
                     </div>
-                    <div class="card-body" style="display:block;">
-                        <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
-                            <input id="role-new-name" class="input-text" type="text" placeholder="Role name (e.g. LOGS_ONLY)" style="flex:1;min-width:160px;" />
-                            <select id="role-new-base" class="select">
-                                <option value="CUSTOM">CUSTOM (customizable)</option>
-                                <option value="OWNER">OWNER (full access)</option>
-                            </select>
-                            <button class="button button-primary button-compact" id="role-new-create">Create</button>
-                        </div>
-                        <p class="hint" style="margin-top:8px;">After creating a role, you can fine-tune its permissions below.</p>
+                    <div class="roles-form-group" style="min-width:160px;">
+                        <label class="roles-create-label">Base Tier</label>
+                        <select id="role-new-base" class="roles-form-select">
+                            <option value="CUSTOM">CUSTOM (customizable)</option>
+                            <option value="OWNER">OWNER (full access)</option>
+                        </select>
                     </div>
+                    <button class="roles-create-btn" id="role-new-create">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                        Create Role
+                    </button>
                 </div>
             `;
 
@@ -11284,74 +17341,70 @@ if (typeof window !== 'undefined') {
                 const enabledTabs = VIEW_PERM_DEFS.filter(def => perms[def.key]).map(def => def.label);
                 const otherCaps = OTHER_PERM_DEFS.filter(def => perms[def.key]).map(def => def.label);
                 const summaryParts = [];
-                if (enabledTabs.length) summaryParts.push('Tabs: ' + enabledTabs.join(', '));
-                if (enabledActions.length) summaryParts.push('Actions: ' + enabledActions.join(', '));
-                if (otherCaps.length) summaryParts.push(otherCaps.join(', '));
+                if (enabledTabs.length) summaryParts.push(enabledTabs.length + ' tabs');
+                if (enabledActions.length) summaryParts.push(enabledActions.length + ' actions');
+                if (otherCaps.length) summaryParts.push(otherCaps.length + ' other');
                 const summaryText = summaryParts.length
                     ? summaryParts.join(' • ')
-                    : 'No capabilities enabled yet. This role currently cannot see or do anything.';
+                    : 'No permissions enabled';
 
                 html += `
-                    <div class="card" data-role-id="${role.id}" style="cursor: default; margin-bottom: 10px;">
-                        <div class="card-header" style="align-items:flex-start;justify-content:space-between;gap:8px;">
-                            <div>
-                                <div class="card-title">${role.name}
-                                    <span class="badge badge-warning role-edited-badge" style="display:none;margin-left:6px;font-size:10px;">Edited</span>
+                    <div class="roles-profile-card" data-role-id="${role.id}">
+                        <div class="roles-profile-header">
+                            <div class="roles-profile-info">
+                                <div class="roles-profile-name">
+                                    ${role.name}
+                                    <span class="roles-profile-edited role-edited-badge">Edited</span>
                                 </div>
-                                <div class="card-subtitle" style="max-width:320px;">Base tier: ${role.base_role}</div>
-                                <div class="card-subtitle" style="max-width:420px;margin-top:4px;font-size:11px;">${summaryText}</div>
+                                <div class="roles-profile-base">Base: ${role.base_role}</div>
+                                <div class="roles-profile-summary">${summaryText}</div>
                             </div>
-                            <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end;">
-                                <button class="button button-secondary button-compact" data-role-action="toggle" data-role-id="${role.id}">Edit</button>
-                                <button class="button button-danger button-compact" data-role-action="delete" data-role-id="${role.id}">Delete</button>
+                            <div class="roles-profile-actions">
+                                <button class="roles-btn-edit" data-role-action="toggle" data-role-id="${role.id}">Edit</button>
+                                <button class="roles-btn-delete" data-role-action="delete" data-role-id="${role.id}">Delete</button>
                             </div>
                         </div>
-                        <div class="card-body" style="display:none;">
-                            <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;align-items:center;">
-                                <label style="font-size:12px;color:var(--text-secondary);">Base tier:</label>
-                                <select class="select" data-role-field="base_role" data-role-id="${role.id}">
-                                    <option value="CUSTOM" ${role.base_role === 'CUSTOM' ? 'selected' : ''}>CUSTOM (customizable)</option>
-                                    <option value="OWNER" ${role.base_role === 'OWNER' ? 'selected' : ''}>OWNER (full access)</option>
-                                </select>
-                            </div>
-                            <div style="margin-bottom:10px;">
-                                <textarea class="input-text" data-role-field="description" data-role-id="${role.id}" style="width:100%;min-height:40px;resize:vertical;" placeholder="Description...">${role.description || ''}</textarea>
-                            </div>
-                            <div style="margin-bottom:8px;">
-                                <div style="font-size:11px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:4px;">Basic actions this role can perform</div>
-                                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:6px;">
-                                    ${CONTROL_PERM_DEFS.map(def => `
-                                        <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-secondary);">
-                                            <input type="checkbox" data-role-perm="${def.key}" data-role-id="${role.id}" ${perms[def.key] ? 'checked' : ''} />
-                                            <span>${def.label}</span>
-                                        </label>
-                                    `).join('')}
+                        <div class="roles-profile-body">
+                            <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin-bottom:16px;">
+                                <div class="roles-form-group" style="min-width:160px;flex:0;">
+                                    <label class="roles-form-label">Base Tier</label>
+                                    <select class="roles-form-select" data-role-field="base_role" data-role-id="${role.id}">
+                                        <option value="CUSTOM" ${role.base_role === 'CUSTOM' ? 'selected' : ''}>CUSTOM</option>
+                                        <option value="OWNER" ${role.base_role === 'OWNER' ? 'selected' : ''}>OWNER</option>
+                                    </select>
+                                </div>
+                                <div class="roles-form-group" style="flex:1;">
+                                    <label class="roles-form-label">Description</label>
+                                    <input class="roles-form-input" data-role-field="description" data-role-id="${role.id}" placeholder="Role description..." value="${role.description || ''}"/>
                                 </div>
                             </div>
-                            <div style="margin-bottom:8px;">
-                                <div style="font-size:11px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:4px;">Advanced: which tabs this role can see</div>
-                                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:6px;">
+                            
+                            <div class="roles-perm-section">
+                                <div class="roles-perm-title">Tab Access</div>
+                                <div class="roles-perm-grid">
                                     ${VIEW_PERM_DEFS.map(def => `
-                                        <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-secondary);">
-                                            <input type="checkbox" data-role-perm="${def.key}" data-role-id="${role.id}" ${perms[def.key] ? 'checked' : ''} />
+                                        <label class="roles-perm-item">
+                                            <input type="checkbox" data-role-perm="${def.key}" data-role-id="${role.id}" ${perms[def.key] ? 'checked' : ''}/>
                                             <span>${def.label}</span>
                                         </label>
                                     `).join('')}
                                 </div>
                             </div>
-                            <div>
-                                <div style="font-size:11px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:4px;">Other capabilities</div>
-                                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:6px;">
-                                    ${OTHER_PERM_DEFS.map(def => `
-                                        <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-secondary);">
-                                            <input type="checkbox" data-role-perm="${def.key}" data-role-id="${role.id}" ${perms[def.key] ? 'checked' : ''} />
+                            
+                            <div class="roles-perm-section">
+                                <div class="roles-perm-title">Actions</div>
+                                <div class="roles-perm-grid">
+                                    ${CONTROL_PERM_DEFS.map(def => `
+                                        <label class="roles-perm-item">
+                                            <input type="checkbox" data-role-perm="${def.key}" data-role-id="${role.id}" ${perms[def.key] ? 'checked' : ''}/>
                                             <span>${def.label}</span>
                                         </label>
                                     `).join('')}
                                 </div>
                             </div>
-                            <div style="margin-top:10px;display:flex;justify-content:flex-end;gap:8px;">
-                                <button class="button button-secondary button-compact" data-role-action="save" data-role-id="${role.id}">Save Changes</button>
+                            
+                            <div class="roles-profile-save">
+                                <button class="roles-btn-primary" data-role-action="save" data-role-id="${role.id}">Save Changes</button>
                             </div>
                         </div>
                     </div>
@@ -11361,9 +17414,9 @@ if (typeof window !== 'undefined') {
             profilesContainer.innerHTML = html;
 
             function markRoleEdited(roleId) {
-                const card = profilesContainer.querySelector(`.card[data-role-id="${roleId}"]`);
+                const card = profilesContainer.querySelector(`.roles-profile-card[data-role-id="${roleId}"]`);
                 if (!card) return;
-                const badge = card.querySelector('.role-edited-badge');
+                const badge = card.querySelector('.roles-profile-edited');
                 if (!badge) return;
                 badge.style.display = 'inline-flex';
             }
@@ -11373,12 +17426,12 @@ if (typeof window !== 'undefined') {
                 btn.addEventListener('click', () => {
                     const id = parseInt(btn.getAttribute('data-role-id'), 10);
                     if (!id) return;
-                    const card = profilesContainer.querySelector(`.card[data-role-id="${id}"]`);
+                    const card = profilesContainer.querySelector(`.roles-profile-card[data-role-id="${id}"]`);
                     if (!card) return;
-                    const body = card.querySelector('.card-body');
+                    const body = card.querySelector('.roles-profile-body');
                     if (!body) return;
-                    const isOpen = body.style.display === 'block';
-                    body.style.display = isOpen ? 'none' : 'block';
+                    const isOpen = body.classList.contains('active');
+                    body.classList.toggle('active');
                     btn.textContent = isOpen ? 'Edit' : 'Close';
                 });
             });
@@ -11401,7 +17454,7 @@ if (typeof window !== 'undefined') {
             if (createBtn) {
                 createBtn.addEventListener('click', () => {
                     // CRITICAL: Check permission before creating role
-                    if (!LM_PERMS.action_create_role && !LM_PERMS.control_roles) {
+                    if (!window.LM_PERMS?.action_create_role) {
                         showNotification('You do not have permission to create roles. Requires action_create_role permission.', 'error');
                         return;
                     }
@@ -11421,7 +17474,7 @@ if (typeof window !== 'undefined') {
             profilesContainer.querySelectorAll('[data-role-action="delete"]').forEach(btn => {
                 btn.addEventListener('click', () => {
                     // CRITICAL: Check permission before deleting role
-                    if (!LM_PERMS.action_delete_role && !LM_PERMS.control_roles) {
+                    if (!window.LM_PERMS?.action_delete_role) {
                         showNotification('You do not have permission to delete roles. Requires action_delete_role permission.', 'error');
                         return;
                     }
@@ -11436,14 +17489,14 @@ if (typeof window !== 'undefined') {
             profilesContainer.querySelectorAll('[data-role-action="save"]').forEach(btn => {
                 btn.addEventListener('click', () => {
                     // CRITICAL: Check permission before saving role
-                    if (!LM_PERMS.action_save_role && !LM_PERMS.control_roles) {
+                    if (!window.LM_PERMS?.action_save_role) {
                         showNotification('You do not have permission to save role changes. Requires action_save_role permission.', 'error');
                         return;
                     }
                     
                     const id = parseInt(btn.getAttribute('data-role-id'), 10);
                     if (!id) return;
-                    const card = profilesContainer.querySelector(`.card[data-role-id="${id}"]`);
+                    const card = profilesContainer.querySelector(`.roles-profile-card[data-role-id="${id}"]`);
                     if (!card) return;
                     const baseSel = card.querySelector('[data-role-field="base_role"]');
                     const descEl = card.querySelector('[data-role-field="description"]');
@@ -11469,9 +17522,19 @@ if (typeof window !== 'undefined') {
             })
                 .then(async r => {
                     let data = null;
+                    const contentType = r.headers.get('content-type');
                     try {
-                        data = await r.json();
-                    } catch (_) {}
+                        if (contentType && contentType.includes('application/json')) {
+                            data = await r.json();
+                        } else {
+                            const text = await r.text();
+                            console.error('Roles API returned non-JSON response:', text.substring(0, 500));
+                            throw new Error('Server returned invalid response. Check server logs.');
+                        }
+                    } catch (parseErr) {
+                        console.error('Failed to parse roles API response:', parseErr);
+                        throw new Error('Failed to parse server response');
+                    }
                     if (!r.ok) {
                         const msg = interpretHttpError(r.status, data, 'roles');
                         throw new Error(msg);
@@ -11489,22 +17552,37 @@ if (typeof window !== 'undefined') {
                 })
                 .catch(err => {
                     console.error('Roles API error:', err);
-                    showNotification(err.message || 'Failed to update roles.', 'error');
+                    if (err.message === 'Failed to fetch') {
+                        showNotification('Network error: Could not connect to roles API. Please refresh the page and try again.', 'error');
+                    } else {
+                        showNotification(err.message || 'Failed to update roles.', 'error');
+                    }
                 });
         }
 
+        let dbCurrentTable = null;
+        let dbCurrentPage = 1;
+        let dbPageSize = 50;
+        let dbTotalRecords = 0;
+        let dbTableColumns = [];
+        let dbSelectedRows = new Set();
+        let dbSortColumn = null;
+        let dbSortDirection = 'asc';
+        let dbFilters = {};
+        
         function loadDatabaseTables() {
-            const tablesEl = document.getElementById('db-tables');
-            const rowsEl = document.getElementById('db-rows');
-            const titleEl = document.getElementById('db-selected-title');
-            const subtitleEl = document.getElementById('db-selected-subtitle');
-            if (!tablesEl || !rowsEl) return;
-
-            tablesEl.innerHTML = '<div class="loading">Loading tables...</div>';
-            rowsEl.innerHTML = '';
-            if (titleEl) titleEl.textContent = 'No table selected';
-            if (subtitleEl) subtitleEl.textContent = '';
-
+            console.log('[DATABASE] loadDatabaseTables() called');
+            if (typeof window.LM_PERMS !== 'undefined') {
+                console.log('[DATABASE] LM_PERMS.action_db_read:', window.LM_PERMS.action_db_read);
+            } else {
+                console.error('[DATABASE] window.LM_PERMS is undefined!');
+            }
+            
+            const listEl = document.getElementById('db-tables-list');
+            if (!listEl) return;
+            
+            listEl.innerHTML = '<div class="loading" style="padding:20px;text-align:center;color:#94a3b8;">Loading tables...</div>';
+            
             fetch('owner_db.php?action=tables', { credentials: 'include' })
                 .then(async r => {
                     let data = null;
@@ -11521,36 +17599,139 @@ if (typeof window !== 'undefined') {
                 .then(data => {
                     const tables = data.tables || [];
                     if (!tables.length) {
-                        tablesEl.innerHTML = '<div class="empty-state">No tables found in dashboard database.</div>';
+                        listEl.innerHTML = '<div style="padding:20px;text-align:center;color:#94a3b8;font-size:13px;">No tables found</div>';
                         return;
                     }
-                    tablesEl.innerHTML = tables.map(t => `
-                        <div class="db-table-card">
-                            <div class="db-table-main">
-                                <div class="db-table-name">${t.name}</div>
-                                <div class="db-table-meta">${typeof t.count === 'number' ? (t.count + ' rows') : ''}</div>
+                    
+                    const hasRead = hasPermission('action_db_read');
+                    const hasWrite = hasPermission('action_db_create') || hasPermission('action_db_update') || hasPermission('action_db_delete');
+                    
+                    listEl.innerHTML = tables.map(t => {
+                        const isActive = dbCurrentTable === t.name;
+                        return `
+                            <div class="db-table-item ${isActive ? 'active' : ''}" data-table="${t.name}" onclick="selectDatabaseTable('${t.name}')" style="
+                                padding: 12px 16px;
+                                margin-bottom: 4px;
+                                border-radius: 8px;
+                                cursor: pointer;
+                                background: ${isActive ? 'rgba(168, 85, 247, 0.2)' : 'rgba(15, 23, 42, 0.4)'};
+                                border: 1px solid ${isActive ? 'rgba(168, 85, 247, 0.4)' : 'rgba(148, 163, 184, 0.2)'};
+                                transition: all 0.2s ease;
+                            " onmouseover="if(!this.classList.contains('active')) this.style.background='rgba(30, 41, 59, 0.6)'" onmouseout="if(!this.classList.contains('active')) this.style.background='rgba(15, 23, 42, 0.4)'">
+                                <div style="display:flex;justify-content:space-between;align-items:center;">
+                                    <div style="flex:1;min-width:0;">
+                                        <div style="font-size:14px;font-weight:600;color:${isActive ? '#a855f7' : '#e2e8f0'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${t.name}">
+                                            ${t.name}
+                                        </div>
+                                        ${typeof t.count === 'number' ? `
+                                        <div style="font-size:11px;color:#94a3b8;margin-top:2px;">
+                                            ${t.count.toLocaleString()} ${t.count === 1 ? 'row' : 'rows'}
+                                        </div>
+                                        ` : ''}
+                                    </div>
+                                    ${hasWrite ? `
+                                    <div style="margin-left:8px;">
+                                        <span style="width:6px;height:6px;border-radius:50%;background:#10b981;display:inline-block;" title="Editable"></span>
+                                    </div>
+                                    ` : hasRead ? `
+                                    <div style="margin-left:8px;">
+                                        <span style="width:6px;height:6px;border-radius:50%;background:#94a3b8;display:inline-block;" title="Read-only"></span>
+                                    </div>
+                                    ` : ''}
+                                </div>
                             </div>
-                            <button class="button button-secondary button-compact" onclick="loadDatabaseRows('${t.name}')">Open</button>
-                        </div>
-                    `).join('');
+                        `;
+                    }).join('');
                 })
                 .catch(err => {
                     console.error('Database tables load error:', err);
-                    tablesEl.innerHTML = '<div class="empty-state">Failed to load tables from database.</div>';
+                    listEl.innerHTML = '<div style="padding:20px;text-align:center;color:#ef4444;font-size:13px;">Failed to load tables</div>';
                 });
         }
-
-        window.loadDatabaseRows = function (tableName) {
-            const rowsEl = document.getElementById('db-rows');
-            const titleEl = document.getElementById('db-selected-title');
-            const subtitleEl = document.getElementById('db-selected-subtitle');
-            if (!rowsEl) return;
-
-            rowsEl.innerHTML = '<div class="loading">Loading rows...</div>';
-            if (titleEl) titleEl.textContent = `Table: ${tableName}`;
-            if (subtitleEl) subtitleEl.textContent = 'Showing first 100 rows (read-only).';
-
-            const params = new URLSearchParams({ action: 'rows', table: tableName, limit: '100' });
+        
+        window.filterDatabaseTables = function() {
+            const searchInput = document.getElementById('db-search-tables');
+            const filter = searchInput ? searchInput.value.toLowerCase() : '';
+            const items = document.querySelectorAll('.db-table-item');
+            
+            items.forEach(item => {
+                const tableName = item.getAttribute('data-table') || '';
+                if (tableName.toLowerCase().includes(filter)) {
+                    item.style.display = '';
+                } else {
+                    item.style.display = 'none';
+                }
+            });
+        };
+        
+        window.selectDatabaseTable = function(tableName) {
+            // DEBUG: Show permission status
+            console.log('[DEBUG] Checking action_db_read permission');
+            console.log('[DEBUG] window.LM_PERMS exists:', typeof window.LM_PERMS !== 'undefined');
+            if (typeof window.LM_PERMS !== 'undefined') {
+                console.log('[DEBUG] window.LM_PERMS.action_db_read:', window.LM_PERMS.action_db_read);
+            } else {
+                console.error('[DEBUG] window.LM_PERMS is undefined!');
+            }
+            console.log('[DEBUG] hasPermission result:', hasPermission('action_db_read'));
+            
+            if (!hasPermission('action_db_read')) {
+                showNotification('You do not have permission to read database records. Requires action_db_read permission.', 'error');
+                console.error('[ERROR] Permission denied. Full LM_PERMS:', window.LM_PERMS);
+                return;
+            }
+            
+            dbCurrentTable = tableName;
+            dbCurrentPage = 1;
+            dbSelectedRows.clear();
+            dbFilters = {};
+            dbSortColumn = null;
+            dbSortDirection = 'asc';
+            
+            document.querySelectorAll('.db-table-item').forEach(item => {
+                if (item.getAttribute('data-table') === tableName) {
+                    item.classList.add('active');
+                    item.style.background = 'rgba(168, 85, 247, 0.2)';
+                    item.style.borderColor = 'rgba(168, 85, 247, 0.4)';
+                } else {
+                    item.classList.remove('active');
+                    item.style.background = 'rgba(15, 23, 42, 0.4)';
+                    item.style.borderColor = 'rgba(148, 163, 184, 0.2)';
+                }
+            });
+            
+            loadDatabaseData();
+        };
+        
+        function loadDatabaseData() {
+            if (!dbCurrentTable) return;
+            
+            const gridEl = document.getElementById('db-data-grid');
+            const headerEl = document.getElementById('db-content-header');
+            const paginationEl = document.getElementById('db-pagination');
+            const createBtn = document.getElementById('db-create-btn');
+            const exportBtn = document.getElementById('db-export-btn');
+            
+            if (headerEl) headerEl.style.display = 'block';
+            if (paginationEl) paginationEl.style.display = 'flex';
+            
+            if (createBtn) {
+                createBtn.style.display = hasPermission('action_db_create') ? 'inline-flex' : 'none';
+            }
+            if (exportBtn) {
+                exportBtn.style.display = 'inline-flex';
+            }
+            
+            gridEl.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;"><div class="loading">Loading data...</div></div>';
+            
+            const offset = (dbCurrentPage - 1) * dbPageSize;
+            const params = new URLSearchParams({
+                action: 'rows',
+                table: dbCurrentTable,
+                limit: dbPageSize.toString(),
+                offset: offset.toString()
+            });
+            
             fetch('owner_db.php?' + params.toString(), { credentials: 'include' })
                 .then(async r => {
                     let data = null;
@@ -11566,105 +17747,892 @@ if (typeof window !== 'undefined') {
                 })
                 .then(data => {
                     const rows = data.rows || [];
+                    const columns = data.columns || [];
+                    dbTableColumns = columns;
+                    
+                    const tableNameEl = document.getElementById('db-current-table-name');
+                    const tableInfoEl = document.getElementById('db-current-table-info');
+                    
+                    if (tableNameEl) tableNameEl.textContent = dbCurrentTable;
+                    if (tableInfoEl) {
+                        const hasCreate = hasPermission('action_db_create');
+                        const hasUpdate = hasPermission('action_db_update');
+                        const hasDelete = hasPermission('action_db_delete');
+                        const perms = [];
+                        if (hasCreate) perms.push('Create');
+                        if (hasUpdate) perms.push('Update');
+                        if (hasDelete) perms.push('Delete');
+                        const permsText = perms.length ? perms.join(' · ') : 'Read-only';
+                        tableInfoEl.textContent = `${rows.length} records loaded · ${permsText}`;
+                    }
+                    
                     if (!rows.length) {
-                        rowsEl.innerHTML = '<div class="empty-state">No rows in this table.</div>';
+                        gridEl.innerHTML = `
+                            <div style="display:flex;align-items:center;justify-content:center;height:100%;flex-direction:column;gap:16px;">
+                                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.5"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+                                <div style="color:#94a3b8;font-size:14px;">No records in this table</div>
+                                ${hasPermission('action_db_create') ? `
+                                <button class="button button-primary" onclick="openCreateRecordForm()">
+                                    Create First Record
+                                </button>
+                                ` : ''}
+                            </div>
+                        `;
+                        updatePaginationInfo(0, 0, 0);
                         return;
                     }
-                    const cols = Object.keys(rows[0]);
                     
-                    // Modern table design with sticky header
-                    let html = `
-                        <div style="position: relative; overflow: hidden; border-radius: 12px; border: 1px solid rgba(148, 163, 184, 0.2);">
-                            <div style="overflow-x: auto; overflow-y: auto; max-height: calc(70vh - 100px);">
-                                <table style="width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px;">
-                                    <thead style="position: sticky; top: 0; z-index: 10; background: linear-gradient(135deg, rgba(30, 41, 59, 0.98), rgba(15, 23, 42, 0.98)); backdrop-filter: blur(10px);">
-                                        <tr>
-                    `;
-                    
-                    cols.forEach((col, idx) => {
-                        html += `
-                            <th style="
-                                padding: 16px 20px;
-                                text-align: left;
-                                font-weight: 600;
-                                color: #a855f7;
-                                border-bottom: 2px solid rgba(168, 85, 247, 0.3);
-                                ${idx === 0 ? 'border-left: none;' : ''}
-                                white-space: nowrap;
-                                text-transform: uppercase;
-                                font-size: 11px;
-                                letter-spacing: 0.5px;
-                            ">${col}</th>
-                        `;
-                    });
-                    
-                    html += `
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                    `;
-                    
-                    rows.forEach((row, rowIdx) => {
-                        const isEven = rowIdx % 2 === 0;
-                        html += `<tr style="
-                            background: ${isEven ? 'rgba(15, 23, 42, 0.3)' : 'rgba(30, 41, 59, 0.3)'};
-                            transition: all 0.2s ease;
-                        " onmouseover="this.style.background='rgba(168, 85, 247, 0.15)'; this.style.transform='scale(1.002)';" 
-                           onmouseout="this.style.background='${isEven ? 'rgba(15, 23, 42, 0.3)' : 'rgba(30, 41, 59, 0.3)'}'; this.style.transform='scale(1)';">`;
-                        
-                        cols.forEach((col, colIdx) => {
-                            const v = row[col];
-                            let text = '';
-                            let cellStyle = 'padding: 14px 20px; border-bottom: 1px solid rgba(148, 163, 184, 0.1); color: #e2e8f0;';
-                            
-                            if (v === null || v === undefined) {
-                                text = '<span style="color: #64748b; font-style: italic; font-size: 11px;">NULL</span>';
-                            } else if (typeof v === 'boolean') {
-                                text = v ? '<span style="color: #10b981; font-weight: 600;">✓ TRUE</span>' : '<span style="color: #ef4444; font-weight: 600;">✗ FALSE</span>';
-                            } else if (typeof v === 'number') {
-                                text = `<span style="color: #60a5fa; font-weight: 500;">${v}</span>`;
-                            } else {
-                                const str = String(v);
-                                if (str.length > 100) {
-                                    text = `<span style="color: #cbd5e1;" title="${str}">${str.substring(0, 97)}...</span>`;
-                                } else {
-                                    text = `<span style="color: #cbd5e1;">${str}</span>`;
-                                }
-                            }
-                            
-                            html += `<td style="${cellStyle}">${text}</td>`;
-                        });
-                        
-                        html += '</tr>';
-                    });
-                    
-                    html += `
-                                    </tbody>
-                                </table>
-                            </div>
-                            <div style="
-                                padding: 12px 20px;
-                                background: rgba(15, 23, 42, 0.8);
-                                border-top: 1px solid rgba(148, 163, 184, 0.2);
-                                display: flex;
-                                justify-content: space-between;
-                                align-items: center;
-                                font-size: 12px;
-                                color: #94a3b8;
-                            ">
-                                <span>Showing ${rows.length} rows</span>
-                                <span style="color: #a855f7;">Read-only view</span>
-                            </div>
-                        </div>
-                    `;
-                    
-                    rowsEl.innerHTML = html;
+                    renderDataGrid(rows, columns);
+                    updatePaginationInfo(offset + 1, offset + rows.length, offset + rows.length);
                 })
                 .catch(err => {
-                    console.error('Database rows load error:', err);
-                    rowsEl.innerHTML = '<div class="empty-state">Failed to load table rows.</div>';
+                    console.error('Database data load error:', err);
+                    gridEl.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#ef4444;font-size:14px;">Failed to load data</div>';
                 });
+        }
+        
+        function renderDataGrid(rows, columns) {
+            const gridEl = document.getElementById('db-data-grid');
+            if (!gridEl || !rows.length) return;
+            
+            const cols = Object.keys(rows[0]);
+            const hasUpdate = hasPermission('action_db_update');
+            const hasDelete = hasPermission('action_db_delete');
+            const hasActions = hasUpdate || hasDelete;
+            
+            // FIX: Container erlaubt jetzt horizontales Scrollen und hat eine feste Struktur
+            let html = `
+                <div style="overflow-x:auto; overflow-y:auto; max-height:650px; display:block; position:relative; border-radius:12px; border:1px solid rgba(148, 163, 184, 0.1); background:rgba(15, 23, 42, 0.4);">
+                    <table style="min-width:max-content; border-collapse:separate; border-spacing:0; font-size:13px; table-layout:auto;">
+                        <thead style="position:sticky; top:0; z-index:10; background:linear-gradient(135deg, rgba(15, 23, 42, 0.98), rgba(30, 41, 59, 0.98)); backdrop-filter:blur(10px);">
+                            <tr>
+            `;
+            
+            if (hasActions) {
+                html += `
+                    <th style="padding:14px 16px; text-align:center; font-weight:600; color:#a855f7; border-bottom:2px solid rgba(168, 85, 247, 0.3); width:40px; white-space:nowrap;">
+                        <input type="checkbox" id="db-select-all" onchange="toggleSelectAll(this.checked)" style="cursor:pointer; width:16px; height:16px;">
+                    </th>
+                `;
+            }
+            
+            cols.forEach((col, idx) => {
+                const colInfo = columns.find(c => c.name === col);
+                const isPk = colInfo && colInfo.pk === 1;
+                // FIX: white-space:nowrap hinzugefügt, damit Header nicht umbrechen
+                html += `
+                    <th onclick="sortByColumn('${col}')" style="
+                        padding: 14px 16px;
+                        text-align: left;
+                        font-weight: 600;
+                        color: ${isPk ? '#facc15' : '#a855f7'};
+                        border-bottom: 2px solid ${isPk ? 'rgba(250, 204, 21, 0.3)' : 'rgba(168, 85, 247, 0.3)'};
+                        white-space: nowrap;
+                        text-transform: uppercase;
+                        font-size: 11px;
+                        letter-spacing: 0.5px;
+                        cursor: pointer;
+                        user-select: none;
+                        position: relative;
+                    ">
+                        <div style="display:flex; align-items:center; gap:6px;">
+                            ${isPk ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:#facc15;"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>' : ''}
+                            ${col}
+                            ${dbSortColumn === col ? (dbSortDirection === 'asc' ? ' ↑' : ' ↓') : ''}
+                        </div>
+                    </th>
+                `;
+            });
+            
+            if (hasActions) {
+                html += `
+                    <th style="padding:14px 16px; text-align:center; font-weight:600; color:#a855f7; border-bottom:2px solid rgba(168, 85, 247, 0.3); min-width:140px; white-space:nowrap;">
+                        Actions
+                    </th>
+                `;
+            }
+            
+            html += `
+                            </tr>
+                        </thead>
+                        <tbody>
+            `;
+            
+            rows.forEach((row, rowIdx) => {
+                const isEven = rowIdx % 2 === 0;
+                const rowId = JSON.stringify(row).replace(/"/g, '&quot;');
+                const isSelected = dbSelectedRows.has(rowIdx);
+                
+                html += `<tr data-row-idx="${rowIdx}" style="
+                    background: ${isSelected ? 'rgba(168, 85, 247, 0.2)' : (isEven ? 'rgba(15, 23, 42, 0.3)' : 'rgba(30, 41, 59, 0.3)')};
+                    transition: all 0.2s ease;
+                " onmouseover="this.style.background='rgba(168, 85, 247, 0.15)'" 
+                   onmouseout="this.style.background='${isSelected ? 'rgba(168, 85, 247, 0.2)' : (isEven ? 'rgba(15, 23, 42, 0.3)' : 'rgba(30, 41, 59, 0.3)')}'" 
+                   ondblclick="openRecordDetailModal(${rowId})">`;
+                
+                if (hasActions) {
+                    html += `
+                        <td style="padding:14px 16px; border-bottom:1px solid rgba(148, 163, 184, 0.1); text-align:center; white-space:nowrap;">
+                            <input type="checkbox" class="row-select" data-row-idx="${rowIdx}" ${isSelected ? 'checked' : ''} onchange="toggleRowSelect(${rowIdx}, this.checked)" style="cursor:pointer; width:16px; height:16px;">
+                        </td>
+                    `;
+                }
+                
+                cols.forEach((col, colIdx) => {
+                    const v = row[col];
+                    let text = '';
+                    // FIX: Max-Width entfernt, damit Spalten so breit wie nötig sind
+                    let cellStyle = 'padding:14px 16px; border-bottom:1px solid rgba(148, 163, 184, 0.1); color:#e2e8f0; white-space:nowrap;';                   
+                    
+                    if (v === null || v === undefined) {
+                        text = '<span style="color:#64748b; font-style:italic; font-size:11px;">NULL</span>';
+                    } else if (typeof v === 'boolean') {
+                        text = v ? '<span style="color:#10b981; font-weight:600; display:inline-flex; align-items:center; gap:4px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>TRUE</span>' : '<span style="color:#ef4444; font-weight:600; display:inline-flex; align-items:center; gap:4px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>FALSE</span>';
+                    } else if (typeof v === 'number') {
+                        text = `<span style="color:#60a5fa; font-weight:500;">${v}</span>`;
+                    } else {
+                        const str = String(v);
+                        const escaped = str.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                        text = `<span style="color:#cbd5e1;" title="${escaped}">${escaped}</span>`;
+                    }
+                    
+                    html += `<td style="${cellStyle}">${text}</td>`;
+                });
+                
+                if (hasActions) {
+                    html += `<td style="padding:14px 16px; border-bottom:1px solid rgba(148, 163, 184, 0.1); text-align:center; white-space:nowrap;">`;
+                    html += '<div style="display:flex; gap:6px; justify-content:center;">';
+                    
+                    if (hasUpdate) {
+                        html += `<button class="button button-secondary button-compact" style="padding:6px 10px; font-size:11px; min-width:60px; display:inline-flex; align-items:center; gap:4px;" onclick="event.stopPropagation(); openUpdateRecordForm(${rowId})" title="Edit record"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>Edit</button>`;
+                    }
+                    
+                    if (hasDelete) {
+                        html += `<button class="button button-danger button-compact" style="padding:6px 10px; font-size:11px; display:inline-flex; align-items:center; gap:4px;" onclick="event.stopPropagation(); confirmDeleteRecord(${rowId})" title="Delete record"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>`;
+                    }
+                    
+                    html += '</div></td>';
+                }
+                
+                html += '</tr>';
+            });
+            
+            html += `
+                        </tbody>
+                    </table>
+                </div>
+            `;
+            
+            gridEl.innerHTML = html;
+        }
+        
+        function updatePaginationInfo(start, end, total) {
+            const infoEl = document.getElementById('db-pagination-info');
+            const prevBtn = document.getElementById('db-prev-page');
+            const nextBtn = document.getElementById('db-next-page');
+            
+            if (infoEl) {
+                if (total === 0) {
+                    infoEl.textContent = 'No records';
+                } else {
+                    infoEl.textContent = `Showing ${start}-${end} of ${total} records`;
+                }
+            }
+            
+            if (prevBtn) prevBtn.disabled = dbCurrentPage <= 1;
+            if (nextBtn) nextBtn.disabled = end >= total;
+        }
+        
+        window.loadDatabasePage = function(direction) {
+            if (direction === 'next') {
+                dbCurrentPage++;
+            } else if (direction === 'prev' && dbCurrentPage > 1) {
+                dbCurrentPage--;
+            }
+            loadDatabaseData();
         };
+        
+        window.sortByColumn = function(column) {
+            if (dbSortColumn === column) {
+                dbSortDirection = dbSortDirection === 'asc' ? 'desc' : 'asc';
+            } else {
+                dbSortColumn = column;
+                dbSortDirection = 'asc';
+            }
+            loadDatabaseData();
+        };
+        
+        window.toggleSelectAll = function(checked) {
+            const checkboxes = document.querySelectorAll('.row-select');
+            checkboxes.forEach(cb => {
+                const rowIdx = parseInt(cb.getAttribute('data-row-idx'), 10);
+                cb.checked = checked;
+                toggleRowSelect(rowIdx, checked);
+            });
+        };
+        
+        window.toggleRowSelect = function(rowIdx, checked) {
+            if (checked) {
+                dbSelectedRows.add(rowIdx);
+            } else {
+                dbSelectedRows.delete(rowIdx);
+            }
+            
+            const selectedCountEl = document.getElementById('db-selected-count');
+            const selectedCountText = document.getElementById('db-selected-count-text');
+            
+            if (selectedCountEl && selectedCountText) {
+                if (dbSelectedRows.size > 0) {
+                    selectedCountEl.style.display = 'block';
+                    selectedCountText.textContent = `${dbSelectedRows.size} selected`;
+                } else {
+                    selectedCountEl.style.display = 'none';
+                }
+            }
+        };
+        
+        window.refreshDatabaseView = function() {
+            if (dbCurrentTable) {
+                loadDatabaseData();
+                showNotification('Database view refreshed', 'success');
+            } else {
+                loadDatabaseTables();
+                showNotification('Table list refreshed', 'success');
+            }
+        };
+        
+        window.exportTableData = function() {
+            if (!dbCurrentTable) {
+                showNotification('No table selected', 'warning');
+                return;
+            }
+            
+            if (!hasPermission('action_db_read')) {
+                showNotification('You do not have permission to export data. Requires action_db_read permission.', 'error');
+                return;
+            }
+            
+            const modal = document.createElement('div');
+            modal.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);display:flex;align-items:center;justify-content:center;z-index:10000;';
+            
+            const modalContent = document.createElement('div');
+            modalContent.style.cssText = 'background:linear-gradient(135deg, rgba(15, 23, 42, 0.98), rgba(30, 41, 59, 0.98));border-radius:12px;padding:32px;max-width:500px;width:90%;border:1px solid rgba(168, 85, 247, 0.3);';
+            
+            modalContent.innerHTML = `
+                <div style="margin-bottom:24px;">
+                    <h3 style="font-size:20px;font-weight:700;color:#a855f7;margin-bottom:8px;">Export Table Data</h3>
+                    <p style="font-size:13px;color:#94a3b8;">Export <strong>${dbCurrentTable}</strong> to your preferred format</p>
+                </div>
+                <div style="display:flex;flex-direction:column;gap:12px;margin-bottom:24px;">
+                    <button class="export-format-btn" data-format="csv" style="padding:16px;background:rgba(168, 85, 247, 0.1);border:2px solid rgba(168, 85, 247, 0.3);border-radius:8px;color:#e2e8f0;font-size:14px;font-weight:600;cursor:pointer;transition:all 0.2s;text-align:left;">
+                        <div style="display:flex;align-items:center;gap:12px;">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><line x1="10" y1="9" x2="8" y2="9"/></svg>
+                            <div>
+                                <div style="font-size:16px;margin-bottom:4px;">CSV Format</div>
+                                <div style="font-size:11px;color:#94a3b8;">Comma-separated values (Excel compatible)</div>
+                            </div>
+                        </div>
+                    </button>
+                    <button class="export-format-btn" data-format="json" style="padding:16px;background:rgba(168, 85, 247, 0.1);border:2px solid rgba(168, 85, 247, 0.3);border-radius:8px;color:#e2e8f0;font-size:14px;font-weight:600;cursor:pointer;transition:all 0.2s;text-align:left;">
+                        <div style="display:flex;align-items:center;gap:12px;">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+                            <div>
+                                <div style="font-size:16px;margin-bottom:4px;">JSON Format</div>
+                                <div style="font-size:11px;color:#94a3b8;">JavaScript Object Notation (Developer friendly)</div>
+                            </div>
+                        </div>
+                    </button>
+                </div>
+                <div style="display:flex;gap:12px;justify-content:flex-end;">
+                    <button class="export-cancel-btn" style="padding:10px 20px;background:rgba(148, 163, 184, 0.1);border:1px solid rgba(148, 163, 184, 0.3);border-radius:8px;color:#e2e8f0;font-size:14px;font-weight:600;cursor:pointer;">Cancel</button>
+                </div>
+            `;
+            
+            modal.appendChild(modalContent);
+            document.body.appendChild(modal);
+            
+            const formatBtns = modalContent.querySelectorAll('.export-format-btn');
+            formatBtns.forEach(btn => {
+                btn.addEventListener('mouseenter', () => {
+                    btn.style.background = 'rgba(168, 85, 247, 0.2)';
+                    btn.style.borderColor = 'rgba(168, 85, 247, 0.5)';
+                });
+                btn.addEventListener('mouseleave', () => {
+                    btn.style.background = 'rgba(168, 85, 247, 0.1)';
+                    btn.style.borderColor = 'rgba(168, 85, 247, 0.3)';
+                });
+                btn.addEventListener('click', () => {
+                    const format = btn.getAttribute('data-format');
+                    document.body.removeChild(modal);
+                    performExport(format);
+                });
+            });
+            
+            modalContent.querySelector('.export-cancel-btn').addEventListener('click', () => {
+                document.body.removeChild(modal);
+            });
+            
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) {
+                    document.body.removeChild(modal);
+                }
+            });
+        };
+        
+        function performExport(format) {
+            showNotification(`Exporting ${dbCurrentTable} as ${format.toUpperCase()}...`, 'info');
+            
+            fetch(`owner_db.php?action=rows&table=${dbCurrentTable}&limit=10000&offset=0`, { 
+                credentials: 'include' 
+            })
+            .then(async r => {
+                if (!r.ok) {
+                    throw new Error('Failed to fetch data for export');
+                }
+                return r.json();
+            })
+            .then(data => {
+                const rows = data.rows || [];
+                if (!rows.length) {
+                    showNotification('No data to export', 'warning');
+                    return;
+                }
+                
+                let content = '';
+                let filename = '';
+                let mimeType = '';
+                
+                if (format === 'csv') {
+                    const headers = Object.keys(rows[0]);
+                    const csvRows = [headers.join(',')];
+                    
+                    rows.forEach(row => {
+                        const values = headers.map(header => {
+                            const val = row[header];
+                            if (val === null || val === undefined) return '';
+                            const str = String(val).replace(/"/g, '""');
+                            // Use \\n to prevent Python from creating a literal newline in the JS file
+                            return str.includes(',') || str.includes('"') || str.includes('\\n') ? `"${str}"` : str;
+                        });
+                        csvRows.push(values.join(','));
+                    });
+                    
+                    // Use \\n here as well
+                    content = csvRows.join('\\n');
+                    filename = `${dbCurrentTable}_${new Date().toISOString().slice(0,10)}.csv`;
+                    mimeType = 'text/csv;charset=utf-8;';
+                    
+                } else if (format === 'json') {
+                    content = JSON.stringify(rows, null, 2);
+                    filename = `${dbCurrentTable}_${new Date().toISOString().slice(0,10)}.json`;
+                    mimeType = 'application/json;charset=utf-8;';
+                }
+                
+                const blob = new Blob([content], { type: mimeType });
+                const url = window.URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = filename;
+                link.style.display = 'none';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                window.URL.revokeObjectURL(url);
+                
+                showNotification(`Exported ${rows.length} records to ${filename}`, 'success');
+            })
+            .catch(err => {
+                console.error('Export error:', err);
+                showNotification('Failed to export data', 'error');
+            });
+        }
+        
+        window.openCreateRecordForm = function() {
+            if (!hasPermission('action_db_create')) {
+                showNotification('You do not have permission to create database records. Requires action_db_create permission.', 'error');
+                return;
+            }
+            
+            if (!dbCurrentTable || !dbTableColumns.length) {
+                showNotification('No table selected or columns not loaded', 'warning');
+                return;
+            }
+            
+            showCreateRecordModal(dbCurrentTable, dbTableColumns);
+        };
+        
+        window.openUpdateRecordForm = function(rowData) {
+            if (!hasPermission('action_db_update')) {
+                showNotification('You do not have permission to update database records. Requires action_db_update permission.', 'error');
+                return;
+            }
+            
+            if (!dbCurrentTable || !dbTableColumns.length) {
+                showNotification('No table selected or columns not loaded', 'warning');
+                return;
+            }
+            
+            showUpdateRecordModal(dbCurrentTable, dbTableColumns, rowData);
+        };
+        
+        window.confirmDeleteRecord = function(rowData) {
+            if (!hasPermission('action_db_delete')) {
+                showNotification('You do not have permission to delete database records. Requires action_db_delete permission.', 'error');
+                return;
+            }
+            
+            const keys = Object.keys(rowData);
+            const previewData = keys.slice(0, 3).map(k => `${k}: ${rowData[k]}`).join(', ');
+            const preview = keys.length > 3 ? previewData + '...' : previewData;
+            
+            if (!confirm(`⚠️ DELETE RECORD\n\nTable: ${dbCurrentTable}\nRecord: ${preview}\n\nThis action cannot be undone. Are you sure?`)) {
+                return;
+            }
+            
+            deleteRecord(rowData);
+        };
+        
+        function deleteRecord(rowData) {
+            fetch('owner_db.php', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify({ action: 'delete', table: dbCurrentTable, where: rowData })
+            })
+            .then(async r => {
+                let payload = null;
+                try {
+                    payload = await r.json();
+                } catch (_) {}
+                if (!r.ok) {
+                    const msg = interpretHttpError(r.status, payload, 'database');
+                    throw new Error(msg);
+                }
+                return payload;
+            })
+            .then(result => {
+                if (result.success) {
+                    showNotification(`Record deleted successfully (${result.affected_rows} row affected)`, 'success');
+                    loadDatabaseData();
+                } else {
+                    showNotification(result.error || 'Failed to delete record', 'error');
+                }
+            })
+            .catch(err => {
+                console.error('Delete record error:', err);
+                showNotification(err.message || 'Failed to delete record', 'error');
+            });
+        }
+        
+        window.openRecordDetailModal = function(rowData) {
+            const modalHtml = `
+                <div id="db-detail-modal" style="
+                    position: fixed;
+                    top: 0;
+                    left: 0;
+                    width: 100%;
+                    height: 100%;
+                    background: rgba(0, 0, 0, 0.8);
+                    backdrop-filter: blur(4px);
+                    z-index: 10000;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    padding: 20px;
+                " onclick="if(event.target === this) closeDbDetailModal()">
+                    <div style="
+                        background: linear-gradient(135deg, rgba(15, 23, 42, 0.98), rgba(30, 41, 59, 0.98));
+                        border: 1px solid rgba(148, 163, 184, 0.2);
+                        border-radius: 16px;
+                        padding: 24px;
+                        max-width: 700px;
+                        width: 100%;
+                        max-height: 80vh;
+                        overflow-y: auto;
+                        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+                    ">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                            <h3 style="font-size: 18px; font-weight: 600; color: #a855f7; margin: 0;">
+                                Record Details
+                            </h3>
+                            <button onclick="closeDbDetailModal()" style="
+                                background: none;
+                                border: none;
+                                color: #94a3b8;
+                                font-size: 24px;
+                                cursor: pointer;
+                                padding: 0;
+                                width: 30px;
+                                height: 30px;
+                                display: flex;
+                                align-items: center;
+                                justify-content: center;
+                            ">×</button>
+                        </div>
+                        <div style="display: grid; gap: 16px;">
+                            ${Object.keys(rowData).map(key => {
+                                const value = rowData[key];
+                                const colInfo = dbTableColumns.find(c => c.name === key);
+                                const isPk = colInfo && colInfo.pk === 1;
+                                
+                                let displayValue = '';
+                                if (value === null || value === undefined) {
+                                    displayValue = '<span style="color:#64748b;font-style:italic;">NULL</span>';
+                                } else if (typeof value === 'boolean') {
+                                    displayValue = value ? '<span style="color:#10b981;">✓ TRUE</span>' : '<span style="color:#ef4444;">✗ FALSE</span>';
+                                } else if (typeof value === 'number') {
+                                    displayValue = `<span style="color:#60a5fa;">${value}</span>`;
+                                } else {
+                                    displayValue = String(value).replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                                }
+                                
+                                return `
+                                    <div style="background: rgba(15, 23, 42, 0.6); padding: 16px; border-radius: 8px; border: 1px solid rgba(148, 163, 184, 0.2);">
+                                        <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 8px;">
+                                            <div style="font-size: 13px; font-weight: 600; color: #e2e8f0;">
+                                                ${key}
+                                            </div>
+                                            <div style="display: flex; gap: 6px; align-items: center;">
+                                                ${isPk ? '<span style="font-size:11px;color:#facc15;">🔑 PK</span>' : ''}
+                                                ${colInfo ? `<span style="font-size:11px;color:#94a3b8;">${colInfo.type}</span>` : ''}
+                                            </div>
+                                        </div>
+                                        <div style="font-size: 14px; color: #cbd5e1; word-break: break-word;">
+                                            ${displayValue}
+                                        </div>
+                                    </div>
+                                `;
+                            }).join('')}
+                        </div>
+                        <div style="display: flex; gap: 12px; margin-top: 24px;">
+                            ${hasPermission('action_db_update') ? `
+                            <button class="button button-primary" style="flex: 1;" onclick="closeDbDetailModal(); openUpdateRecordForm(${JSON.stringify(rowData).replace(/"/g, '&quot;')})">
+                                Edit Record
+                            </button>
+                            ` : ''}
+                            <button class="button button-secondary" onclick="closeDbDetailModal()">
+                                Close
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            document.body.insertAdjacentHTML('beforeend', modalHtml);
+        };
+        
+        window.closeDbDetailModal = function() {
+            const modal = document.getElementById('db-detail-modal');
+            if (modal) modal.remove();
+        };
+        
+        window.showCreateRecordModal = function(tableName, columns) {
+            if (!hasPermission('action_db_create')) {
+                showNotification('You do not have permission to create database records. Requires action_db_create permission.', 'error');
+                return;
+            }
+            
+            let fieldsHtml = '';
+            columns.forEach(col => {
+                if (col.pk === 1 && col.type.toUpperCase().includes('INTEGER')) {
+                    return;
+                }
+                const required = col.notnull === 1 ? 'required' : '';
+                fieldsHtml += `
+                    <div style="margin-bottom: 16px;">
+                        <label style="display: block; font-size: 13px; font-weight: 600; color: #e2e8f0; margin-bottom: 6px;">
+                            ${col.name} ${col.notnull === 1 ? '<span style="color: #ef4444;">*</span>' : ''}
+                            <span style="font-size: 11px; font-weight: 400; color: #94a3b8;">(${col.type})</span>
+                        </label>
+                        <input type="text" id="create-field-${col.name}" ${required} 
+                            style="width: 100%; padding: 10px; background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(148, 163, 184, 0.3); border-radius: 8px; color: #e2e8f0; font-size: 13px;"
+                            placeholder="${col.dflt_value ? 'Default: ' + col.dflt_value : 'Enter value...'}">
+                    </div>
+                `;
+            });
+            
+            const modalHtml = `
+                <div id="db-crud-modal" style="
+                    position: fixed;
+                    top: 0;
+                    left: 0;
+                    width: 100%;
+                    height: 100%;
+                    background: rgba(0, 0, 0, 0.8);
+                    backdrop-filter: blur(4px);
+                    z-index: 10000;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    padding: 20px;
+                " onclick="if(event.target === this) closeDbCrudModal()">
+                    <div style="
+                        background: linear-gradient(135deg, rgba(15, 23, 42, 0.98), rgba(30, 41, 59, 0.98));
+                        border: 1px solid rgba(148, 163, 184, 0.2);
+                        border-radius: 16px;
+                        padding: 24px;
+                        max-width: 600px;
+                        width: 100%;
+                        max-height: 80vh;
+                        overflow-y: auto;
+                        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+                    ">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                            <h3 style="font-size: 18px; font-weight: 600; color: #a855f7; margin: 0;">
+                                Create New Record in ${tableName}
+                            </h3>
+                            <button onclick="closeDbCrudModal()" style="
+                                background: none;
+                                border: none;
+                                color: #94a3b8;
+                                font-size: 24px;
+                                cursor: pointer;
+                                padding: 0;
+                                width: 30px;
+                                height: 30px;
+                                display: flex;
+                                align-items: center;
+                                justify-content: center;
+                            ">×</button>
+                        </div>
+                        <form id="create-record-form" onsubmit="submitCreateRecord(event, '${tableName}')">
+                            ${fieldsHtml}
+                            <div style="display: flex; gap: 12px; margin-top: 24px;">
+                                <button type="submit" class="button button-primary" style="flex: 1;">
+                                    Create Record
+                                </button>
+                                <button type="button" class="button button-secondary" onclick="closeDbCrudModal()">
+                                    Cancel
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            `;
+            
+            document.body.insertAdjacentHTML('beforeend', modalHtml);
+        };
+        
+        window.showUpdateRecordModal = function(tableName, columns, rowData) {
+            if (!hasPermission('action_db_update')) {
+                showNotification('You do not have permission to update database records. Requires action_db_update permission.', 'error');
+                return;
+            }
+            
+            let fieldsHtml = '';
+            let pkFields = [];
+            
+            columns.forEach(col => {
+                const value = rowData[col.name] !== undefined ? rowData[col.name] : '';
+                const isPk = col.pk === 1;
+                
+                if (isPk) {
+                    pkFields.push(col.name);
+                }
+                
+                fieldsHtml += `
+                    <div style="margin-bottom: 16px;">
+                        <label style="display: block; font-size: 13px; font-weight: 600; color: #e2e8f0; margin-bottom: 6px;">
+                            ${col.name} ${isPk ? '<span style="color: #facc15;">🔑 Primary Key</span>' : ''}
+                            <span style="font-size: 11px; font-weight: 400; color: #94a3b8;">(${col.type})</span>
+                        </label>
+                        <input type="text" id="update-field-${col.name}" value="${value}"
+                            ${isPk ? 'readonly' : ''}
+                            style="width: 100%; padding: 10px; background: ${isPk ? 'rgba(15, 23, 42, 0.9)' : 'rgba(15, 23, 42, 0.6)'}; border: 1px solid rgba(148, 163, 184, 0.3); border-radius: 8px; color: #e2e8f0; font-size: 13px;"
+                            placeholder="Enter new value...">
+                    </div>
+                `;
+            });
+            
+            const modalHtml = `
+                <div id="db-crud-modal" style="
+                    position: fixed;
+                    top: 0;
+                    left: 0;
+                    width: 100%;
+                    height: 100%;
+                    background: rgba(0, 0, 0, 0.8);
+                    backdrop-filter: blur(4px);
+                    z-index: 10000;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    padding: 20px;
+                " onclick="if(event.target === this) closeDbCrudModal()">
+                    <div style="
+                        background: linear-gradient(135deg, rgba(15, 23, 42, 0.98), rgba(30, 41, 59, 0.98));
+                        border: 1px solid rgba(148, 163, 184, 0.2);
+                        border-radius: 16px;
+                        padding: 24px;
+                        max-width: 600px;
+                        width: 100%;
+                        max-height: 80vh;
+                        overflow-y: auto;
+                        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+                    ">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                            <h3 style="font-size: 18px; font-weight: 600; color: #a855f7; margin: 0;">
+                                Update Record in ${tableName}
+                            </h3>
+                            <button onclick="closeDbCrudModal()" style="
+                                background: none;
+                                border: none;
+                                color: #94a3b8;
+                                font-size: 24px;
+                                cursor: pointer;
+                                padding: 0;
+                                width: 30px;
+                                height: 30px;
+                                display: flex;
+                                align-items: center;
+                                justify-content: center;
+                            ">×</button>
+                        </div>
+                        <form id="update-record-form" onsubmit="submitUpdateRecord(event, '${tableName}', ${JSON.stringify(pkFields).replace(/"/g, '&quot;')})">
+                            ${fieldsHtml}
+                            <div style="display: flex; gap: 12px; margin-top: 24px;">
+                                <button type="submit" class="button button-primary" style="flex: 1;">
+                                    Update Record
+                                </button>
+                                <button type="button" class="button button-secondary" onclick="closeDbCrudModal()">
+                                    Cancel
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            `;
+            
+            document.body.insertAdjacentHTML('beforeend', modalHtml);
+        };
+        
+        window.closeDbCrudModal = function() {
+            const modal = document.getElementById('db-crud-modal');
+            if (modal) {
+                modal.remove();
+            }
+        };
+        
+        window.submitCreateRecord = function(event, tableName) {
+            event.preventDefault();
+            
+            if (!hasPermission('action_db_create')) {
+                showNotification('You do not have permission to create database records. Requires action_db_create permission.', 'error');
+                return;
+            }
+            
+            const form = event.target;
+            const data = {};
+            
+            Array.from(form.elements).forEach(element => {
+                if (element.id && element.id.startsWith('create-field-')) {
+                    const fieldName = element.id.replace('create-field-', '');
+                    const value = element.value.trim();
+                    if (value !== '') {
+                        data[fieldName] = value;
+                    }
+                }
+            });
+            
+            fetch('owner_db.php', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify({ action: 'create', table: tableName, data: data })
+            })
+            .then(async r => {
+                let payload = null;
+                try {
+                    payload = await r.json();
+                } catch (_) {}
+                if (!r.ok) {
+                    const msg = interpretHttpError(r.status, payload, 'database');
+                    throw new Error(msg);
+                }
+                return payload;
+            })
+            .then(result => {
+                if (result.success) {
+                    showNotification('Record created successfully!', 'success');
+                    closeDbCrudModal();
+                    loadDatabaseData();
+                } else {
+                    showNotification(result.error || 'Failed to create record', 'error');
+                }
+            })
+            .catch(err => {
+                console.error('Create record error:', err);
+                showNotification(err.message || 'Failed to create record', 'error');
+            });
+        };
+        
+        window.submitUpdateRecord = function(event, tableName, pkFields) {
+            event.preventDefault();
+            
+            if (!hasPermission('action_db_update')) {
+                showNotification('You do not have permission to update database records. Requires action_db_update permission.', 'error');
+                return;
+            }
+            
+            const form = event.target;
+            const data = {};
+            const where = {};
+            
+            Array.from(form.elements).forEach(element => {
+                if (element.id && element.id.startsWith('update-field-')) {
+                    const fieldName = element.id.replace('update-field-', '');
+                    const value = element.value.trim();
+                    
+                    if (pkFields.includes(fieldName)) {
+                        where[fieldName] = value;
+                    } else if (value !== '') {
+                        data[fieldName] = value;
+                    }
+                }
+            });
+            
+            if (Object.keys(where).length === 0) {
+                showNotification('Cannot update: no primary key found', 'error');
+                return;
+            }
+            
+            if (Object.keys(data).length === 0) {
+                showNotification('No fields to update', 'warning');
+                return;
+            }
+            
+            fetch('owner_db.php', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify({ action: 'update', table: tableName, data: data, where: where })
+            })
+            .then(async r => {
+                let payload = null;
+                try {
+                    payload = await r.json();
+                } catch (_) {}
+                if (!r.ok) {
+                    const msg = interpretHttpError(r.status, payload, 'database');
+                    throw new Error(msg);
+                }
+                return payload;
+            })
+            .then(result => {
+                if (result.success) {
+                    showNotification(`Record updated successfully! (${result.affected_rows} row(s) affected)`, 'success');
+                    closeDbCrudModal();
+                    loadDatabaseData();
+                } else {
+                    showNotification(result.error || 'Failed to update record', 'error');
+                }
+            })
+            .catch(err => {
+                console.error('Update record error:', err);
+                showNotification(err.message || 'Failed to update record', 'error');
+            });
+        };
+        
 
         function renderCurrentUserPill() {
             try {
@@ -12086,6 +19054,8 @@ if (typeof window !== 'undefined') {
                 currentData = data;
                 currentGuilds = data.bot?.guilds_detail || [];
                 
+                updateDebugLoggingButtons();
+                
                 // Extract platform info
                 if (data.system && data.system.platform) {
                     platformOS = data.system.platform;
@@ -12355,8 +19325,9 @@ if (typeof window !== 'undefined') {
             console.log('pageTickets.length:', pageTickets.length);
             console.log('pageTickets:', pageTickets);
 
-            const hasViewTickets = typeof LM_PERMS !== 'undefined' && (LM_PERMS.view_tickets || LM_PERMS.control_tickets);
-            const hasDeleteTickets = typeof LM_PERMS !== 'undefined' && (LM_PERMS.action_delete_ticket || LM_PERMS.control_tickets);
+            const hasViewTickets = typeof LM_PERMS !== 'undefined' && (LM_PERMS.action_view_ticket || LM_PERMS.view_tickets);
+            const hasDownloadTickets = typeof LM_PERMS !== 'undefined' && (LM_PERMS.action_download_ticket || LM_PERMS.view_tickets);
+            const hasDeleteTickets = typeof LM_PERMS !== 'undefined' && (LM_PERMS.action_delete_ticket);
 
             pageTickets.forEach(ticket => {
                 const row = document.createElement('tr');
@@ -12378,9 +19349,9 @@ if (typeof window !== 'undefined') {
                     <td style="padding:12px 16px;color:#94a3b8;font-size:13px;">${closedDate}</td>
                     <td style="padding:12px 16px;" onclick="event.stopPropagation();">
                         <div style="display:flex;gap:8px;">
-                            ${hasViewTickets ? `<button class="button button-primary button-compact" onclick="openTicketTranscript('${ticket.ticket_id}', '${ticket.guild_id}')" style="padding:6px 12px;font-size:12px;">Open</button>` : ''}
-                            ${hasViewTickets ? `<button class="button button-secondary button-compact" onclick="downloadTicketTranscript('${ticket.ticket_id}', '${ticket.guild_id}', ${ticket.ticket_number})" style="padding:6px 12px;font-size:12px;">Download</button>` : ''}
-                            ${hasDeleteTickets ? `<button class="button button-danger button-compact" onclick="deleteTicketTranscript('${ticket.ticket_id}', '${ticket.guild_id}')" style="padding:6px 12px;font-size:12px;background:rgba(239,68,68,0.2);color:#ef4444;">Delete</button>` : ''}
+                            ${hasViewTickets ? `<button class="button button-primary button-compact ticket-open-btn" onclick="openTicketTranscript('${ticket.ticket_id}', '${ticket.guild_id}')" style="padding:6px 12px;font-size:12px;">Open</button>` : ''}
+                            ${hasDownloadTickets ? `<button class="button button-secondary button-compact ticket-download-btn" onclick="downloadTicketTranscript('${ticket.ticket_id}', '${ticket.guild_id}', ${ticket.ticket_number})" style="padding:6px 12px;font-size:12px;">Download</button>` : ''}
+                            ${hasDeleteTickets ? `<button class="button button-danger button-compact ticket-delete-btn" onclick="deleteTicketTranscript('${ticket.ticket_id}', '${ticket.guild_id}')" style="padding:6px 12px;font-size:12px;background:rgba(239,68,68,0.2);color:#ef4444;">Delete</button>` : ''}
                         </div>
                 `;
 
@@ -12600,6 +19571,8 @@ if (typeof window !== 'undefined') {
             }
         }
         
+        
+
 </script>
 </body>
 </html>'''.replace('{{TOKEN}}', token).replace('{{PREFIX}}', self._get_default_prefix())
@@ -13375,6 +20348,14 @@ function lm_ensure_schema() {
     } catch (Throwable $e) {
         // Ignore if column already exists
     }
+    
+    // CRITICAL: Delete any OWNER role from dashboard_roles table
+    // OWNER should only exist as code-defined tier, never in database
+    try {
+        $pdo->exec("DELETE FROM dashboard_roles WHERE UPPER(name) = 'OWNER'");
+    } catch (Throwable $e) {
+        // Ignore if table doesn't exist yet or other errors
+    }
 
     // Seed single config row if missing
     $stmt = $pdo->query("SELECT COUNT(*) AS c FROM dashboard_config");
@@ -13902,12 +20883,11 @@ function lm_default_permissions_for_tier(string $tier): array {
                 'view_security' => true,        // Security & Logs tab
                 'view_roles' => true,           // Roles & Access tab
                 'view_bot_invite' => true,      // Bot Invite Helper tab
-                'view_logs' => true,            // Logs (in security tab)
                 
                 // ACTION PERMISSIONS - Dashboard Actions (5)
                 'action_clear_cache' => true,
                 'action_toggle_logging' => true,
-                'action_toggle_debug' => true,
+                'action_toggle_debug_packages' => true,
                 'action_backup_dashboard' => true,
                 'action_backup_bot' => true,
                 
@@ -13970,11 +20950,21 @@ function lm_default_permissions_for_tier(string $tier): array {
                 'action_delete_role' => true,
                 'action_create_role' => true,
                 
-                // ACTION PERMISSIONS - Log Actions (1)
+                // ACTION PERMISSIONS - User Management Actions (3)
+                'action_add_user' => true,
+                'action_remove_user' => true,
+                'action_change_user_role' => true,
+                
+                // ACTION PERMISSIONS - Log Actions (2)
+                'action_view_logs' => true,
                 'action_export_logs' => true,
                 
-                // ACTION PERMISSIONS - Database Actions (1)
+                // ACTION PERMISSIONS - Database Actions (5)
                 'action_execute_query' => true,
+                'action_db_create' => true,
+                'action_db_read' => true,
+                'action_db_update' => true,
+                'action_db_delete' => true,
             ];
 
         case 'CUSTOM':
@@ -13998,12 +20988,11 @@ function lm_default_permissions_for_tier(string $tier): array {
                 'view_security' => false,       // Security & Logs - SENSITIVE
                 'view_roles' => false,          // Roles & Access - SENSITIVE
                 'view_bot_invite' => true,      // Bot Invite Helper tab
-                'view_logs' => false,           // Logs - SENSITIVE
                 
                 // ALL ACTION PERMISSIONS - FALSE by default (customize per role)
                 'action_clear_cache' => false,
                 'action_toggle_logging' => false,
-                'action_toggle_debug' => false,
+                'action_toggle_debug_packages' => false,
                 'action_backup_dashboard' => false,
                 'action_backup_bot' => false,
                 'action_reload_extension' => false,
@@ -14045,8 +21034,16 @@ function lm_default_permissions_for_tier(string $tier): array {
                 'action_save_role' => false,
                 'action_delete_role' => false,
                 'action_create_role' => false,
+                'action_add_user' => false,
+                'action_remove_user' => false,
+                'action_change_user_role' => false,
+                'action_view_logs' => false,
                 'action_export_logs' => false,
                 'action_execute_query' => false,
+                'action_db_create' => false,
+                'action_db_read' => false,
+                'action_db_update' => false,
+                'action_db_delete' => false,
             ];
     }
 }
@@ -14057,11 +21054,29 @@ function lm_default_permissions_for_tier(string $tier): array {
  */
 function lm_role_permissions(string $roleName, string $tier): array {
     $perms = lm_default_permissions_for_tier($tier);
-    try {
-        $upper = strtoupper($roleName);
-        if (in_array($upper, ['OWNER', 'CUSTOM', 'CUSTOM'], true)) {
-            return $perms;
+    
+    // CRITICAL: For OWNER role, ALWAYS return tier defaults, never check database
+    // This ensures OWNER always has ALL permissions including new ones
+    $upper = strtoupper($roleName);
+    if ($upper === 'OWNER') {
+        // AUTOMATIC FIX: Delete any OWNER entry from database right now
+        // This runs every time OWNER logs in, ensuring the fix happens automatically
+        try {
+            $pdo = lm_db();
+            $pdo->exec("DELETE FROM dashboard_roles WHERE UPPER(name) = 'OWNER'");
+        } catch (Throwable $e) {
+            // Ignore errors, permissions will still work from code
         }
+        return $perms;
+    }
+    
+    // For CUSTOM base roles, just return tier defaults
+    if ($upper === 'CUSTOM') {
+        return $perms;
+    }
+    
+    // For custom role names (not OWNER or CUSTOM), merge database permissions
+    try {
         $pdo = lm_db();
         $stmt = $pdo->prepare('SELECT permissions_json FROM dashboard_roles WHERE UPPER(name) = UPPER(:name) LIMIT 1');
         $stmt->execute([':name' => $roleName]);
@@ -14075,7 +21090,7 @@ function lm_role_permissions(string $roleName, string $tier): array {
             }
         }
     } catch (Throwable $e) {
-        // Ignore
+        // Ignore DB errors
     }
     return $perms;
 }
@@ -14826,168 +21841,488 @@ if (isset($_GET['action']) && $_GET['action'] === 'start_oauth') {
     <title>Live Monitor – Login</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
-        body {
+        @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap');
+        
+        * {
             margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
             min-height: 100vh;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-            background: radial-gradient(circle at top, #0f172a 0, #020617 55%, #000 100%);
+            font-family: 'Space Grotesk', system-ui, -apple-system, sans-serif;
+            background: #020617;
             color: #e5e7eb;
-        }
-        .login-shell {
-            width: 100%;
-            max-width: 880px;
-            margin: 16px;
-            border-radius: 18px;
-            border: 1px solid rgba(148, 163, 184, 0.5);
             overflow: hidden;
-            background: radial-gradient(circle at 0 0, rgba(59,130,246,0.25), transparent 55%),
-                        radial-gradient(circle at 100% 100%, rgba(139,92,246,0.2), transparent 55%),
-                        rgba(15,23,42,0.98);
-            box-shadow: 0 24px 80px rgba(0,0,0,0.8);
+            position: relative;
+        }
+        
+        /* Animated Background */
+        .bg-animation {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 0;
+            overflow: hidden;
+        }
+        
+        .bg-gradient {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            background: 
+                radial-gradient(ellipse at 20% 20%, rgba(124, 58, 237, 0.15) 0%, transparent 50%),
+                radial-gradient(ellipse at 80% 80%, rgba(59, 130, 246, 0.15) 0%, transparent 50%),
+                radial-gradient(ellipse at 50% 50%, rgba(168, 85, 247, 0.08) 0%, transparent 70%);
+        }
+        
+        /* Floating Orbs */
+        .orb {
+            position: absolute;
+            border-radius: 50%;
+            filter: blur(80px);
+            animation: float 20s infinite ease-in-out;
+        }
+        
+        .orb-1 {
+            width: 600px;
+            height: 600px;
+            background: rgba(124, 58, 237, 0.3);
+            top: -200px;
+            left: -200px;
+            animation-delay: 0s;
+        }
+        
+        .orb-2 {
+            width: 500px;
+            height: 500px;
+            background: rgba(59, 130, 246, 0.25);
+            bottom: -150px;
+            right: -150px;
+            animation-delay: -5s;
+            animation-duration: 25s;
+        }
+        
+        .orb-3 {
+            width: 400px;
+            height: 400px;
+            background: rgba(236, 72, 153, 0.2);
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            animation-delay: -10s;
+            animation-duration: 30s;
+        }
+        
+        .orb-4 {
+            width: 300px;
+            height: 300px;
+            background: rgba(34, 211, 238, 0.2);
+            top: 20%;
+            right: 10%;
+            animation-delay: -7s;
+            animation-duration: 22s;
+        }
+        
+        @keyframes float {
+            0%, 100% {
+                transform: translate(0, 0) scale(1);
+            }
+            25% {
+                transform: translate(50px, -50px) scale(1.1);
+            }
+            50% {
+                transform: translate(-30px, 30px) scale(0.95);
+            }
+            75% {
+                transform: translate(40px, 40px) scale(1.05);
+            }
+        }
+        
+        /* Grid Pattern */
+        .grid-pattern {
+            position: absolute;
+            width: 200%;
+            height: 200%;
+            top: -50%;
+            left: -50%;
+            background-image: 
+                linear-gradient(rgba(148, 163, 184, 0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(148, 163, 184, 0.03) 1px, transparent 1px);
+            background-size: 60px 60px;
+            animation: gridMove 30s linear infinite;
+        }
+        
+        @keyframes gridMove {
+            0% {
+                transform: translate(0, 0) rotate(0deg);
+            }
+            100% {
+                transform: translate(60px, 60px) rotate(1deg);
+            }
+        }
+        
+        /* Floating Particles */
+        .particles {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+        }
+        
+        .particle {
+            position: absolute;
+            width: 4px;
+            height: 4px;
+            background: rgba(168, 85, 247, 0.6);
+            border-radius: 50%;
+            animation: particleFloat 15s infinite ease-in-out;
+        }
+        
+        .particle:nth-child(1) { left: 10%; top: 20%; animation-delay: 0s; }
+        .particle:nth-child(2) { left: 20%; top: 80%; animation-delay: -2s; }
+        .particle:nth-child(3) { left: 30%; top: 40%; animation-delay: -4s; }
+        .particle:nth-child(4) { left: 40%; top: 60%; animation-delay: -6s; }
+        .particle:nth-child(5) { left: 50%; top: 30%; animation-delay: -8s; }
+        .particle:nth-child(6) { left: 60%; top: 70%; animation-delay: -10s; }
+        .particle:nth-child(7) { left: 70%; top: 50%; animation-delay: -12s; }
+        .particle:nth-child(8) { left: 80%; top: 20%; animation-delay: -14s; }
+        .particle:nth-child(9) { left: 90%; top: 90%; animation-delay: -1s; }
+        .particle:nth-child(10) { left: 15%; top: 55%; animation-delay: -3s; }
+        .particle:nth-child(11) { left: 85%; top: 45%; animation-delay: -5s; }
+        .particle:nth-child(12) { left: 45%; top: 85%; animation-delay: -7s; }
+        
+        @keyframes particleFloat {
+            0%, 100% {
+                transform: translateY(0) scale(1);
+                opacity: 0.6;
+            }
+            50% {
+                transform: translateY(-100px) scale(1.5);
+                opacity: 1;
+            }
+        }
+        
+        /* Scan Lines */
+        .scanlines {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            background: repeating-linear-gradient(
+                0deg,
+                transparent,
+                transparent 2px,
+                rgba(0, 0, 0, 0.03) 2px,
+                rgba(0, 0, 0, 0.03) 4px
+            );
+            pointer-events: none;
+        }
+        
+        /* Login Card */
+        .login-shell {
+            position: relative;
+            z-index: 10;
+            width: 100%;
+            max-width: 920px;
+            margin: 16px;
+            border-radius: 24px;
+            border: 1px solid rgba(148, 163, 184, 0.2);
+            overflow: hidden;
+            background: rgba(15, 23, 42, 0.8);
+            backdrop-filter: blur(20px);
+            box-shadow: 
+                0 0 0 1px rgba(255, 255, 255, 0.05) inset,
+                0 25px 50px -12px rgba(0, 0, 0, 0.5),
+                0 0 100px rgba(124, 58, 237, 0.1);
             display: grid;
             grid-template-columns: minmax(0, 1.3fr) minmax(0, 1.1fr);
+            animation: cardAppear 0.8s ease-out;
         }
+        
+        @keyframes cardAppear {
+            from {
+                opacity: 0;
+                transform: translateY(30px) scale(0.95);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+            }
+        }
+        
         .login-visual {
             position: relative;
-            background: radial-gradient(circle at 0 0, rgba(56,189,248,0.25), transparent 60%),
-                        radial-gradient(circle at 100% 100%, rgba(250,204,21,0.25), transparent 60%);
+            background: 
+                radial-gradient(circle at 0 0, rgba(56, 189, 248, 0.15), transparent 60%),
+                radial-gradient(circle at 100% 100%, rgba(250, 204, 21, 0.15), transparent 60%);
             display: flex;
             align-items: flex-start;
             justify-content: center;
-            padding: 22px;
+            padding: 24px;
         }
+        
         .login-visual-inner {
             width: 100%;
             border-radius: 16px;
             overflow: hidden;
-            border: 1px solid rgba(148, 163, 184, 0.55);
-            background: #020617;
+            border: 1px solid rgba(148, 163, 184, 0.3);
+            background: rgba(2, 6, 23, 0.8);
+            animation: visualSlide 0.8s ease-out 0.2s both;
         }
+        
+        @keyframes visualSlide {
+            from {
+                opacity: 0;
+                transform: translateX(-20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+        
         .login-banner {
             width: 100%;
             height: 160px;
             object-fit: cover;
             display: block;
         }
+        
         .login-visual-footer {
-            padding: 12px 14px 14px;
+            padding: 14px 16px;
             display: flex;
             align-items: center;
             justify-content: space-between;
-            gap: 10px;
+            gap: 12px;
+            border-top: 1px solid rgba(148, 163, 184, 0.1);
         }
+        
         .login-brand {
             display: flex;
             align-items: center;
-            gap: 10px;
+            gap: 12px;
         }
+        
         .login-brand img {
-            width: 32px;
-            height: 32px;
-            border-radius: 8px;
+            width: 36px;
+            height: 36px;
+            border-radius: 10px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
         }
+        
         .login-brand-title {
             font-size: 14px;
             font-weight: 600;
+            background: linear-gradient(135deg, #e5e7eb, #a855f7);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
         }
+        
         .login-brand-subtitle {
             font-size: 11px;
-            color: #9ca3af;
+            color: #94a3b8;
         }
+        
         .login-pill {
-            font-size: 11px;
-            padding: 4px 10px;
+            font-size: 10px;
+            padding: 5px 12px;
             border-radius: 999px;
-            border: 1px solid rgba(56,189,248,0.7);
-            background: rgba(15,23,42,0.9);
-            color: #e5e7eb;
+            border: 1px solid rgba(124, 58, 237, 0.5);
+            background: rgba(124, 58, 237, 0.1);
+            color: #c4b5fd;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
         }
+        
         .login-main {
-            padding: 22px 24px 20px;
+            padding: 28px 28px 24px;
             display: flex;
             flex-direction: column;
-            gap: 16px;
+            gap: 20px;
+            animation: contentFade 0.8s ease-out 0.3s both;
         }
+        
+        @keyframes contentFade {
+            from {
+                opacity: 0;
+                transform: translateX(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+        
         .login-title {
-            font-size: 22px;
+            font-size: 26px;
             font-weight: 700;
+            background: linear-gradient(135deg, #ffffff, #a855f7);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
         }
+        
         .login-subtitle {
             font-size: 13px;
-            color: #9ca3af;
-            margin-top: 4px;
+            color: #94a3b8;
+            margin-top: 6px;
+            line-height: 1.6;
         }
+        
         .login-list {
-            margin: 10px 0 0;
-            padding-left: 18px;
+            margin: 12px 0 0;
+            padding-left: 0;
+            list-style: none;
             font-size: 13px;
-            color: #9ca3af;
+            color: #94a3b8;
         }
+        
+        .login-list li {
+            padding: 8px 0 8px 24px;
+            position: relative;
+            border-left: 2px solid rgba(124, 58, 237, 0.3);
+            margin-left: 8px;
+        }
+        
+        .login-list li::before {
+            content: '';
+            position: absolute;
+            left: -6px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 10px;
+            height: 10px;
+            background: linear-gradient(135deg, #7c3aed, #a855f7);
+            border-radius: 50%;
+        }
+        
+        .login-list li strong {
+            color: #e5e7eb;
+        }
+        
         .login-section-label {
             font-size: 11px;
             text-transform: uppercase;
-            letter-spacing: 0.08em;
-            color: #6b7280;
-            margin-top: 12px;
-            margin-bottom: 4px;
-        }
-        .login-callout {
+            letter-spacing: 0.1em;
+            color: #64748b;
             margin-top: 8px;
-            padding: 8px 10px;
-            border-radius: 10px;
-            border: 1px solid rgba(56,189,248,0.5);
-            background: rgba(15,23,42,0.9);
-            font-size: 12px;
-            color: #e5e7eb;
+            margin-bottom: 6px;
+            font-weight: 600;
         }
+        
+        .login-callout {
+            padding: 12px 14px;
+            border-radius: 12px;
+            border: 1px solid rgba(59, 130, 246, 0.3);
+            background: rgba(59, 130, 246, 0.05);
+            font-size: 12px;
+            color: #cbd5e1;
+            line-height: 1.6;
+        }
+        
+        .login-callout code {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 11px;
+            color: #93c5fd;
+        }
+        
         .login-button-row {
-            margin-top: 14px;
+            margin-top: 8px;
             display: flex;
             align-items: center;
-            gap: 10px;
+            gap: 12px;
             flex-wrap: wrap;
         }
+        
         .btn-discord {
             display: inline-flex;
             align-items: center;
-            gap: 8px;
-            padding: 9px 16px;
-            border-radius: 999px;
+            gap: 10px;
+            padding: 12px 24px;
+            border-radius: 12px;
             border: none;
-            background: #5865F2;
+            background: linear-gradient(135deg, #5865F2, #7c3aed);
             color: #fff;
-            font-size: 13px;
+            font-size: 14px;
             font-weight: 600;
             cursor: pointer;
             text-decoration: none;
-            box-shadow: 0 10px 30px rgba(88,101,242,0.5);
+            box-shadow: 
+                0 4px 15px rgba(88, 101, 242, 0.4),
+                0 0 0 1px rgba(255, 255, 255, 0.1) inset;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
         }
+        
+        .btn-discord::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+            transition: left 0.5s ease;
+        }
+        
         .btn-discord:hover {
-            background: #4f5adf;
+            transform: translateY(-2px);
+            box-shadow: 
+                0 8px 25px rgba(88, 101, 242, 0.5),
+                0 0 0 1px rgba(255, 255, 255, 0.15) inset;
         }
+        
+        .btn-discord:hover::before {
+            left: 100%;
+        }
+        
+        .btn-discord svg {
+            width: 20px;
+            height: 20px;
+        }
+        
         .btn-secondary {
-            border-radius: 999px;
-            border: 1px solid rgba(148, 163, 184, 0.6);
-            background: transparent;
-            color: #e5e7eb;
-            padding: 8px 14px;
+            border-radius: 12px;
+            border: 1px solid rgba(148, 163, 184, 0.3);
+            background: rgba(15, 23, 42, 0.5);
+            color: #94a3b8;
+            padding: 10px 18px;
             font-size: 12px;
+            cursor: not-allowed;
         }
+        
         .login-footer {
             margin-top: auto;
             font-size: 11px;
-            color: #6b7280;
+            color: #475569;
+            padding-top: 12px;
+            border-top: 1px solid rgba(148, 163, 184, 0.1);
         }
+        
         .login-footer a {
-            color: #93c5fd;
+            color: #818cf8;
             text-decoration: none;
+            transition: color 0.2s;
         }
+        
+        .login-footer a:hover {
+            color: #a5b4fc;
+        }
+        
         @media (max-width: 860px) {
             .login-shell {
                 grid-template-columns: minmax(0, 1fr);
+                max-width: 440px;
             }
             .login-visual {
                 display: none;
@@ -14996,57 +22331,82 @@ if (isset($_GET['action']) && $_GET['action'] === 'start_oauth') {
     </style>
 </head>
 <body>
-<div class="login-shell">
-    <div class="login-visual">
-        <div class="login-visual-inner">
-            <img src="assets/banner.png" alt="Zoryx Framework" class="login-banner">
-            <div class="login-visual-footer">
-                <div class="login-brand">
-                    <img src="assets/zoryx-framework.png" alt="Zoryx Icon">
-                    <div>
-                        <div class="login-brand-title">Zoryx Discord Bot Framework</div>
-                        <div class="login-brand-subtitle">Live Monitor Dashboard</div>
+    <div class="bg-animation">
+        <div class="bg-gradient"></div>
+        <div class="grid-pattern"></div>
+        <div class="orb orb-1"></div>
+        <div class="orb orb-2"></div>
+        <div class="orb orb-3"></div>
+        <div class="orb orb-4"></div>
+        <div class="particles">
+            <div class="particle"></div>
+            <div class="particle"></div>
+            <div class="particle"></div>
+            <div class="particle"></div>
+            <div class="particle"></div>
+            <div class="particle"></div>
+            <div class="particle"></div>
+            <div class="particle"></div>
+            <div class="particle"></div>
+            <div class="particle"></div>
+            <div class="particle"></div>
+            <div class="particle"></div>
+        </div>
+        <div class="scanlines"></div>
+    </div>
+    
+    <div class="login-shell">
+        <div class="login-visual">
+            <div class="login-visual-inner">
+                <img src="assets/banner.png" alt="Zoryx Framework" class="login-banner">
+                <div class="login-visual-footer">
+                    <div class="login-brand">
+                        <img src="assets/zoryx-framework.png" alt="Zoryx Icon">
+                        <div>
+                            <div class="login-brand-title">Zoryx Discord Bot Framework</div>
+                            <div class="login-brand-subtitle">Live Monitor Dashboard</div>
+                        </div>
                     </div>
+                    <div class="login-pill">Self-hosted</div>
                 </div>
-                <div class="login-pill">Self-hosted control panel</div>
+            </div>
+        </div>
+        <div class="login-main">
+            <div>
+                <div class="login-title">Login with Discord</div>
+                <div class="login-subtitle">
+                    Authenticate with your Discord account to access the Live Monitor dashboard.
+                </div>
+                <ul class="login-list">
+                    <li><strong>Whitelist-based access</strong>: Only users added to the dashboard can log in.</li>
+                    <li><strong>Role-based permissions</strong>: Your assigned role determines what you can view and control.</li>
+                    <li><strong>First login</strong>: The first person to log in becomes the dashboard owner with full access.</li>
+                </ul>
+            </div>
+
+            <div>
+                <div class="login-section-label">Authentication</div>
+                <div class="login-callout">
+                    This dashboard uses Discord OAuth2 with the <code>identify</code> scope only. Your Discord ID and name are stored
+                    in the local <code>dashboard.sqlite</code> database for access control and audit logging.
+                </div>
+                <div class="login-button-row">
+                    <?php if ($oauthConfigured): ?>
+                        <a href="?action=start_oauth" class="btn-discord">
+                            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028 14.09 14.09 0 0 0 1.226-1.994.076.076 0 0 0-.041-.106 13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z"/></svg>
+                            <span>Login with Discord</span>
+                        </a>
+                    <?php else: ?>
+                        <button class="btn-secondary" disabled>OAuth not configured – run /livemonitor quickstart</button>
+                    <?php endif; ?>
+                </div>
+            </div>
+
+            <div class="login-footer">
+                Zoryx Discord Bot Framework · Live Monitor. Configure OAuth once via the one-time setup URL, then return here to log in.
             </div>
         </div>
     </div>
-    <div class="login-main">
-        <div>
-            <div class="login-title">Login with Discord</div>
-            <div class="login-subtitle">
-                After logging in, access is granted only if your Discord user ID has been added by the bot owner.
-            </div>
-            <ul class="login-list">
-                <li><strong>Bot owner</strong>: claim the dashboard and manage Roles &amp; Access.</li>
-                <li><strong>Helpers</strong>: operate the bot depending on your assigned role.</li>
-                <li><strong>Visitors</strong>: view-only access if the owner enabled it for you.</li>
-            </ul>
-        </div>
-
-        <div>
-            <div class="login-section-label">Authentication</div>
-            <div class="login-callout">
-                This dashboard uses Discord OAuth2 with the <code>identify</code> scope only. Your Discord ID and name are stored
-                in the local <code>dashboard.sqlite</code> database for access control and audit logging.
-            </div>
-            <div class="login-button-row">
-                <?php if ($oauthConfigured): ?>
-                    <a href="?action=start_oauth" class="btn-discord">
-                        <span>Login with Discord</span>
-                    </a>
-                <?php else: ?>
-                    <button class="btn-secondary" disabled>OAuth not configured – run /livemonitor quickstart</button>
-                <?php endif; ?>
-            </div>
-        </div>
-
-        <div class="login-footer">
-            Zoryx Discord Bot Framework · Live Monitor. Configure OAuth once via the one-time setup URL, then return here to log in.
-        </div>
-    </div>
-</div>
 </body>
 </html>
 '''
@@ -15191,7 +22551,577 @@ try {
             $pdo->commit();
             lm_log_audit('LOGIN_DENIED', 'USER', $discordId, []);
             http_response_code(403);
-            echo '<h1>Access denied</h1><p>Your Discord account is not allowed to use this dashboard. Ask the owner to add you.</p>';
+            
+            // Beautiful Access Denied page
+            $safeDisplayName = htmlspecialchars($displayName, ENT_QUOTES, 'UTF-8');
+            $safeAvatarUrl = $avatarUrl ? htmlspecialchars($avatarUrl, ENT_QUOTES, 'UTF-8') : '';
+            $defaultAvatar = 'data:image/svg+xml;base64,' . base64_encode('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect fill="#374151" width="100" height="100"/><text x="50" y="60" font-size="40" text-anchor="middle" fill="#9ca3af">?</text></svg>');
+            $avatarSrc = $safeAvatarUrl ?: $defaultAvatar;
+            
+            echo <<<HTML
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Access Denied – Live Monitor</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap');
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: 'Space Grotesk', system-ui, -apple-system, sans-serif;
+            background: #020617;
+            color: #e5e7eb;
+            overflow: hidden;
+            position: relative;
+        }
+        
+        /* Animated Background - Red/Orange Theme for Denied */
+        .bg-animation {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 0;
+            overflow: hidden;
+        }
+        
+        .bg-gradient {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            background: 
+                radial-gradient(ellipse at 20% 20%, rgba(239, 68, 68, 0.12) 0%, transparent 50%),
+                radial-gradient(ellipse at 80% 80%, rgba(249, 115, 22, 0.12) 0%, transparent 50%),
+                radial-gradient(ellipse at 50% 50%, rgba(220, 38, 38, 0.06) 0%, transparent 70%);
+        }
+        
+        /* Floating Orbs - Warning Colors */
+        .orb {
+            position: absolute;
+            border-radius: 50%;
+            filter: blur(100px);
+            animation: float 20s infinite ease-in-out;
+        }
+        
+        .orb-1 {
+            width: 500px;
+            height: 500px;
+            background: rgba(239, 68, 68, 0.25);
+            top: -150px;
+            left: -150px;
+            animation-delay: 0s;
+        }
+        
+        .orb-2 {
+            width: 400px;
+            height: 400px;
+            background: rgba(249, 115, 22, 0.2);
+            bottom: -100px;
+            right: -100px;
+            animation-delay: -5s;
+            animation-duration: 25s;
+        }
+        
+        .orb-3 {
+            width: 350px;
+            height: 350px;
+            background: rgba(251, 146, 60, 0.15);
+            top: 60%;
+            left: 20%;
+            animation-delay: -10s;
+            animation-duration: 30s;
+        }
+        
+        @keyframes float {
+            0%, 100% {
+                transform: translate(0, 0) scale(1);
+            }
+            25% {
+                transform: translate(40px, -40px) scale(1.1);
+            }
+            50% {
+                transform: translate(-30px, 30px) scale(0.95);
+            }
+            75% {
+                transform: translate(35px, 35px) scale(1.05);
+            }
+        }
+        
+        /* Glitch Grid */
+        .grid-pattern {
+            position: absolute;
+            width: 200%;
+            height: 200%;
+            top: -50%;
+            left: -50%;
+            background-image: 
+                linear-gradient(rgba(239, 68, 68, 0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(239, 68, 68, 0.03) 1px, transparent 1px);
+            background-size: 50px 50px;
+            animation: gridPulse 4s ease-in-out infinite;
+        }
+        
+        @keyframes gridPulse {
+            0%, 100% { opacity: 0.5; }
+            50% { opacity: 1; }
+        }
+        
+        /* Warning Particles */
+        .particles {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+        }
+        
+        .particle {
+            position: absolute;
+            width: 3px;
+            height: 3px;
+            background: rgba(239, 68, 68, 0.5);
+            border-radius: 50%;
+            animation: particleFall 10s infinite linear;
+        }
+        
+        .particle:nth-child(1) { left: 5%; animation-delay: 0s; }
+        .particle:nth-child(2) { left: 15%; animation-delay: -1s; }
+        .particle:nth-child(3) { left: 25%; animation-delay: -2s; }
+        .particle:nth-child(4) { left: 35%; animation-delay: -3s; }
+        .particle:nth-child(5) { left: 45%; animation-delay: -4s; }
+        .particle:nth-child(6) { left: 55%; animation-delay: -5s; }
+        .particle:nth-child(7) { left: 65%; animation-delay: -6s; }
+        .particle:nth-child(8) { left: 75%; animation-delay: -7s; }
+        .particle:nth-child(9) { left: 85%; animation-delay: -8s; }
+        .particle:nth-child(10) { left: 95%; animation-delay: -9s; }
+        
+        @keyframes particleFall {
+            0% {
+                transform: translateY(-100vh) rotate(0deg);
+                opacity: 0;
+            }
+            10% {
+                opacity: 0.8;
+            }
+            90% {
+                opacity: 0.8;
+            }
+            100% {
+                transform: translateY(100vh) rotate(720deg);
+                opacity: 0;
+            }
+        }
+        
+        /* Scan Lines */
+        .scanlines {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            background: repeating-linear-gradient(
+                0deg,
+                transparent,
+                transparent 2px,
+                rgba(0, 0, 0, 0.03) 2px,
+                rgba(0, 0, 0, 0.03) 4px
+            );
+            pointer-events: none;
+            animation: scanlineMove 8s linear infinite;
+        }
+        
+        @keyframes scanlineMove {
+            0% { transform: translateY(0); }
+            100% { transform: translateY(4px); }
+        }
+        
+        /* Main Card */
+        .denied-card {
+            position: relative;
+            z-index: 10;
+            width: 100%;
+            max-width: 480px;
+            margin: 16px;
+            border-radius: 24px;
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            overflow: hidden;
+            background: rgba(15, 23, 42, 0.85);
+            backdrop-filter: blur(20px);
+            box-shadow: 
+                0 0 0 1px rgba(255, 255, 255, 0.03) inset,
+                0 25px 50px -12px rgba(0, 0, 0, 0.5),
+                0 0 80px rgba(239, 68, 68, 0.15);
+            animation: cardShake 0.6s ease-out, cardAppear 0.8s ease-out;
+        }
+        
+        @keyframes cardShake {
+            0%, 100% { transform: translateX(0); }
+            10%, 30%, 50%, 70%, 90% { transform: translateX(-5px); }
+            20%, 40%, 60%, 80% { transform: translateX(5px); }
+        }
+        
+        @keyframes cardAppear {
+            from {
+                opacity: 0;
+                transform: scale(0.9);
+            }
+            to {
+                opacity: 1;
+                transform: scale(1);
+            }
+        }
+        
+        /* Warning Header Strip */
+        .denied-header {
+            background: linear-gradient(135deg, rgba(239, 68, 68, 0.2), rgba(249, 115, 22, 0.15));
+            padding: 20px 24px;
+            border-bottom: 1px solid rgba(239, 68, 68, 0.2);
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+        
+        .denied-icon {
+            width: 56px;
+            height: 56px;
+            background: linear-gradient(135deg, #dc2626, #ea580c);
+            border-radius: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 8px 20px rgba(220, 38, 38, 0.4);
+            animation: iconPulse 2s ease-in-out infinite;
+        }
+        
+        @keyframes iconPulse {
+            0%, 100% { 
+                transform: scale(1);
+                box-shadow: 0 8px 20px rgba(220, 38, 38, 0.4);
+            }
+            50% { 
+                transform: scale(1.05);
+                box-shadow: 0 12px 30px rgba(220, 38, 38, 0.6);
+            }
+        }
+        
+        .denied-icon svg {
+            width: 28px;
+            height: 28px;
+            color: white;
+        }
+        
+        .denied-header-text h1 {
+            font-size: 22px;
+            font-weight: 700;
+            color: #fca5a5;
+            margin-bottom: 4px;
+        }
+        
+        .denied-header-text p {
+            font-size: 13px;
+            color: #94a3b8;
+        }
+        
+        /* User Info Section */
+        .denied-user {
+            padding: 24px;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            background: rgba(0, 0, 0, 0.2);
+            border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+        }
+        
+        .denied-avatar {
+            width: 64px;
+            height: 64px;
+            border-radius: 50%;
+            border: 3px solid rgba(239, 68, 68, 0.5);
+            box-shadow: 0 0 20px rgba(239, 68, 68, 0.3);
+            animation: avatarGlow 3s ease-in-out infinite;
+        }
+        
+        @keyframes avatarGlow {
+            0%, 100% { 
+                box-shadow: 0 0 20px rgba(239, 68, 68, 0.3);
+            }
+            50% { 
+                box-shadow: 0 0 30px rgba(239, 68, 68, 0.5);
+            }
+        }
+        
+        .denied-user-info h2 {
+            font-size: 18px;
+            font-weight: 600;
+            color: #e5e7eb;
+            margin-bottom: 4px;
+        }
+        
+        .denied-user-info p {
+            font-size: 12px;
+            color: #64748b;
+            font-family: 'SF Mono', Monaco, monospace;
+        }
+        
+        /* Message Section */
+        .denied-message {
+            padding: 24px;
+        }
+        
+        .denied-message h3 {
+            font-size: 15px;
+            font-weight: 600;
+            color: #f87171;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .denied-message p {
+            font-size: 14px;
+            color: #94a3b8;
+            line-height: 1.7;
+            margin-bottom: 16px;
+        }
+        
+        .denied-steps {
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 12px;
+            padding: 16px;
+            border: 1px solid rgba(148, 163, 184, 0.1);
+        }
+        
+        .denied-steps h4 {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: #64748b;
+            margin-bottom: 12px;
+            font-weight: 600;
+        }
+        
+        .denied-step {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            padding: 10px 0;
+            border-bottom: 1px solid rgba(148, 163, 184, 0.08);
+        }
+        
+        .denied-step:last-child {
+            border-bottom: none;
+            padding-bottom: 0;
+        }
+        
+        .denied-step-num {
+            width: 24px;
+            height: 24px;
+            background: rgba(59, 130, 246, 0.2);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            font-weight: 600;
+            color: #60a5fa;
+            flex-shrink: 0;
+        }
+        
+        .denied-step-text {
+            font-size: 13px;
+            color: #cbd5e1;
+            line-height: 1.5;
+        }
+        
+        .denied-step-text code {
+            background: rgba(124, 58, 237, 0.2);
+            color: #c4b5fd;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 11px;
+        }
+        
+        /* Footer Actions */
+        .denied-footer {
+            padding: 20px 24px;
+            background: rgba(0, 0, 0, 0.2);
+            border-top: 1px solid rgba(148, 163, 184, 0.1);
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+        
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 12px 20px;
+            border-radius: 12px;
+            font-size: 13px;
+            font-weight: 600;
+            text-decoration: none;
+            transition: all 0.3s ease;
+            cursor: pointer;
+            border: none;
+        }
+        
+        .btn-primary {
+            background: linear-gradient(135deg, #3b82f6, #6366f1);
+            color: white;
+            box-shadow: 0 4px 15px rgba(59, 130, 246, 0.3);
+        }
+        
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(59, 130, 246, 0.4);
+        }
+        
+        .btn-secondary {
+            background: rgba(148, 163, 184, 0.1);
+            color: #94a3b8;
+            border: 1px solid rgba(148, 163, 184, 0.2);
+        }
+        
+        .btn-secondary:hover {
+            background: rgba(148, 163, 184, 0.2);
+            color: #e5e7eb;
+        }
+        
+        .btn svg {
+            width: 16px;
+            height: 16px;
+        }
+        
+        /* Decorative Corner Elements */
+        .corner {
+            position: absolute;
+            width: 60px;
+            height: 60px;
+            border: 2px solid rgba(239, 68, 68, 0.2);
+            pointer-events: none;
+        }
+        
+        .corner-tl { top: 20px; left: 20px; border-right: none; border-bottom: none; border-radius: 12px 0 0 0; }
+        .corner-tr { top: 20px; right: 20px; border-left: none; border-bottom: none; border-radius: 0 12px 0 0; }
+        .corner-bl { bottom: 20px; left: 20px; border-right: none; border-top: none; border-radius: 0 0 0 12px; }
+        .corner-br { bottom: 20px; right: 20px; border-left: none; border-top: none; border-radius: 0 0 12px 0; }
+        
+        @media (max-width: 520px) {
+            .denied-card {
+                margin: 12px;
+                border-radius: 20px;
+            }
+            .denied-header {
+                padding: 16px 20px;
+            }
+            .denied-user, .denied-message, .denied-footer {
+                padding: 20px;
+            }
+            .denied-avatar {
+                width: 52px;
+                height: 52px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="bg-animation">
+        <div class="bg-gradient"></div>
+        <div class="grid-pattern"></div>
+        <div class="orb orb-1"></div>
+        <div class="orb orb-2"></div>
+        <div class="orb orb-3"></div>
+        <div class="particles">
+            <div class="particle"></div>
+            <div class="particle"></div>
+            <div class="particle"></div>
+            <div class="particle"></div>
+            <div class="particle"></div>
+            <div class="particle"></div>
+            <div class="particle"></div>
+            <div class="particle"></div>
+            <div class="particle"></div>
+            <div class="particle"></div>
+        </div>
+        <div class="scanlines"></div>
+        <div class="corner corner-tl"></div>
+        <div class="corner corner-tr"></div>
+        <div class="corner corner-bl"></div>
+        <div class="corner corner-br"></div>
+    </div>
+    
+    <div class="denied-card">
+        <div class="denied-header">
+            <div class="denied-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="10"/>
+                    <line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/>
+                </svg>
+            </div>
+            <div class="denied-header-text">
+                <h1>Access Denied</h1>
+                <p>Your account is not on the whitelist</p>
+            </div>
+        </div>
+        
+        <div class="denied-user">
+            <img src="{$avatarSrc}" alt="Avatar" class="denied-avatar">
+            <div class="denied-user-info">
+                <h2>{$safeDisplayName}</h2>
+                <p>ID: {$discordId}</p>
+            </div>
+        </div>
+        
+        <div class="denied-message">
+            <h3>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+                Why am I seeing this?
+            </h3>
+            <p>
+                Your Discord account has not been added to the dashboard whitelist yet. 
+                Only users on the whitelist can access the Live Monitor dashboard.
+            </p>
+            
+            <div class="denied-steps">
+                <h4>How to get access</h4>
+                <div class="denied-step">
+                    <div class="denied-step-num">1</div>
+                    <div class="denied-step-text">Contact someone with dashboard access and share your Discord ID shown above</div>
+                </div>
+                <div class="denied-step">
+                    <div class="denied-step-num">2</div>
+                    <div class="denied-step-text">Ask them to add you via <code>Roles & Access</code> (requires the <code>Add User</code> permission)</div>
+                </div>
+                <div class="denied-step">
+                    <div class="denied-step-num">3</div>
+                    <div class="denied-step-text">Once added, return here and log in again</div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="denied-footer">
+            <a href="login.php" class="btn btn-primary">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
+                Try Again
+            </a>
+            <button onclick="navigator.clipboard.writeText('{$discordId}');this.innerHTML='<svg width=16 height=16 viewBox=&quot;0 0 24 24&quot; fill=&quot;none&quot; stroke=&quot;currentColor&quot; stroke-width=&quot;2&quot;><polyline points=&quot;20 6 9 17 4 12&quot;/></svg> Copied!';" class="btn btn-secondary">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                Copy My ID
+            </button>
+        </div>
+    </div>
+</body>
+</html>
+HTML;
             exit;
         }
 
@@ -15247,6 +23177,181 @@ session_destroy();
 header('Location: login.php');
 exit;
 ?>
+'''
+
+    def _generate_htaccess(self) -> str:
+        """Generate .htaccess file to protect sensitive files from direct access.
+        
+        This blocks direct access to:
+        - The /data/ directory (contains SQLite database with OAuth secrets)
+        - All SQLite/database files anywhere
+        - PHP include files that shouldn't be accessed directly
+        - Hidden files (.env, .git, etc.)
+        
+        NOTE: monitor_data_*.json files in the root are ALLOWED - they're needed
+        by the dashboard JavaScript and don't contain sensitive secrets.
+        The sensitive data (OAuth secrets, user accounts) is in /data/dashboard.sqlite.
+        """
+        return '''# ============================================
+# Live Monitor Security - .htaccess
+# Protects sensitive files from direct access
+# Generated by Zoryx Discord Bot Framework
+# ============================================
+
+# Enable rewrite engine
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+</IfModule>
+
+# ============================================
+# PROTECT DATA DIRECTORY (CRITICAL)
+# Contains: dashboard.sqlite, config files
+# ============================================
+
+# Block all access to /data/ directory
+<IfModule mod_rewrite.c>
+    RewriteRule ^data/ - [F,L]
+    RewriteRule ^data$ - [F,L]
+</IfModule>
+
+# ============================================
+# BLOCK SENSITIVE FILE TYPES
+# ============================================
+
+# Block all SQLite and database files (anywhere)
+<FilesMatch "\\.(sqlite|sqlite3|db|sql)$">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order Allow,Deny
+        Deny from all
+    </IfModule>
+</FilesMatch>
+
+# Block PHP include/library files that shouldn't be accessed directly
+<FilesMatch "^(lm_auth|lm_db|lm_bootstrap)\\.php$">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order Allow,Deny
+        Deny from all
+    </IfModule>
+</FilesMatch>
+
+# Block .htaccess itself and other hidden/sensitive files
+<FilesMatch "^\\.(htaccess|htpasswd|git|env|DS_Store)">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order Allow,Deny
+        Deny from all
+    </IfModule>
+</FilesMatch>
+
+# Block log files
+<FilesMatch "\\.(log|logs)$">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order Allow,Deny
+        Deny from all
+    </IfModule>
+</FilesMatch>
+
+# Block backup files
+<FilesMatch "\\.(bak|backup|old|orig|tmp)$">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order Allow,Deny
+        Deny from all
+    </IfModule>
+</FilesMatch>
+
+# ============================================
+# ADDITIONAL SECURITY HEADERS
+# ============================================
+
+<IfModule mod_headers.c>
+    # Prevent MIME type sniffing
+    Header set X-Content-Type-Options "nosniff"
+    
+    # Clickjacking protection
+    Header set X-Frame-Options "SAMEORIGIN"
+    
+    # XSS protection
+    Header set X-XSS-Protection "1; mode=block"
+    
+    # Referrer policy
+    Header set Referrer-Policy "strict-origin-when-cross-origin"
+</IfModule>
+
+# ============================================
+# PREVENT DIRECTORY LISTING
+# ============================================
+
+Options -Indexes
+
+# ============================================
+# ERROR DOCUMENTS
+# ============================================
+
+ErrorDocument 403 "Access Denied - This file cannot be accessed directly."
+ErrorDocument 404 "Not Found"
+
+# ============================================
+# NOTE: monitor_data_*.json files are ALLOWED
+# They contain bot status data needed by the
+# dashboard UI and don't have OAuth secrets.
+# Sensitive data is protected in /data/ dir.
+# ============================================
+'''
+
+    def _generate_data_htaccess(self) -> str:
+        """Generate .htaccess for the data directory to completely block access.
+        
+        The data directory contains:
+        - dashboard.sqlite (OAuth secrets, users, audit logs)
+        - live_monitor_config.json
+        - Other sensitive configuration files
+        """
+        return '''# ============================================
+# Live Monitor Data Directory Protection
+# DENY ALL DIRECT ACCESS
+# Generated by Zoryx Discord Bot Framework
+# ============================================
+
+# Deny everything in this directory
+<IfModule mod_authz_core.c>
+    Require all denied
+</IfModule>
+<IfModule !mod_authz_core.c>
+    Order Allow,Deny
+    Deny from all
+</IfModule>
+
+# Extra protection: disable all handlers
+<FilesMatch ".*">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order Allow,Deny
+        Deny from all
+    </IfModule>
+</FilesMatch>
+
+# Prevent any script execution
+Options -ExecCGI -Indexes
+RemoveHandler .php .php3 .php4 .php5 .phtml .pl .py .cgi
+
+# Disable directory listing
+Options -Indexes
 '''
 
     def _generate_backup_dashboard_php(self) -> str:
@@ -15341,9 +23446,9 @@ $roleName = $user['role'] ?? 'CUSTOM';
 $roleTier = lm_resolve_role_tier($roleName);
 $rolePerms = lm_role_permissions($roleName, $roleTier);
 
-// CRITICAL: Viewing audit logs requires view_security AND view_logs permissions
-if (empty($rolePerms['view_security']) || empty($rolePerms['view_logs'])) {
-    lm_render_error_page(403, 'Access Denied', 'You do not have permission to view audit logs. Requires view_security and view_logs permissions.', 'forbidden');
+// CRITICAL: Viewing audit logs requires view_security AND action_view_logs permissions
+if (empty($rolePerms['view_security']) || empty($rolePerms['action_view_logs'])) {
+    lm_render_error_page(403, 'Access Denied', 'You do not have permission to view audit logs. Requires view_security and action_view_logs permissions.', 'forbidden');
 }
 
 $pdo = lm_db();
@@ -15450,13 +23555,42 @@ function h($s) {
             flex-wrap: wrap;
             margin-bottom: 10px;
         }
-        input[type="text"], select {
-            padding: 6px 8px;
-            border-radius: 6px;
-            border: 1px solid rgba(148, 163, 184, 0.5);
-            background: #020617;
+        input[type="text"] {
+            padding: 8px 12px;
+            border-radius: 8px;
+            border: 1px solid rgba(148, 163, 184, 0.3);
+            background: rgba(15, 23, 42, 0.8);
             color: #e5e7eb;
             font-size: 12px;
+        }
+        input[type="text"]:focus {
+            outline: none;
+            border-color: rgba(59, 130, 246, 0.5);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        }
+        select {
+            padding: 8px 32px 8px 12px;
+            border-radius: 8px;
+            border: 1px solid rgba(148, 163, 184, 0.3);
+            background-color: rgba(15, 23, 42, 0.8);
+            background-image: url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 10px center;
+            color: #e5e7eb;
+            font-size: 12px;
+            appearance: none;
+            -webkit-appearance: none;
+            cursor: pointer;
+        }
+        select:focus {
+            outline: none;
+            border-color: rgba(59, 130, 246, 0.5);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        }
+        select option {
+            background: #0f172a;
+            color: #e5e7eb;
+            padding: 8px;
         }
         button {
             padding: 6px 10px;
@@ -15670,23 +23804,49 @@ if (!is_array($data)) {
 $action = $data['action'] ?? '';
 
 // CRITICAL: Check action permissions before allowing any modifications
-$requiresCreate = in_array($action, ['add', 'create_role', 'role_create'], true);
-$requiresSave = in_array($action, ['update_role', 'save_role', 'role_update'], true);
-$requiresDelete = in_array($action, ['remove', 'delete_role', 'role_delete'], true);
+// User management permissions
+$requiresAddUser = in_array($action, ['add'], true);
+$requiresRemoveUser = in_array($action, ['delete'], true);
+$requiresChangeUserRole = in_array($action, ['update_role'], true);
 
-if ($requiresCreate && empty($rolePerms['action_create_role'])) {
+// Role profile permissions
+$requiresCreateRole = in_array($action, ['create_role', 'role_create'], true);
+$requiresSaveRole = in_array($action, ['save_role', 'role_update'], true);
+$requiresDeleteRole = in_array($action, ['remove', 'delete_role', 'role_delete'], true);
+
+// User management permission checks
+if ($requiresAddUser && empty($rolePerms['action_add_user'])) {
+    http_response_code(403);
+    echo json_encode(['success' => false, 'error' => 'No permission to add users. Requires action_add_user permission.']);
+    exit;
+}
+
+if ($requiresRemoveUser && empty($rolePerms['action_remove_user'])) {
+    http_response_code(403);
+    echo json_encode(['success' => false, 'error' => 'No permission to remove users. Requires action_remove_user permission.']);
+    exit;
+}
+
+if ($requiresChangeUserRole && empty($rolePerms['action_change_user_role'])) {
+    http_response_code(403);
+    echo json_encode(['success' => false, 'error' => 'No permission to change user roles. Requires action_change_user_role permission.']);
+    exit;
+}
+
+// Role profile permission checks
+if ($requiresCreateRole && empty($rolePerms['action_create_role'])) {
     http_response_code(403);
     echo json_encode(['success' => false, 'error' => 'No permission to create roles. Requires action_create_role permission.']);
     exit;
 }
 
-if ($requiresSave && empty($rolePerms['action_save_role'])) {
+if ($requiresSaveRole && empty($rolePerms['action_save_role'])) {
     http_response_code(403);
     echo json_encode(['success' => false, 'error' => 'No permission to save role changes. Requires action_save_role permission.']);
     exit;
 }
 
-if ($requiresDelete && empty($rolePerms['action_delete_role'])) {
+if ($requiresDeleteRole && empty($rolePerms['action_delete_role'])) {
     http_response_code(403);
     echo json_encode(['success' => false, 'error' => 'No permission to delete roles. Requires action_delete_role permission.']);
     exit;
@@ -15887,7 +24047,7 @@ try {
 '''
 
     def _generate_owner_db_php(self) -> str:
-        """RBAC-aware JSON API for inspecting the local dashboard SQLite database."""
+        """RBAC-aware JSON API for inspecting and managing the local dashboard SQLite database."""
         return '''<?php
 require_once __DIR__ . '/lm_auth.php';
 
@@ -15914,7 +24074,7 @@ if (empty($rolePerms['view_database'])) {
 }
 
 $pdo = lm_db();
-$action = $_GET['action'] ?? 'tables';
+$action = $_GET['action'] ?? $_POST['action'] ?? 'tables';
 
 try {
     if ($action === 'tables') {
@@ -15945,6 +24105,12 @@ try {
     }
 
     if ($action === 'rows') {
+        if (empty($rolePerms['action_db_read'])) {
+            http_response_code(403);
+            echo json_encode(['success' => false, 'error' => 'You do not have permission to read database rows. Requires action_db_read permission.']);
+            exit;
+        }
+        
         $table = $_GET['table'] ?? '';
         if (!$table || !preg_match('/^[A-Za-z0-9_]+$/', $table)) {
             http_response_code(400);
@@ -15963,6 +24129,9 @@ try {
         $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
         $stmt->execute();
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        
+        $colStmt = $pdo->query(sprintf('PRAGMA table_info("%s")', $table));
+        $columns = $colStmt->fetchAll(PDO::FETCH_ASSOC);
 
         echo json_encode([
             'success' => true,
@@ -15970,6 +24139,166 @@ try {
             'limit' => $limit,
             'offset' => $offset,
             'rows' => $rows,
+            'columns' => $columns,
+        ]);
+        exit;
+    }
+    
+    if ($action === 'create') {
+        if (empty($rolePerms['action_db_create'])) {
+            http_response_code(403);
+            echo json_encode(['success' => false, 'error' => 'You do not have permission to create database records. Requires action_db_create permission.']);
+            exit;
+        }
+        
+        $input = json_decode(file_get_contents('php://input'), true);
+        $table = $input['table'] ?? '';
+        $data = $input['data'] ?? [];
+        
+        if (!$table || !preg_match('/^[A-Za-z0-9_]+$/', $table)) {
+            http_response_code(400);
+            echo json_encode(['success' => false, 'error' => 'Invalid table name']);
+            exit;
+        }
+        
+        if (empty($data) || !is_array($data)) {
+            http_response_code(400);
+            echo json_encode(['success' => false, 'error' => 'No data provided']);
+            exit;
+        }
+        
+        $columns = array_keys($data);
+        $placeholders = array_map(function($col) { return ':' . $col; }, $columns);
+        
+        $sql = sprintf(
+            'INSERT INTO "%s" (%s) VALUES (%s)',
+            $table,
+            implode(', ', array_map(function($c) { return '"' . $c . '"'; }, $columns)),
+            implode(', ', $placeholders)
+        );
+        
+        $stmt = $pdo->prepare($sql);
+        foreach ($data as $col => $val) {
+            $stmt->bindValue(':' . $col, $val);
+        }
+        $stmt->execute();
+        
+        echo json_encode([
+            'success' => true,
+            'message' => 'Record created successfully',
+            'id' => $pdo->lastInsertId()
+        ]);
+        exit;
+    }
+    
+    if ($action === 'update') {
+        if (empty($rolePerms['action_db_update'])) {
+            http_response_code(403);
+            echo json_encode(['success' => false, 'error' => 'You do not have permission to update database records. Requires action_db_update permission.']);
+            exit;
+        }
+        
+        $input = json_decode(file_get_contents('php://input'), true);
+        $table = $input['table'] ?? '';
+        $data = $input['data'] ?? [];
+        $where = $input['where'] ?? [];
+        
+        if (!$table || !preg_match('/^[A-Za-z0-9_]+$/', $table)) {
+            http_response_code(400);
+            echo json_encode(['success' => false, 'error' => 'Invalid table name']);
+            exit;
+        }
+        
+        if (empty($data) || !is_array($data)) {
+            http_response_code(400);
+            echo json_encode(['success' => false, 'error' => 'No data provided']);
+            exit;
+        }
+        
+        if (empty($where) || !is_array($where)) {
+            http_response_code(400);
+            echo json_encode(['success' => false, 'error' => 'No WHERE conditions provided']);
+            exit;
+        }
+        
+        $setClauses = [];
+        foreach (array_keys($data) as $col) {
+            $setClauses[] = sprintf('"%s" = :set_%s', $col, $col);
+        }
+        
+        $whereClauses = [];
+        foreach (array_keys($where) as $col) {
+            $whereClauses[] = sprintf('"%s" = :where_%s', $col, $col);
+        }
+        
+        $sql = sprintf(
+            'UPDATE "%s" SET %s WHERE %s',
+            $table,
+            implode(', ', $setClauses),
+            implode(' AND ', $whereClauses)
+        );
+        
+        $stmt = $pdo->prepare($sql);
+        foreach ($data as $col => $val) {
+            $stmt->bindValue(':set_' . $col, $val);
+        }
+        foreach ($where as $col => $val) {
+            $stmt->bindValue(':where_' . $col, $val);
+        }
+        $stmt->execute();
+        
+        echo json_encode([
+            'success' => true,
+            'message' => 'Record updated successfully',
+            'affected_rows' => $stmt->rowCount()
+        ]);
+        exit;
+    }
+    
+    if ($action === 'delete') {
+        if (empty($rolePerms['action_db_delete'])) {
+            http_response_code(403);
+            echo json_encode(['success' => false, 'error' => 'You do not have permission to delete database records. Requires action_db_delete permission.']);
+            exit;
+        }
+        
+        $input = json_decode(file_get_contents('php://input'), true);
+        $table = $input['table'] ?? '';
+        $where = $input['where'] ?? [];
+        
+        if (!$table || !preg_match('/^[A-Za-z0-9_]+$/', $table)) {
+            http_response_code(400);
+            echo json_encode(['success' => false, 'error' => 'Invalid table name']);
+            exit;
+        }
+        
+        if (empty($where) || !is_array($where)) {
+            http_response_code(400);
+            echo json_encode(['success' => false, 'error' => 'No WHERE conditions provided - refusing to delete entire table']);
+            exit;
+        }
+        
+        $whereClauses = [];
+        foreach (array_keys($where) as $col) {
+            $whereClauses[] = sprintf('"%s" = :%s', $col, $col);
+        }
+        
+        $sql = sprintf(
+            'DELETE FROM "%s" WHERE %s',
+            $table,
+            implode(' AND ', $whereClauses)
+        );
+        
+        $stmt = $pdo->prepare($sql);
+        foreach ($where as $col => $val) {
+            $stmt->bindValue(':' . $col, $val);
+        }
+        $stmt->execute();
+        
+        echo json_encode([
+            'success' => true,
+            'message' => 'Record deleted successfully',
+            'affected_rows' => $stmt->rowCount()
         ]);
         exit;
     }
@@ -16185,7 +24514,7 @@ function lm_command_allowed_for_permissions(string $command, array $perms): bool
         case 'set_verbose_logging':
             return !empty($perms['action_toggle_logging']);
         case 'toggle_debug_packages':
-            return !empty($perms['action_toggle_debug']);
+            return !empty($perms['action_toggle_debug_packages']);
         case 'backup_bot_directory':
             return !empty($perms['action_backup_bot']);
         
@@ -16444,8 +24773,9 @@ $roleName = $user['role'] ?? 'CUSTOM';
 $roleTier = lm_resolve_role_tier($roleName);
 $rolePerms = lm_role_permissions($roleName, $roleTier);
 
-if (empty($rolePerms['control_tickets'])) {
-    lm_render_error_page(403, 'Access Denied', 'You do not have permission to view ticket transcripts. This requires the control_tickets permission.', 'forbidden');
+// CRITICAL: Viewing transcript requires action_view_ticket permission ONLY
+if (empty($rolePerms['action_view_ticket'])) {
+    lm_render_error_page(403, 'Access Denied', 'You do not have permission to view ticket transcripts. Requires action_view_ticket permission.', 'forbidden');
 }
 
 $ticketId = $_GET['ticket_id'] ?? '';
@@ -16776,6 +25106,7 @@ if (!$ticketId || !$guildId) {
 </body>
 </html>
 '''
+
 
 async def setup(bot):
     await bot.add_cog(LiveMonitor(bot))
