@@ -42,12 +42,48 @@ ADDITIONAL TERMS:
    credit or information about the original framework must not be removed,
    modified, or obscured. Additional fields or information may be added.
 
-5. The Live Monitor Dashboard (cogs/live_monitor.py) Credits tab and visual
-   design are separately copyrighted and are NOT covered by this MIT license.
-   The Credits section (including layout, wording, and SVG crown artwork)
-   MUST remain clearly visible at all times in any use, modification, fork,
-   or redistribution of the dashboard. The Credits tab cannot be hidden,
-   removed, or obscured.
+5. Live Monitor Dashboard (cogs/live_monitor.py) License and Identity Protection
+
+The Live Monitor Dashboard, including but not limited to its name, branding,
+identity, and Credits tab, is NOT covered by the MIT License governing the
+remainder of the Software and is separately copyrighted.
+
+Protected components include, but are not limited to:
+- The names “Zoryx”, “Zoryx Framework”, and “Zoryx Discord Bot Framework”
+- The author name “TheHolyOneZ”
+- The Live Monitor Dashboard Credits tab, including its layout, wording,
+  structure, and crown SVG artwork
+
+The Credits tab MUST:
+- Remain clearly visible at all times
+- Remain unaltered in wording, layout, and visual design
+- Not be hidden, removed, renamed, duplicated, repositioned, minimized,
+  or visually obscured in any way
+
+Users ARE permitted to:
+- Customize styling, layout, or functionality of the dashboard outside
+  the protected Credits section
+- Extend the dashboard with new features, integrations, or additional tabs
+
+If a new tab is added, it MUST:
+- Be clearly labeled as the modifier’s own work
+- Accurately describe the modifications or additions made
+- Include wording such as:
+  “Tab created by <YourName>. Added custom functionality on top of the existing Zoryx system.”
+
+Users MUST NOT:
+- Claim authorship of framework code or systems they did not create
+- Present themselves as the original creator of the framework
+- Imply ownership of backend logic they did not meaningfully modify
+- Modify backend logic in a way that introduces security risks
+- Remove, obscure, or misrepresent attribution to the original author
+- Modify the framework with intent to mislead, damage reputation,
+  or misrepresent authorship
+
+Any violation of this section constitutes a breach of license and intent,
+unless explicit, direct permission is granted by TheHolyOneZ.
+
+
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
