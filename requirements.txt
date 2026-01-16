@@ -1,5 +1,13 @@
+# The command below is for Linux servers (e.g., Pterodactyl). Comment it out if you want to download Torch. w
+# --extra-index-url https://download.pytorch.org/whl/cpu
+
+
+
+# If you're experiencing storage (disk space) issues, comment out the following modules: Torch, TorchVision, opencv.
+
 discord.py==2.6.3
 aiofiles==24.1.0
+PyNaCl==1.5.0
 spotipy==2.25.1
 aiohttp==3.12.14
 yt-dlp==2025.6.30
@@ -26,3 +34,4 @@ rich==14.0.0
 # So if you install all that directly, you can, 99% of the time, just install, load them, and it works.
 # If you install all of them now, you won't have problems unless you break something or I forgot a requirement. 
 # If this happens, go on, join the Discord, and I'll help you properly.
+
