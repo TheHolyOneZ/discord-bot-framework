@@ -1,4 +1,4 @@
-# The command below is for Linux servers (e.g., Pterodactyl). Comment it out if you want to download Torch. w
+# The command below is for Linux servers (e.g., Pterodactyl). Remove the "#" if you want to download Torch. (This is not needed if you download it on Windows or something similar).
 # --extra-index-url https://download.pytorch.org/whl/cpu
 
 
@@ -34,4 +34,5 @@ rich==14.0.0
 # So if you install all that directly, you can, 99% of the time, just install, load them, and it works.
 # If you install all of them now, you won't have problems unless you break something or I forgot a requirement. 
 # If this happens, go on, join the Discord, and I'll help you properly.
+
 
