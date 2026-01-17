@@ -456,7 +456,7 @@ class InstallConfirmView(discord.ui.View):
 class ExtensionMarketplace(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.api_url = "https://zygnalbot.com/extension/api/extensions.php?action=list"
+        self.api_url = "https://zsync.eu/extension/api/extensions.php?action=list"
         self.extensions_folder = "./extensions"
         self.data_folder = "./data/marketplace"
         self.zygnal_id_file = os.path.join(self.data_folder, "ZygnalID.txt")
@@ -582,7 +582,7 @@ class ExtensionMarketplace(commands.Cog):
                     download_url = base_url
             else:
                 extension_id = extension_data['id']
-                download_url = f"https://zygnalbot.com/extension/download.php?id={extension_id}{query_suffix}"
+                download_url = f"https://zsync.eu/extension/download.php?id={extension_id}{query_suffix}"
             
             response_text, error = await self._download_with_retry(download_url, max_retries=3)
             
