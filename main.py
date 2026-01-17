@@ -31,6 +31,7 @@ load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
 BOT_OWNER_ID = int(os.getenv("BOT_OWNER_ID", 0))
 
+
 class MetricsCollector:
     def __init__(self, max_commands: int = 100):
         self.command_count = defaultdict(int)
@@ -2067,12 +2068,26 @@ async def framework_command(ctx):
         pass
 
 class HelpView(discord.ui.View):
-    def __init__(self, categories, author, prefix):
+    def __init__(self, categories, author, prefix, category_page=0):
         super().__init__(timeout=180)
         self.categories = categories
         self.author = author
         self.prefix = prefix
-        self.add_item(CategorySelect(categories, prefix))
+        self.category_page = category_page
+        self.categories_per_page = 10
+        
+
+        total_categories = len(categories)
+        self.total_category_pages = (total_categories - 1) // self.categories_per_page + 1
+        
+
+        self.add_item(CategorySelect(categories, prefix, category_page, self.categories_per_page))
+        
+
+        if self.total_category_pages > 1:
+            self.add_item(CategoryPrevButton(prefix))
+            self.add_item(CategoryNextButton(prefix))
+        
         self.add_item(CreditsButton())
     
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -2084,27 +2099,108 @@ class HelpView(discord.ui.View):
             return False
         return True
 
+class CategoryPrevButton(discord.ui.Button):
+    def __init__(self, prefix):
+        super().__init__(style=discord.ButtonStyle.gray, label="◀ Prev Categories", row=1)
+        self.prefix = prefix
+    
+    async def callback(self, interaction: discord.Interaction):
+        view = self.view
+        if view.category_page > 0:
+            view.category_page -= 1
+        
+
+        new_view = HelpView(view.categories, view.author, self.prefix, view.category_page)
+        
+
+        total_categories = len(view.categories)
+        embed = discord.Embed(
+            title="📚 Help Menu",
+            description="**Select a category from the dropdown menu**\n\n"
+                        f"```Available Categories: {total_categories}\nCurrent Prefix: {self.prefix}\nCategory Page: {view.category_page + 1}/{view.total_category_pages}```",
+            color=0x2b2d31,
+            timestamp=discord.utils.utcnow()
+        )
+        
+        embed.set_footer(text=f"Requested by {interaction.user}", icon_url=interaction.user.display_avatar.url)
+        embed.set_thumbnail(url=interaction.client.user.display_avatar.url)
+        
+        await interaction.response.edit_message(embed=embed, view=new_view)
+
+
+class CategoryNextButton(discord.ui.Button):
+    def __init__(self, prefix):
+        super().__init__(style=discord.ButtonStyle.gray, label="Next Categories ▶", row=1)
+        self.prefix = prefix
+    
+    async def callback(self, interaction: discord.Interaction):
+        view = self.view
+        if view.category_page < view.total_category_pages - 1:
+            view.category_page += 1
+        
+
+        new_view = HelpView(view.categories, view.author, self.prefix, view.category_page)
+        
+
+        total_categories = len(view.categories)
+        embed = discord.Embed(
+            title="📚 Help Menu",
+            description="**Select a category from the dropdown menu**\n\n"
+                        f"```Available Categories: {total_categories}\nCurrent Prefix: {self.prefix}\nCategory Page: {view.category_page + 1}/{view.total_category_pages}```",
+            color=0x2b2d31,
+            timestamp=discord.utils.utcnow()
+        )
+        
+        embed.set_footer(text=f"Requested by {interaction.user}", icon_url=interaction.user.display_avatar.url)
+        embed.set_thumbnail(url=interaction.client.user.display_avatar.url)
+        
+        await interaction.response.edit_message(embed=embed, view=new_view)
+
+
 class CategorySelect(discord.ui.Select):
-    def __init__(self, categories, prefix):
+    def __init__(self, categories, prefix, category_page=0, categories_per_page=10):
+        self.all_categories = categories
+        self.category_page = category_page
+        self.categories_per_page = categories_per_page
+        
+
+        category_names = list(categories.keys())
+        start_idx = category_page * categories_per_page
+        end_idx = start_idx + categories_per_page
+        current_page_categories = category_names[start_idx:end_idx]
+        
+
         options = [
             discord.SelectOption(
-                label=cog_name,
-                description=f"{len(cmds)} commands available",
+                label=cog_name[:100],
+                description=f"{len(categories[cog_name])} commands available"[:100],
                 emoji="📖"
             )
-            for cog_name, cmds in categories.items()
+            for cog_name in current_page_categories
         ]
+        
+
+        if not options:
+            options = [discord.SelectOption(label="No categories", description="Empty", emoji="❌")]
+        
         super().__init__(
-            placeholder="📂 Select a category...",
+            placeholder=f"📂 Select a category (Page {category_page + 1})...",
             options=options,
             min_values=1,
-            max_values=1
+            max_values=1,
+            row=0
         )
         self.categories = categories
         self.prefix = prefix
     
     async def callback(self, interaction: discord.Interaction):
         selected = self.values[0]
+        
+
+        if selected == "No categories":
+            await interaction.response.send_message("❌ No categories available", ephemeral=True)
+            return
+        
         cmds = self.categories[selected]
         
         page = 0
@@ -2168,6 +2264,8 @@ class CategorySelect(discord.ui.Select):
         embed.set_footer(text=f"Category: {category}")
         
         return embed
+
+
 
 class CategoryView(discord.ui.View):
     def __init__(self, category, cmds, page, per_page, total_pages, author, prefix):
@@ -2324,7 +2422,6 @@ class NextButton(discord.ui.Button):
         embed.set_footer(text=f"Category: {category}")
         
         return embed
-
 class BackButton(discord.ui.Button):
     def __init__(self, prefix):
         super().__init__(style=discord.ButtonStyle.blurple, label="🏠 Back to Main", row=1)
@@ -2352,18 +2449,27 @@ class BackButton(discord.ui.Button):
             await interaction.response.edit_message(embed=embed, view=None)
             return
         
+        total_categories = len(categories)
+        
         embed = discord.Embed(
             title="📚 Help Menu",
             description="**Select a category from the dropdown menu**\n\n"
-                        f"```Available Categories: {len(categories)}\nCurrent Prefix: {self.prefix}```",
+                        f"```Available Categories: {total_categories}\nCurrent Prefix: {self.prefix}```",
             color=0x2b2d31,
             timestamp=discord.utils.utcnow()
         )
         
+        if total_categories > 10:
+            embed.add_field(
+                name="ℹ️ Navigation",
+                value=f"```Use ◀ ▶ buttons to navigate category pages\nShowing 10 categories per page```",
+                inline=False
+            )
+        
         embed.set_footer(text=f"Requested by {interaction.user}", icon_url=interaction.user.display_avatar.url)
         embed.set_thumbnail(url=interaction.client.user.display_avatar.url)
         
-        view = HelpView(categories, interaction.user, self.prefix)
+        view = HelpView(categories, interaction.user, self.prefix, category_page=0)
         await interaction.response.edit_message(embed=embed, view=view)
 
 class CreditsButton(discord.ui.Button):
