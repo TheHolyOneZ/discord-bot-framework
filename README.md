@@ -124,7 +124,7 @@
 
 **Web-Based Monitoring Dashboard**
 - Real-time bot status via Live Monitor cog (~12,000+ lines)
-- 15 dashboard tabs: Dashboard, Commands, Plugins, Hooks, Files, Chat, Guilds, Events, System, and more
+- 15+ dashboard tabs: Dashboard, Commands, Plugins, Hooks, Files, Chat, Guilds, Events, System, and more
 - Remote extension management (load/unload/reload from browser)
 - Full file browser with read/write/delete operations
 - Chat console to send Discord messages from dashboard
@@ -314,6 +314,9 @@
 | Roles & Access | Manage dashboard user roles (Owner/Helper/Visitor) |
 | Security & Logs | Audit logs, login history, security events |
 | Credits | Framework attribution (required to remain visible) |
+
+> **NOTE** The number of tabs, and the tabs themselves, may be greater in the latest version! Right now, there are around 18 tabs. I couldn't update the readme, though, so I made this quick note right here. Just know that there are more tabs and more features!
+
 
 **Generated PHP Files (quickstart creates these in `./live_monitor_website/`):**
 | File | Purpose |
@@ -3868,5 +3871,6 @@ Want to see the framework in action? Check the `/images` directory for screensho
 
 
 ---
+
 
 
