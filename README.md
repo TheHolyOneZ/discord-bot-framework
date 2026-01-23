@@ -32,7 +32,7 @@
 <details>
 <summary><strong>Click to expand</strong></summary>
   
-- [Important Note for EU Users](#important-note-eu-users)
+- [Important Notice / Data Protection](#Important-Notice-/-Data-Protection)
 - [🌟 What Makes This Framework Special](#-what-makes-this-framework-special)
   - [🏗️ Enterprise-Grade Architecture](#️-enterprise-grade-architecture)
   - [🎯 Developer Experience](#-developer-experience)
@@ -3852,9 +3852,8 @@ Want to see the framework in action? Check the `/images` directory for screensho
 
 ---
 
-## IMPORTANT NOTE (EU Users)
-If you are using this framework in the EU, please be aware that **you are solely responsible for GDPR compliance**. The framework records **only login events and actions performed in the web dashboard** in the **audit log database table on your own server**. These logs exist on your server, but I **do not have access to them** and the framework does **not transmit or use them** in any way. You are responsible for ensuring that any data stored on your server, including these logs, is handled in accordance with applicable data protection laws.
-
+## Important Notice / Data Protection
+IMPORTANT NOTE: If you are using this framework, please be aware that you are solely responsible for complying with applicable data protection laws in your country or region. The framework records only login events and actions performed in the web dashboard in the audit log database table on your own server. These logs exist on your server, but I do not have access to them and the framework does not transmit or use them in any way. You are responsible for following the data protection guidelines that apply to your location and for ensuring that any data stored on your server, including these logs, is handled appropriately.
 
 ---
 
@@ -3879,6 +3878,7 @@ If you are using this framework in the EU, please be aware that **you are solely
 
 
 ---
+
 
 
 
