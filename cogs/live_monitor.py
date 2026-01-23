@@ -92,6 +92,8 @@ import inspect
 import shutil
 import platform
 import sys
+import ast
+import re
 logger = logging.getLogger('discord')
 
 
@@ -122,6 +124,10 @@ class LiveMonitor(commands.Cog):
 
 
         self._fileops_lock = asyncio.Lock()
+
+        # Dashboard Plugin System
+        self._dashboard_plugins = []
+        self._plugins_discovered = False
 
         logger.info("Live Monitor: Advanced system initialized")
     
@@ -233,6 +239,643 @@ class LiveMonitor(commands.Cog):
         except Exception as e:
             logger.error(f"Live Monitor: Failed to save config: {e}")
     
+    # ═══════════════════════════════════════════════════════════════════════════════
+    # DASHBOARD PLUGIN SYSTEM
+    # ═══════════════════════════════════════════════════════════════════════════════
+    
+    def _discover_dashboard_plugins(self) -> List[Dict[str, Any]]:
+        """
+        Scan the extensions folder for dashboard-compatible plugins.
+        
+        A plugin is recognized if it has:
+        - DASHBOARD_COMPATIBLE = True
+        - DASHBOARD_PLUGIN = {...} configuration dict
+        
+        Returns:
+            List of plugin configurations with extracted HTML/CSS/JS
+        """
+        plugins = []
+        extensions_dir = Path("./extensions")
+        
+        if not extensions_dir.exists():
+            logger.info("Dashboard Plugin System: extensions/ folder not found")
+            return plugins
+        
+        # Scan all .py files recursively
+        for py_file in extensions_dir.rglob("*.py"):
+            try:
+                plugin = self._extract_plugin_from_file(py_file)
+                if plugin:
+                    plugins.append(plugin)
+                    logger.info(f"Dashboard Plugin System: Discovered plugin '{plugin['id']}' from {py_file}")
+            except Exception as e:
+                logger.error(f"Dashboard Plugin System: Error scanning {py_file}: {e}")
+        
+        # Sort by position
+        plugins.sort(key=lambda p: p.get('position', 99))
+        
+        logger.info(f"Dashboard Plugin System: Found {len(plugins)} compatible plugin(s)")
+        return plugins
+    
+    def _extract_plugin_from_file(self, file_path: Path) -> Optional[Dict[str, Any]]:
+        """
+        Extract plugin configuration from a Python file.
+        
+        Uses AST parsing for safety - doesn't execute the file.
+        """
+        try:
+            content = file_path.read_text(encoding='utf-8')
+        except Exception as e:
+            logger.error(f"Could not read {file_path}: {e}")
+            return None
+        
+        # Quick check - does file contain the compatibility flag?
+        if 'DASHBOARD_COMPATIBLE' not in content:
+            return None
+        
+        # Parse AST
+        try:
+            tree = ast.parse(content)
+        except SyntaxError as e:
+            logger.error(f"Syntax error in {file_path}: {e}")
+            return None
+        
+        # Extract module-level assignments
+        assignments = {}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Assign):
+                for target in node.targets:
+                    if isinstance(target, ast.Name):
+                        try:
+                            if isinstance(node.value, ast.Constant):
+                                assignments[target.id] = node.value.value
+                            elif isinstance(node.value, ast.Dict):
+                                assignments[target.id] = self._ast_dict_to_python(node.value)
+                            elif isinstance(node.value, ast.NameConstant):
+                                assignments[target.id] = node.value.value
+                        except Exception:
+                            pass
+        
+        # Check compatibility flag
+        if assignments.get('DASHBOARD_COMPATIBLE') is not True:
+            return None
+        
+        # Get plugin config
+        plugin_config = assignments.get('DASHBOARD_PLUGIN')
+        if not plugin_config or not isinstance(plugin_config, dict):
+            logger.warning(f"DASHBOARD_COMPATIBLE=True but no valid DASHBOARD_PLUGIN in {file_path}")
+            return None
+        
+        # Validate required fields
+        if 'id' not in plugin_config or 'name' not in plugin_config:
+            logger.warning(f"Plugin in {file_path} missing required 'id' or 'name' field")
+            return None
+        
+        # Extract HTML/CSS/JS using regex (more reliable for multiline strings)
+        plugin_config['_html'] = self._extract_multiline_string(content, 'DASHBOARD_HTML')
+        plugin_config['_css'] = self._extract_multiline_string(content, 'DASHBOARD_CSS')
+        plugin_config['_js'] = self._extract_multiline_string(content, 'DASHBOARD_JS')
+        plugin_config['_source_file'] = str(file_path)
+        
+        # Ensure permissions structure exists
+        if 'permissions' not in plugin_config:
+            plugin_config['permissions'] = {}
+        if 'view' not in plugin_config['permissions']:
+            plugin_config['permissions']['view'] = f"view_{plugin_config['id']}"
+        if 'actions' not in plugin_config['permissions']:
+            plugin_config['permissions']['actions'] = []
+        
+        return plugin_config
+    
+    def _ast_dict_to_python(self, node: ast.Dict) -> dict:
+        """Convert an AST Dict node to a Python dictionary."""
+        result = {}
+        for key, value in zip(node.keys, node.values):
+            if isinstance(key, ast.Constant):
+                k = key.value
+            elif isinstance(key, ast.Str):
+                k = key.s
+            else:
+                continue
+            
+            if isinstance(value, ast.Constant):
+                result[k] = value.value
+            elif isinstance(value, ast.Str):
+                result[k] = value.s
+            elif isinstance(value, ast.Num):
+                result[k] = value.n
+            elif isinstance(value, ast.NameConstant):
+                result[k] = value.value
+            elif isinstance(value, ast.List):
+                result[k] = self._ast_list_to_python(value)
+            elif isinstance(value, ast.Dict):
+                result[k] = self._ast_dict_to_python(value)
+        
+        return result
+    
+    def _ast_list_to_python(self, node: ast.List) -> list:
+        """Convert an AST List node to a Python list."""
+        result = []
+        for item in node.elts:
+            if isinstance(item, ast.Constant):
+                result.append(item.value)
+            elif isinstance(item, ast.Str):
+                result.append(item.s)
+            elif isinstance(item, ast.Num):
+                result.append(item.n)
+            elif isinstance(item, ast.Dict):
+                result.append(self._ast_dict_to_python(item))
+            elif isinstance(item, ast.List):
+                result.append(self._ast_list_to_python(item))
+        return result
+    
+    def _extract_multiline_string(self, content: str, var_name: str) -> str:
+        """Extract a multiline string assignment from Python source code."""
+        patterns = [
+            rf'{var_name}\s*=\s*"""(.*?)"""',
+            rf"{var_name}\s*=\s*'''(.*?)'''",
+            rf'{var_name}\s*=\s*"([^"]*)"',
+            rf"{var_name}\s*=\s*'([^']*)'",
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, content, re.DOTALL)
+            if match:
+                return match.group(1)
+        
+        return ""
+    
+    def _get_all_plugin_permissions(self, plugins: List[Dict]) -> Dict[str, List[Dict]]:
+        """Extract all permissions from discovered plugins."""
+        view_perms = []
+        action_perms = []
+        
+        for plugin in plugins:
+            perms = plugin.get('permissions', {})
+            
+            view_key = perms.get('view')
+            if view_key:
+                view_perms.append({
+                    'key': view_key,
+                    'label': f"{plugin['name']} (Plugin)",
+                    'plugin_id': plugin['id']
+                })
+            
+            for action in perms.get('actions', []):
+                action_perms.append({
+                    'key': action['key'],
+                    'label': f"{action.get('label', action['key'])} (Plugin: {plugin['name']})",
+                    'description': action.get('description', ''),
+                    'dangerous': action.get('dangerous', False),
+                    'plugin_id': plugin['id']
+                })
+        
+        return {'view': view_perms, 'actions': action_perms}
+    
+    def _generate_plugin_sidebar_html(self, plugins: List[Dict]) -> str:
+        """Generate the HTML for the Plugins section in the sidebar."""
+        if not plugins:
+            return ""
+        
+        items_html = ""
+        for plugin in plugins:
+            icon = plugin.get('icon', '📦')
+            name = plugin['name']
+            plugin_id = plugin['id']
+            view_perm = plugin.get('permissions', {}).get('view', f'view_{plugin_id}')
+            
+            if name.startswith(icon):
+                name = name[len(icon):].strip()
+            
+            items_html += '''
+                    <button class="lm-sidebar-item lm-plugin-item" data-tab="''' + plugin_id + '''" data-view-perm="''' + view_perm + '''">
+                        ''' + icon + ''' ''' + name + '''
+                    </button>'''
+        
+        return '''
+                    <div class="lm-plugin-section" id="lm-plugin-section">
+                        <div class="lm-sidebar-group-label lm-plugin-group-toggle" onclick="togglePluginDropdown()">
+                            <span class="plugin-dropdown-arrow">▶</span> Plugins
+                            <span class="plugin-count-badge" id="lm-plugin-visible-count">''' + str(len(plugins)) + '''</span>
+                        </div>
+                        <div class="lm-plugin-dropdown" id="lm-plugin-dropdown" style="display: none;">
+                            ''' + items_html + '''
+                        </div>
+                    </div>'''
+    
+    def _generate_plugin_tabs_html(self, plugins: List[Dict]) -> str:
+        """Generate the HTML tab content for each plugin."""
+        if not plugins:
+            return ""
+        
+        tabs_html = ""
+        for plugin in plugins:
+            plugin_id = plugin['id']
+            plugin_name = plugin['name']
+            css = plugin.get('_css', '')
+            html = plugin.get('_html', '')
+            js = plugin.get('_js', '')
+            
+            # Build the tab HTML using string concatenation to avoid f-string issues with curly braces
+            tab_content = '''
+            <!-- Plugin Tab: ''' + plugin_name + ''' -->
+            <div id="tab-''' + plugin_id + '''" class="tab-content">
+                <style>
+                    /* Plugin CSS: ''' + plugin_id + ''' */
+                    ''' + css + '''
+                </style>
+                ''' + html + '''
+                <script>
+                    /* Plugin JS: ''' + plugin_id + ''' */
+                    ''' + js + '''
+                </script>
+            </div>
+            '''
+            tabs_html += tab_content
+        
+        return tabs_html
+    
+    def _generate_plugin_permission_js(self, plugins: List[Dict]) -> str:
+        """Generate JavaScript to add plugin permissions to VIEW_PERM_DEFS and CONTROL_PERM_DEFS."""
+        if not plugins:
+            return ""
+        
+        all_perms = self._get_all_plugin_permissions(plugins)
+        
+        view_additions = json.dumps(all_perms['view'])
+        action_additions = json.dumps(all_perms['actions'])
+        
+        return f'''
+            // ═══════════════════════════════════════════════════════════════
+            // Dashboard Plugin System - Permission Injection
+            // ═══════════════════════════════════════════════════════════════
+            (function() {{
+                const pluginViewPerms = {view_additions};
+                const pluginActionPerms = {action_additions};
+                
+                if (typeof VIEW_PERM_DEFS !== 'undefined') {{
+                    pluginViewPerms.forEach(p => VIEW_PERM_DEFS.push({{ key: p.key, label: p.label }}));
+                }}
+                
+                if (typeof CONTROL_PERM_DEFS !== 'undefined') {{
+                    pluginActionPerms.forEach(p => CONTROL_PERM_DEFS.push({{ key: p.key, label: p.label }}));
+                }}
+                
+                console.log('[Dashboard Plugins] Registered ' + pluginViewPerms.length + ' view permissions');
+                console.log('[Dashboard Plugins] Registered ' + pluginActionPerms.length + ' action permissions');
+            }})();
+        '''
+    
+    def _generate_plugin_tab_mapping_js(self, plugins: List[Dict]) -> str:
+        """Generate JavaScript to add plugin tabs to the permission mapping."""
+        if not plugins:
+            return ""
+        
+        mappings = []
+        for plugin in plugins:
+            plugin_id = plugin['id']
+            view_perm = plugin.get('permissions', {}).get('view', f'view_{plugin_id}')
+            mappings.append(f"'{plugin_id}': '{view_perm}'")
+        
+        return f'''
+            // Plugin tab permission mappings
+            const PLUGIN_TAB_PERMS = {{
+                {', '.join(mappings)}
+            }};
+            
+            // Extend tab permission checking for plugins
+            const _origIsTabAllowed = typeof isTabAllowedByPerms === 'function' ? isTabAllowedByPerms : null;
+            window.isTabAllowedByPermsWithPlugins = function(tabName) {{
+                if (PLUGIN_TAB_PERMS[tabName]) {{
+                    return typeof LM_PERMS !== 'undefined' && !!LM_PERMS[PLUGIN_TAB_PERMS[tabName]];
+                }}
+                return _origIsTabAllowed ? _origIsTabAllowed(tabName) : true;
+            }};
+        '''
+    
+    def _generate_plugin_dropdown_js(self) -> str:
+        """Generate JavaScript for the plugin dropdown toggle."""
+        return '''
+            function togglePluginDropdown() {
+                const dropdown = document.getElementById('lm-plugin-dropdown');
+                const arrow = document.querySelector('#lm-plugin-section .plugin-dropdown-arrow');
+                
+                if (dropdown.style.display === 'none') {
+                    dropdown.style.display = 'block';
+                    if (arrow) arrow.textContent = '▼';
+                } else {
+                    dropdown.style.display = 'none';
+                    if (arrow) arrow.textContent = '▶';
+                }
+            }
+            
+            function toggleDrawerPluginDropdown() {
+                const dropdown = document.getElementById('lm-drawer-plugin-dropdown');
+                const arrow = document.querySelector('#lm-drawer-plugin-section .plugin-dropdown-arrow');
+                
+                if (dropdown.style.display === 'none') {
+                    dropdown.style.display = 'block';
+                    if (arrow) arrow.textContent = '▼';
+                } else {
+                    dropdown.style.display = 'none';
+                    if (arrow) arrow.textContent = '▶';
+                }
+            }
+        '''
+    
+    def _generate_plugin_dropdown_css(self) -> str:
+        """Generate CSS for the plugin dropdown."""
+        return '''
+            /* Dashboard Plugin System - Sidebar Styles */
+            .lm-plugin-group-toggle {
+                cursor: pointer;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                user-select: none;
+            }
+            
+            .lm-plugin-group-toggle:hover {
+                color: #a855f7;
+            }
+            
+            .plugin-dropdown-arrow {
+                font-size: 10px;
+                transition: transform 0.2s ease;
+            }
+            
+            .plugin-count-badge {
+                background: linear-gradient(135deg, #a855f7 0%, #7c3aed 100%);
+                color: white;
+                font-size: 10px;
+                font-weight: 600;
+                padding: 2px 6px;
+                border-radius: 10px;
+                margin-left: auto;
+            }
+            
+            .lm-plugin-dropdown {
+                margin-left: 12px;
+                border-left: 2px solid rgba(148, 163, 184, 0.2);
+                padding-left: 8px;
+            }
+            
+            .lm-plugin-item {
+                font-size: 13px !important;
+                padding: 8px 12px !important;
+            }
+        '''
+    
+    def _generate_plugin_owner_permissions_php(self, plugins: List[Dict]) -> str:
+        """Generate PHP array entries for plugin permissions (for OWNER tier)."""
+        if not plugins:
+            return ""
+        
+        lines = []
+        for plugin in plugins:
+            perms = plugin.get('permissions', {})
+            
+            view_perm = perms.get('view')
+            if view_perm:
+                lines.append(f"            '{view_perm}' => true,")
+            
+            for action in perms.get('actions', []):
+                lines.append(f"            '{action['key']}' => true,")
+        
+        return '\n'.join(lines)
+    
+    def _generate_plugin_api_php(self, plugins: List[Dict]) -> str:
+        """Generate plugin_api.php for routing API calls to plugins."""
+        perm_map = {}
+        for plugin in plugins:
+            plugin_id = plugin['id']
+            perm_map[plugin_id] = {}
+            
+            for endpoint in plugin.get('api_endpoints', []):
+                action = endpoint.get('action')
+                requires = endpoint.get('requires_permission')
+                if action:
+                    perm_map[plugin_id][action] = requires
+        
+        # Convert to PHP array syntax
+        def to_php_array(obj, indent=0):
+            spaces = '    ' * indent
+            if obj is None:
+                return 'null'
+            elif isinstance(obj, bool):
+                return 'true' if obj else 'false'
+            elif isinstance(obj, str):
+                return f"'{obj}'"
+            elif isinstance(obj, dict):
+                if not obj:
+                    return '[]'
+                items = []
+                for k, v in obj.items():
+                    items.append(f"{spaces}    '{k}' => {to_php_array(v, indent + 1)}")
+                return '[\n' + ',\n'.join(items) + f'\n{spaces}]'
+            elif isinstance(obj, list):
+                if not obj:
+                    return '[]'
+                items = [to_php_array(item, indent + 1) for item in obj]
+                return '[' + ', '.join(items) + ']'
+            else:
+                return str(obj)
+        
+        perm_map_php = to_php_array(perm_map)
+        
+        return '''<?php
+/**
+ * Dashboard Plugin System - API Router
+ * 
+ * Routes API requests to the appropriate plugin handler on the bot.
+ * Generated by Zoryx Discord Bot Framework
+ */
+
+require_once __DIR__ . '/lm_auth.php';
+
+lm_start_session_if_needed();
+lm_ensure_schema();
+
+$user = lm_current_user();
+if (!$user) {
+    http_response_code(403);
+    header('Content-Type: application/json');
+    echo json_encode(['error' => 'Authentication required']);
+    exit;
+}
+
+// Permission requirements by plugin and action
+$PLUGIN_PERMISSIONS = ''' + perm_map_php + ''';
+
+$pluginId = $_GET['plugin'] ?? '';
+$action = $_GET['action'] ?? '';
+
+if (!$pluginId || !$action) {
+    http_response_code(400);
+    header('Content-Type: application/json');
+    echo json_encode(['error' => 'Missing plugin or action parameter']);
+    exit;
+}
+
+// Check permission for this action if defined
+if (isset($PLUGIN_PERMISSIONS[$pluginId][$action])) {
+    $requiredPerm = $PLUGIN_PERMISSIONS[$pluginId][$action];
+    if ($requiredPerm) {
+        $roleName = $user['role'] ?? 'CUSTOM';
+        $roleTier = lm_resolve_role_tier($roleName);
+        $rolePerms = lm_role_permissions($roleName, $roleTier);
+        
+        if (empty($rolePerms[$requiredPerm])) {
+            http_response_code(403);
+            header('Content-Type: application/json');
+            echo json_encode([
+                'error' => 'Permission denied',
+                'required' => $requiredPerm
+            ]);
+            exit;
+        }
+    }
+}
+
+// Get POST data if any
+$postData = null;
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $postData = json_decode(file_get_contents('php://input'), true);
+}
+
+// Queue request for bot to process
+$queueFile = __DIR__ . '/monitor_data_plugin_requests.json';
+$requests = [];
+
+if (file_exists($queueFile)) {
+    $json = file_get_contents($queueFile);
+    $requests = json_decode($json, true) ?: [];
+}
+
+$requestId = uniqid('req_', true);
+$request = [
+    'id' => $requestId,
+    'plugin' => $pluginId,
+    'action' => $action,
+    'data' => $postData,
+    'user' => $user['username'] ?? 'unknown',
+    'timestamp' => date('c')
+];
+
+$requests[] = $request;
+$requests = array_slice($requests, -100);
+
+file_put_contents($queueFile, json_encode($requests, JSON_PRETTY_PRINT));
+
+// Wait for response (polling with timeout)
+$responseFile = __DIR__ . "/monitor_data_plugin_response_$requestId.json";
+$timeout = 10;
+$start = time();
+
+while (time() - $start < $timeout) {
+    if (file_exists($responseFile)) {
+        $response = json_decode(file_get_contents($responseFile), true);
+        @unlink($responseFile);
+        
+        header('Content-Type: application/json');
+        echo json_encode($response);
+        exit;
+    }
+    usleep(100000);
+}
+
+header('Content-Type: application/json');
+echo json_encode([
+    'status' => 'pending',
+    'request_id' => $requestId,
+    'message' => 'Request queued, bot may be offline or busy'
+]);
+?>'''
+    
+    async def _process_plugin_api_requests(self):
+        """Process pending plugin API requests from the dashboard."""
+        if not self.config.get("website_url"):
+            return
+        
+        base_url = str(self.config["website_url"]).rstrip("/")
+        token = self.config.get("secret_token", "")
+        
+        # Fetch pending requests
+        try:
+            async with aiohttp.ClientSession() as session:
+                url = f"{base_url}/monitor_data_plugin_requests.json"
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+                    if resp.status != 200:
+                        return
+                    requests = await resp.json()
+        except Exception:
+            return
+        
+        if not requests:
+            return
+        
+        processed_ids = []
+        
+        for req in requests:
+            request_id = req.get('id')
+            plugin_id = req.get('plugin')
+            action = req.get('action')
+            data = req.get('data')
+            
+            if not plugin_id or not action or not request_id:
+                continue
+            
+            response = {'error': f'Plugin {plugin_id} not found or not loaded'}
+            
+            # Find the cog for this plugin
+            for cog in self.bot.cogs.values():
+                try:
+                    cog_module = type(cog).__module__
+                    import importlib
+                    module = importlib.import_module(cog_module)
+                    if getattr(module, 'DASHBOARD_COMPATIBLE', False):
+                        plugin_config = getattr(module, 'DASHBOARD_PLUGIN', {})
+                        if plugin_config.get('id') == plugin_id:
+                            if hasattr(cog, 'handle_plugin_api'):
+                                try:
+                                    response = await cog.handle_plugin_api(action, data)
+                                except Exception as e:
+                                    response = {'error': str(e)}
+                            else:
+                                response = {'error': f'Plugin {plugin_id} has no API handler'}
+                            break
+                except Exception as e:
+                    logger.error(f"Error finding plugin cog: {e}")
+            
+            # Send response back
+            try:
+                response_url = f"{base_url}/receive.php?token={token}&package=plugin_response"
+                async with aiohttp.ClientSession() as session:
+                    payload = {
+                        'request_id': request_id,
+                        'response': response
+                    }
+                    async with session.post(response_url, json=payload, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+                        pass
+            except Exception as e:
+                logger.error(f"Failed to send plugin response: {e}")
+            
+            processed_ids.append(request_id)
+        
+        # Clear processed requests
+        if processed_ids:
+            try:
+                clear_url = f"{base_url}/receive.php?token={token}&package=plugin_requests_clear"
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(clear_url, json={'ids': processed_ids}, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+                        pass
+            except Exception:
+                pass
+    
+    # ═══════════════════════════════════════════════════════════════════════════════
+    # END DASHBOARD PLUGIN SYSTEM
+    # ═══════════════════════════════════════════════════════════════════════════════
+
     def _log_event(self, event_type: str, details: Dict[str, Any]):
         self._event_log.append({
             "timestamp": datetime.now().isoformat(),
@@ -738,12 +1381,12 @@ class LiveMonitor(commands.Cog):
                 }
                 fw_section = self.bot.config.get("framework", {}) or {}
                 framework_info = {
-                    "version": "1.5.0",
+                    "version": "1.5.3",
                     "recommended_python": fw_section.get("recommended_python", "3.12.7"),
                     "python_runtime": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
-                    "docs_url": "https://zygnalbot.com/bot-framework/",
+                    "docs_url": "https://zsync.eu/zdbf",
                     "github_url": "https://github.com/TheHolyOneZ/discord-bot-framework",
-                    "support_url": "https://zygnalbot.com/support.html",
+                    "support_url": "https://zsync.eu/zygnalbot/support.html",
                 }
         except Exception as e:
             logger.error(f"Live Monitor: Failed to collect core settings/framework info: {e}")
@@ -1202,7 +1845,7 @@ class LiveMonitor(commands.Cog):
         fileops_commands = [
             "list_dir", "read_file", "write_file", "rename_file", "create_dir", "delete_path",
             "fetch_marketplace_extensions", "download_marketplace_extension", "load_downloaded_extension",
-            "backup_bot_directory"
+            "backup_bot_directory", "validate_zygnal_id"
         ]
         if cmd_type in fileops_commands:
             self._fileops_response = None
@@ -1497,6 +2140,69 @@ class LiveMonitor(commands.Cog):
                         "error": str(e)
                     }
 
+            elif cmd_type == "validate_zygnal_id":
+                zygnal_id = params.get("zygnal_id")
+                request_id = params.get("request_id")
+                logger.info(f"Live Monitor: Validating ZygnalID: {zygnal_id}")
+
+                try:
+                    url = f"https://zsync.eu/extension/api/validate_zid.php?zygnalid={zygnal_id}"
+                    timeout = aiohttp.ClientTimeout(total=10)
+                    async with aiohttp.ClientSession(timeout=timeout) as session:
+                        async with session.get(url) as resp:
+                            status = resp.status
+                            try:
+                                data = await resp.json()
+                            except:
+                                try:
+                                    data = await resp.text()
+                                except:
+                                    data = None
+                            
+                            logger.info(f"Live Monitor: Validation response status: {status}, data: {data}")
+
+                            self._fileops_response = {
+                                "type": "validate_zygnal_id",
+                                "request_id": request_id,
+                                "status": status,
+                                "data": data,
+                                "success": True
+                            }
+                            
+                            # Send response back directly
+                            async with self._fileops_lock:
+                                try:
+                                    base_url = self.config['website_url']
+                                    token = self.config['secret_token']
+                                    post_url = f"{base_url}/receive.php?token={token}&package=fileops"
+                                    async with session.post(post_url, json=self._fileops_response, timeout=aiohttp.ClientTimeout(total=10)) as post_resp:
+                                        if post_resp.status == 200:
+                                            logger.info(f"Live Monitor: [OK] Validation response sent")
+                                        else:
+                                            logger.warning(f"Live Monitor: [ERROR] Validation response send failed: {post_resp.status}")
+                                except Exception as e:
+                                    logger.error(f"Live Monitor: Failed to send validation response: {e}")
+
+                except Exception as e:
+                    logger.error(f"Live Monitor: Validation failed: {e}")
+                    self._fileops_response = {
+                        "type": "validate_zygnal_id",
+                        "request_id": request_id,
+                        "success": False,
+                        "error": str(e)
+                    }
+                    # Send error response back
+                    async with self._fileops_lock:
+                        try:
+                            base_url = self.config['website_url']
+                            token = self.config['secret_token']
+                            post_url = f"{base_url}/receive.php?token={token}&package=fileops"
+                            async with aiohttp.ClientSession() as session:
+                                async with session.post(post_url, json=self._fileops_response, timeout=aiohttp.ClientTimeout(total=10)) as post_resp:
+                                    pass
+                        except:
+                            pass
+
             elif cmd_type == "shutdown_bot":
                 delay = int(params.get("delay", 0))
                 self._log_event("bot_shutdown_requested", {"delay_seconds": delay})
@@ -1529,7 +2235,7 @@ class LiveMonitor(commands.Cog):
 
             elif cmd_type == "fetch_marketplace_extensions":
                 try:
-                    api_url = "https://zygnalbot.com/extension/api/extensions.php?action=list"
+                    api_url = "https://zsync.eu/extension/api/extensions.php?action=list"
                     logger.info(f"Live Monitor: Fetching marketplace extensions from {api_url}")
                     
                     timeout = aiohttp.ClientTimeout(total=30)
@@ -1538,7 +2244,26 @@ class LiveMonitor(commands.Cog):
                             logger.info(f"Live Monitor: Marketplace API returned status {response.status}")
                             
                             if response.status == 200:
-                                data = await response.json()
+                                try:
+                                    # First get text content to handle PHP warnings/errors that might precede JSON
+                                    text_content = await response.text()
+                                    
+                                    # Try to find JSON content if there's garbage before it (like PHP warnings)
+                                    json_start = text_content.find('{')
+                                    if json_start != -1:
+                                        json_content = text_content[json_start:]
+                                        data = json.loads(json_content)
+                                    else:
+                                        data = json.loads(text_content)
+                                        
+                                except Exception as json_err:
+                                    logger.error(f"Live Monitor: Failed to parse marketplace JSON: {json_err}")
+                                    try:
+                                        logger.error(f"Live Monitor: Raw response content: {text_content[:200]}")
+                                    except:
+                                        pass
+                                    raise json_err
+
                                 if data.get('success'):
                                     extensions = data.get('extensions', [])
                                     logger.info(f"Live Monitor: Successfully fetched {len(extensions)} extensions")
@@ -1634,7 +2359,7 @@ class LiveMonitor(commands.Cog):
                                 download_url = base_url
                         else:
                             extension_id = extension_data['id']
-                            download_url = f"https://zygnalbot.com/extension/download.php?id={extension_id}&zygnalid={zygnal_id}"
+                            download_url = f"https://zsync.eu/extension/download.php?id={extension_id}&zygnalid={zygnal_id}"
                         
 
                         response_text = None
@@ -1746,12 +2471,8 @@ class LiveMonitor(commands.Cog):
                                 
 
                                 filepath_str = str(filepath)
-                                if platform.system() == "Windows":
-
-                                    filepath_formatted = filepath_str
-                                else:
-
-                                    filepath_formatted = filepath_str.replace('\\', '/')
+                                # Always use forward slashes for web/JSON compatibility
+                                filepath_formatted = filepath_str.replace('\\', '/')
                                 
                                 self._fileops_response = {
                                     "success": True,
@@ -1793,22 +2514,42 @@ class LiveMonitor(commands.Cog):
             
             elif cmd_type == "load_downloaded_extension":
                 try:
+                    # We accept 'filepath' OR 'filename' (safer)
                     filepath = params.get("filepath")
-                    if not filepath:
-                        self._fileops_response = {"success": False, "error": "No filepath provided"}
+                    filename = params.get("filename")
+                    
+                    if not filepath and not filename:
+                        self._fileops_response = {"success": False, "error": "No filepath or filename provided"}
                     else:
-                        file_path = Path(filepath)
+                        if filename:
+                            # If filename is provided, construct path securely
+                            file_path = Path("./extensions") / filename
+                        else:
+                            # Fallback to filepath, but normalize it
+                            file_path = Path(filepath)
+
                         if not file_path.exists():
-                            self._fileops_response = {"success": False, "error": f"File not found: {filepath}"}
+                            self._fileops_response = {"success": False, "error": f"File not found: {file_path}"}
                         else:
                             extension_name = file_path.stem
-                            await self.bot.load_extension(f"extensions.{extension_name}")
-                            
-                            self._fileops_response = {
-                                "success": True,
-                                "message": f"Loaded extension: {extension_name}",
-                                "extension_name": extension_name
-                            }
+                            try:
+                                await self.bot.load_extension(f"extensions.{extension_name}")
+                                self._fileops_response = {
+                                    "success": True,
+                                    "message": f"Loaded extension: {extension_name}",
+                                    "extension_name": extension_name
+                                }
+                            except Exception as load_err:
+                                # It might be already loaded, try to reload
+                                try:
+                                    await self.bot.reload_extension(f"extensions.{extension_name}")
+                                    self._fileops_response = {
+                                        "success": True,
+                                        "message": f"Reloaded extension: {extension_name}",
+                                        "extension_name": extension_name
+                                    }
+                                except Exception as reload_err:
+                                    raise reload_err
                         
 
                         if self._fileops_response:
@@ -2307,7 +3048,10 @@ class LiveMonitor(commands.Cog):
                 self._generate_lm_bootstrap_php(token, setup_token), encoding='utf-8'
             )
             (output_dir / "lm_db.php").write_text(self._generate_lm_db_php(), encoding='utf-8')
-            (output_dir / "lm_auth.php").write_text(self._generate_lm_auth_php(), encoding='utf-8')
+            (output_dir / "lm_auth.php").write_text(self._generate_lm_auth_php(self._dashboard_plugins), encoding='utf-8')
+            # Generate plugin_api.php if there are dashboard plugins
+            if self._dashboard_plugins:
+                (output_dir / "plugin_api.php").write_text(self._generate_plugin_api_php(self._dashboard_plugins), encoding='utf-8')
             (output_dir / "setup.php").write_text(self._generate_setup_php(), encoding='utf-8')
             (output_dir / "login.php").write_text(self._generate_login_php(), encoding='utf-8')
             (output_dir / "oauth_callback.php").write_text(self._generate_oauth_callback_php(), encoding='utf-8')
@@ -2565,7 +3309,10 @@ class LiveMonitor(commands.Cog):
                 self._generate_lm_bootstrap_php(token, setup_token), encoding='utf-8'
             )
             (output_dir / "lm_db.php").write_text(self._generate_lm_db_php(), encoding='utf-8')
-            (output_dir / "lm_auth.php").write_text(self._generate_lm_auth_php(), encoding='utf-8')
+            (output_dir / "lm_auth.php").write_text(self._generate_lm_auth_php(self._dashboard_plugins), encoding='utf-8')
+            # Generate plugin_api.php if there are dashboard plugins
+            if self._dashboard_plugins:
+                (output_dir / "plugin_api.php").write_text(self._generate_plugin_api_php(self._dashboard_plugins), encoding='utf-8')
             (output_dir / "setup.php").write_text(self._generate_setup_php(), encoding='utf-8')
             (output_dir / "login.php").write_text(self._generate_login_php(), encoding='utf-8')
             (output_dir / "oauth_callback.php").write_text(self._generate_oauth_callback_php(), encoding='utf-8')
@@ -11067,6 +11814,8 @@ class LiveMonitor(commands.Cog):
             color: #e5e7eb;
             padding: 8px;
         }
+
+        /* DASHBOARD_PLUGINS_CSS_PLACEHOLDER */
     </style>
 </head>
 <body>
@@ -11197,6 +11946,8 @@ class LiveMonitor(commands.Cog):
                             <circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/>
                         </svg>
                         Extension Marketplace <span style="font-size:10px;background:linear-gradient(135deg,#3b82f6,#8b5cf6);padding:2px 6px;border-radius:4px;margin-left:6px;">BETA</span></button>
+
+                    <!-- DASHBOARD_PLUGINS_SIDEBAR_PLACEHOLDER -->
 
                     <div class="lm-sidebar-group-label">Admin</div>
                     <button class="lm-sidebar-item" data-tab="roles">Roles &amp; Access</button>
@@ -11676,7 +12427,7 @@ class LiveMonitor(commands.Cog):
                                 <div class="plug-promo-subtitle">Browse the official ZygnalBot Extension Portal for additional extensions and plugins</div>
                             </div>
                             <div class="plug-promo-actions">
-                                <a href="https://zygnalbot.com/extension/" target="_blank" rel="noreferrer noopener" class="plug-promo-btn plug-promo-btn-primary">
+                                <a href="https://zsync.eu/extension/" target="_blank" rel="noreferrer noopener" class="plug-promo-btn plug-promo-btn-primary">
                                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
                                     Extension Portal
                                 </a>
@@ -13060,7 +13811,7 @@ if (typeof window !== 'undefined') {
                                 This dashboard integrates with <strong>Multi-Ticket System V4.0.0+</strong> from the ZygnalBot Marketplace.
                             </div>
                         </div>
-                        <a href="https://zygnalbot.com/extension/view.php?id=116" target="_blank" class="tickets-notice-btn">
+                        <a href="https://zsync.eu/extension/view.php?id=116" target="_blank" class="tickets-notice-btn">
                             Install Extension
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
                         </a>
@@ -13132,7 +13883,7 @@ if (typeof window !== 'undefined') {
                                 <div class="tickets-empty-icon"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#a855f7" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7C3 5.89543 3.89543 5 5 5H19C20.1046 5 21 5.89543 21 7V10C19.8954 10 19 10.8954 19 12C19 13.1046 19.8954 14 21 14V17C21 18.1046 20.1046 19 19 19H5C3.89543 19 3 18.1046 3 17V14C4.10457 14 5 13.1046 5 12C5 10.8954 4.10457 10 3 10V7Z"/><line x1="9" y1="9" x2="9" y2="15"/><line x1="12" y1="9" x2="12" y2="15"/><line x1="15" y1="9" x2="15" y2="15"/></svg></div>
                                 <div class="tickets-empty-title">No tickets found</div>
                                 <div class="tickets-empty-text">No tickets exist yet or match your filters</div>
-                                <a href="https://zygnalbot.com/extension/view.php?id=116" target="_blank" class="tickets-empty-link">Get Multi-Ticket System →</a>
+                                <a href="https://zsync.eu/extension/view.php?id=116" target="_blank" class="tickets-empty-link">Get Multi-Ticket System →</a>
                             </div>
                             <div id="tickets-loading" class="tickets-loading">
                                 <div class="tickets-loading-spinner"></div>
@@ -13718,7 +14469,7 @@ if (typeof window !== 'undefined') {
                                 </div>
                                 <div class="credits-info-item">
                                     <span class="credits-info-label">Overview</span>
-                                    <a href="https://zygnalbot.com/bot-framework/" target="_blank" class="credits-info-link">zygnalbot.com/bot-framework</a>
+                                    <a href="https://zsync.eu/zygnalbot/zdbf" target="_blank" class="credits-info-link">zsync.eu/zygnalbot/zdbf</a>
                                 </div>
                                 <div class="credits-info-item">
                                     <span class="credits-info-label">Repository</span>
@@ -13726,7 +14477,7 @@ if (typeof window !== 'undefined') {
                                 </div>
                                 <div class="credits-info-item">
                                     <span class="credits-info-label">Support</span>
-                                    <a href="https://zygnalbot.com/support.html" target="_blank" class="credits-info-link">zygnalbot.com/support</a>
+                                    <a href="https://zsync.eu/zygnalbot/support.html" target="_blank" class="credits-info-link">zysnc.eu/zygnalbot/support</a>
                                 </div>
                             </div>
                         </div>
@@ -13805,6 +14556,9 @@ if (typeof window !== 'undefined') {
                         </div>
                     </div>
                 </div>
+
+                <!-- DASHBOARD_PLUGINS_TABS_PLACEHOLDER -->
+
             </div>
         </div>
 
@@ -13910,6 +14664,8 @@ if (typeof window !== 'undefined') {
                 </svg>
                 Marketplace (BETA)
             </button>
+
+            <!-- DASHBOARD_PLUGINS_DRAWER_PLACEHOLDER -->
 
             <div class="lm-drawer-group-label">Admin</div>
             <button class="lm-drawer-item" data-tab="roles">Roles &amp; Access</button>
@@ -14505,6 +15261,7 @@ if (typeof window !== 'undefined') {
                 marketplace: 'view_marketplace',
                 tickets: 'view_tickets',
                 credits: null,
+                /* DASHBOARD_PLUGINS_TAB_MAP_PLACEHOLDER */
             };
             const key = map[tabName];
             if (!key) return true;
@@ -14535,6 +15292,7 @@ if (typeof window !== 'undefined') {
                 database: 'view_database',
                 marketplace: 'view_marketplace',
                 credits: null,
+                /* DASHBOARD_PLUGINS_TAB_PERM_MAP_PLACEHOLDER */
             };
 
             Object.keys(tabPermMap).forEach(tab => {
@@ -14552,6 +15310,45 @@ if (typeof window !== 'undefined') {
                     tabContent.style.display = allowed ? '' : 'none';
                 }
             });
+            
+            // Check plugin section visibility - hide entire dropdown if no plugins are accessible
+            const pluginSection = document.getElementById('lm-plugin-section');
+            if (pluginSection) {
+                const pluginItems = pluginSection.querySelectorAll('.lm-plugin-item');
+                let visibleCount = 0;
+                
+                pluginItems.forEach(item => {
+                    const viewPerm = item.getAttribute('data-view-perm');
+                    const hasAccess = viewPerm ? !!LM_PERMS[viewPerm] : true;
+                    item.style.display = hasAccess ? '' : 'none';
+                    if (hasAccess) visibleCount++;
+                });
+                
+                // Hide entire plugin section if no plugins are visible
+                pluginSection.style.display = visibleCount > 0 ? '' : 'none';
+                
+                // Update the visible count badge
+                const countBadge = document.getElementById('lm-plugin-visible-count');
+                if (countBadge) {
+                    countBadge.textContent = visibleCount;
+                }
+            }
+            
+            // Also handle drawer plugin section
+            const drawerPluginSection = document.getElementById('lm-drawer-plugin-section');
+            if (drawerPluginSection) {
+                const pluginItems = drawerPluginSection.querySelectorAll('.lm-drawer-item');
+                let visibleCount = 0;
+                
+                pluginItems.forEach(item => {
+                    const viewPerm = item.getAttribute('data-view-perm');
+                    const hasAccess = viewPerm ? !!LM_PERMS[viewPerm] : true;
+                    item.style.display = hasAccess ? '' : 'none';
+                    if (hasAccess) visibleCount++;
+                });
+                
+                drawerPluginSection.style.display = visibleCount > 0 ? '' : 'none';
+            }
         }
 
         // Apply permissions and ensure we start on the Dashboard view
@@ -14913,30 +15710,39 @@ if (typeof window !== 'undefined') {
             
             showNotification('Validating ZygnalID...', 'info');
             
-            try {
-                const validationUrl = `https://zygnalbot.com/extension/api/validate_zid.php?zygnalid=${encodeURIComponent(zygnalId)}`;
-                console.log('[MARKETPLACE] Validating at:', validationUrl);
-                
-                const validationResp = await fetch(validationUrl);
-                console.log('[MARKETPLACE] Validation response status:', validationResp.status);
-                
-                if (validationResp.status !== 200) {
-                    openModal('ZygnalID Validation Failed', 
+            // Use backend to validate to avoid CORS issues
+            const validationResult = await new Promise((resolve) => {
+                sendCommandWithResponse('validate_zygnal_id', {zygnal_id: zygnalId}, (resp) => {
+                    console.log('[MARKETPLACE] Validation result:', resp);
+                    resolve(resp);
+                }, 30);
+            });
+            
+            if (!validationResult || !validationResult.success) {
+                 console.error('[MARKETPLACE] Validation error:', validationResult?.error || 'Unknown error');
+                 openModal('Validation Error', 
+                    'Failed to validate ZygnalID via bot.\\n\\n' +
+                    'Error: ' + (validationResult?.error || 'Bot communication failed') + '\\n\\n' +
+                    'Please check your bot connection.'
+                );
+                restoreButton();
+                return;
+            }
+
+            if (validationResult.status !== 200) {
+                 openModal('ZygnalID Validation Failed', 
                         'Could not connect to validation server.\\n\\n' +
                         'ZygnalID: ' + zygnalId + '\\n' +
-                        'Status: ' + validationResp.status + '\\n\\n' +
+                        'Status: ' + validationResult.status + '\\n\\n' +
                         'Please try again later.'
                     );
                     restoreButton();
                     return;
-                }
-                
-                // Parse JSON response
-                const validationData = await validationResp.json();
-                console.log('[MARKETPLACE] Validation data:', validationData);
-                
-                if (!validationData.valid) {
-                    openModal('ZygnalID Not Activated', 
+            }
+
+            const validationData = validationResult.data;
+            if (!validationData || validationData.valid !== true) {
+                 openModal('ZygnalID Not Activated', 
                         '❌ Your ZygnalID is not activated or is invalid.\\n\\n' +
                         'ZygnalID: ' + zygnalId + '\\n\\n' +
                         '📋 ACTIVATION STEPS:\\n' +
@@ -14950,19 +15756,9 @@ if (typeof window !== 'undefined') {
                     );
                     restoreButton();
                     return;
-                }
-                
-                showNotification('ZygnalID validated successfully!', 'success');
-            } catch (err) {
-                console.error('[MARKETPLACE] Validation error:', err);
-                openModal('Validation Error', 
-                    'Failed to validate ZygnalID.\\n\\n' +
-                    'Error: ' + err.message + '\\n\\n' +
-                    'Please check your internet connection and try again.'
-                );
-                restoreButton();
-                return;
             }
+            
+            showNotification('ZygnalID validated successfully!', 'success');
             
             const shouldLoad = confirm(`Download ${extension.title}?\\n\\nWould you like to automatically load it after download?`);
             console.log('[MARKETPLACE] Auto-load after download:', shouldLoad);
@@ -14987,7 +15783,7 @@ if (typeof window !== 'undefined') {
                     if (shouldLoad && response.filepath) {
                         console.log('[MARKETPLACE] Auto-loading extension:', response.filepath);
                         setTimeout(() => {
-                            loadDownloadedExtension(response.filepath, extension.title);
+                            loadDownloadedExtension(response.filepath, extension.title, response.filename);
                         }, 1500);
                     } else if (shouldLoad && !response.filepath) {
                         console.warn('[MARKETPLACE] Cannot auto-load: filepath not provided in response');
@@ -15013,17 +15809,23 @@ if (typeof window !== 'undefined') {
             }, 120);
         }
 
-        function loadDownloadedExtension(filepath, extensionName) {
-            // Use platform-appropriate path separator
-            const separator = (platformOS === 'Windows') ? '\\\\' : '/';
-            const filename = filepath.split(separator).pop() || filepath.split(/[\\\\/]/).pop();
+        function loadDownloadedExtension(filepath, extensionName, filenameOverride) {
+            let filename;
+            if (filenameOverride) {
+                filename = filenameOverride;
+            } else {
+                // Use platform-appropriate path separator
+                const separator = (platformOS === 'Windows') ? '\\\\' : '/';
+                filename = filepath.split(separator).pop() || filepath.split(/[\\\\/]/).pop();
+            }
+
             const extensionNameFromFile = filename.replace(/\\.(py|pyw)$/, '');
             const extensionPath = `extensions.${extensionNameFromFile}`;
             
-            console.log('[MARKETPLACE] Platform:', platformOS, 'Separator:', separator);
-            console.log('[MARKETPLACE] Loading extension:', extensionPath, 'from filepath:', filepath);
+            console.log('[MARKETPLACE] Loading extension:', extensionPath, 'from filepath:', filepath, 'filename:', filename);
             showNotification(`Loading ${extensionName}...`, 'info');
-            sendCommand('load_extension', { extension: extensionPath });
+            // Use load_downloaded_extension which handles both fresh loads and reloads better for marketplace flow
+            sendCommand('load_downloaded_extension', { filepath: filepath, filename: filename });
         }
 
         function renderMarkdown(text) {
@@ -18134,6 +18936,7 @@ if (typeof window !== 'undefined') {
                 { key: 'view_marketplace', label: 'Extension Marketplace' },
                 { key: 'view_bot_invite', label: 'Bot Invite Helper' },
                 { key: 'view_roles', label: 'Roles & Access' },
+                /* DASHBOARD_PLUGINS_VIEW_PERMS_PLACEHOLDER */
             ];
 
             const CONTROL_PERM_DEFS = [
@@ -18218,6 +19021,7 @@ if (typeof window !== 'undefined') {
                 { key: 'action_db_read', label: 'Read Database Records' },
                 { key: 'action_db_update', label: 'Update Database Records' },
                 { key: 'action_db_delete', label: 'Delete Database Records' },
+                /* DASHBOARD_PLUGINS_ACTION_PERMS_PLACEHOLDER */
             ];
 
             const OTHER_PERM_DEFS = [];
@@ -20860,7 +21664,7 @@ if (typeof window !== 'undefined') {
             }
         }
         
-        
+        /* DASHBOARD_PLUGINS_JS_PLACEHOLDER */
 
 </script>
 </body>
@@ -20872,8 +21676,82 @@ if (typeof window !== 'undefined') {
         The underlying HTML/JS is still generated by `_generate_index_html`, but
         index.php adds a lightweight guard that ensures the dashboard is either
         in one-time setup mode or requires a logged-in Discord user.
+        
+        Also injects Dashboard Plugin System content.
         """
+        # Discover dashboard plugins
+        if not self._plugins_discovered:
+            self._dashboard_plugins = self._discover_dashboard_plugins()
+            self._plugins_discovered = True
+        
+        plugins = self._dashboard_plugins
+        
         base_html = self._generate_index_html(token)
+        
+        # Inject plugin content into placeholders
+        if plugins:
+            # Sidebar - plugin dropdown
+            sidebar_html = self._generate_plugin_sidebar_html(plugins)
+            base_html = base_html.replace('<!-- DASHBOARD_PLUGINS_SIDEBAR_PLACEHOLDER -->', sidebar_html)
+            
+            # Drawer - plugin items (with different IDs for drawer)
+            drawer_html = self._generate_plugin_sidebar_html(plugins)
+            drawer_html = drawer_html.replace('lm-sidebar-item', 'lm-drawer-item')
+            drawer_html = drawer_html.replace('lm-sidebar-group-label', 'lm-drawer-group-label')
+            drawer_html = drawer_html.replace('id="lm-plugin-section"', 'id="lm-drawer-plugin-section"')
+            drawer_html = drawer_html.replace('id="lm-plugin-dropdown"', 'id="lm-drawer-plugin-dropdown"')
+            drawer_html = drawer_html.replace('id="lm-plugin-visible-count"', 'id="lm-drawer-plugin-visible-count"')
+            drawer_html = drawer_html.replace('togglePluginDropdown()', 'toggleDrawerPluginDropdown()')
+            base_html = base_html.replace('<!-- DASHBOARD_PLUGINS_DRAWER_PLACEHOLDER -->', drawer_html)
+            
+            # Tab content
+            tabs_html = self._generate_plugin_tabs_html(plugins)
+            base_html = base_html.replace('<!-- DASHBOARD_PLUGINS_TABS_PLACEHOLDER -->', tabs_html)
+            
+            # CSS
+            css_html = self._generate_plugin_dropdown_css()
+            base_html = base_html.replace('/* DASHBOARD_PLUGINS_CSS_PLACEHOLDER */', css_html)
+            
+            # JavaScript - dropdown and tab mapping
+            js_html = self._generate_plugin_dropdown_js() + self._generate_plugin_tab_mapping_js(plugins)
+            base_html = base_html.replace('/* DASHBOARD_PLUGINS_JS_PLACEHOLDER */', js_html)
+            
+            # Permission definitions in the Roles & Access UI
+            all_perms = self._get_all_plugin_permissions(plugins)
+            
+            # View permissions for VIEW_PERM_DEFS array
+            view_perms_js = ""
+            for perm in all_perms['view']:
+                view_perms_js += f"{{ key: '{perm['key']}', label: '{perm['label']}' }},\n                "
+            base_html = base_html.replace('/* DASHBOARD_PLUGINS_VIEW_PERMS_PLACEHOLDER */', view_perms_js.rstrip().rstrip(','))
+            
+            # Action permissions for CONTROL_PERM_DEFS array
+            action_perms_js = ""
+            for perm in all_perms['actions']:
+                label = perm['label'].replace("'", "\\'")
+                action_perms_js += f"{{ key: '{perm['key']}', label: '{label}' }},\n                "
+            base_html = base_html.replace('/* DASHBOARD_PLUGINS_ACTION_PERMS_PLACEHOLDER */', action_perms_js.rstrip().rstrip(','))
+            
+            # Tab permission mappings for isTabAllowedByPerms and applyPermissionsToUI
+            tab_map_js = ""
+            for plugin in plugins:
+                plugin_id = plugin['id']
+                view_perm = plugin.get('permissions', {}).get('view', f'view_{plugin_id}')
+                tab_map_js += f"'{plugin_id}': '{view_perm}',\n                "
+            base_html = base_html.replace('/* DASHBOARD_PLUGINS_TAB_MAP_PLACEHOLDER */', tab_map_js.rstrip().rstrip(','))
+            base_html = base_html.replace('/* DASHBOARD_PLUGINS_TAB_PERM_MAP_PLACEHOLDER */', tab_map_js.rstrip().rstrip(','))
+        else:
+            # No plugins - remove placeholders
+            base_html = base_html.replace('<!-- DASHBOARD_PLUGINS_SIDEBAR_PLACEHOLDER -->', '')
+            base_html = base_html.replace('<!-- DASHBOARD_PLUGINS_DRAWER_PLACEHOLDER -->', '')
+            base_html = base_html.replace('<!-- DASHBOARD_PLUGINS_TABS_PLACEHOLDER -->', '')
+            base_html = base_html.replace('/* DASHBOARD_PLUGINS_CSS_PLACEHOLDER */', '')
+            base_html = base_html.replace('/* DASHBOARD_PLUGINS_JS_PLACEHOLDER */', '')
+            base_html = base_html.replace('/* DASHBOARD_PLUGINS_VIEW_PERMS_PLACEHOLDER */', '')
+            base_html = base_html.replace('/* DASHBOARD_PLUGINS_ACTION_PERMS_PLACEHOLDER */', '')
+            base_html = base_html.replace('/* DASHBOARD_PLUGINS_TAB_MAP_PLACEHOLDER */', '')
+            base_html = base_html.replace('/* DASHBOARD_PLUGINS_TAB_PERM_MAP_PLACEHOLDER */', '')
+        
         php_guard = """<?php
 require_once __DIR__ . '/lm_db.php';
 require_once __DIR__ . '/lm_auth.php';
@@ -21662,9 +22540,9 @@ function lm_ensure_schema() {
 ?>
 '''
 
-    def _generate_lm_auth_php(self) -> str:
+    def _generate_lm_auth_php(self, plugins: List[Dict] = None) -> str:
         """Authentication helpers: sessions, roles, audit logging, guards."""
-        return '''<?php
+        base_php = '''<?php
 // Prevent direct access to this file
 if (basename($_SERVER['PHP_SELF']) == basename(__FILE__)) {
     http_response_code(403);
@@ -22254,6 +23132,9 @@ function lm_default_permissions_for_tier(string $tier): array {
                 'action_db_read' => true,
                 'action_db_update' => true,
                 'action_db_delete' => true,
+                
+                // DASHBOARD PLUGIN PERMISSIONS (dynamically added)
+                /* DASHBOARD_PLUGINS_OWNER_PERMISSIONS_PLACEHOLDER */
             ];
 
         case 'CUSTOM':
@@ -22864,6 +23745,14 @@ function lm_render_error_page(int $code, string $title, string $message, string 
 
 ?>
 '''
+        # Inject plugin permissions for OWNER
+        if plugins:
+            plugin_perms_php = self._generate_plugin_owner_permissions_php(plugins)
+            base_php = base_php.replace('/* DASHBOARD_PLUGINS_OWNER_PERMISSIONS_PLACEHOLDER */', plugin_perms_php)
+        else:
+            base_php = base_php.replace('/* DASHBOARD_PLUGINS_OWNER_PERMISSIONS_PLACEHOLDER */', '')
+        
+        return base_php
 
     def _generate_setup_php(self) -> str:
         """One-time setup wizard page (Discord OAuth config + claim link)."""
@@ -25635,7 +26524,7 @@ try {
     }}
 
     $package = $_GET['package'] ?? 'unknown';
-    $validPackages = ['core', 'commands', 'plugins', 'hooks', 'extensions', 'system_details', 'events', 'filesystem', 'fileops', 'assets', 'tickets', 'hook_creator', 'status'];
+    $validPackages = ['core', 'commands', 'plugins', 'hooks', 'extensions', 'system_details', 'events', 'filesystem', 'fileops', 'assets', 'tickets', 'hook_creator', 'status', 'plugin_response', 'plugin_requests_clear'];
 
     if (!in_array($package, $validPackages)) {{
         http_response_code(400);
@@ -25689,6 +26578,46 @@ try {
 
         http_response_code(200);
         echo json_encode(['success' => true, 'message' => 'Assets uploaded', 'count' => $written]);
+        exit;
+    }}
+
+    // Handle plugin API responses from the bot
+    if ($package === 'plugin_response') {{
+        $requestId = $decoded->request_id ?? null;
+        $response = $decoded->response ?? null;
+        
+        if (!$requestId) {{
+            http_response_code(400);
+            die(json_encode(['error' => 'Missing request_id']));
+        }}
+        
+        $responseFile = __DIR__ . "/monitor_data_plugin_response_$requestId.json";
+        if (file_put_contents($responseFile, json_encode($response), LOCK_EX) === false) {{
+            http_response_code(500);
+            die(json_encode(['error' => 'Could not write response']));
+        }}
+        chmod($responseFile, 0644);
+        
+        http_response_code(200);
+        echo json_encode(['success' => true, 'message' => 'Plugin response saved']);
+        exit;
+    }}
+    
+    // Handle clearing processed plugin requests
+    if ($package === 'plugin_requests_clear') {{
+        $processedIds = $decoded->ids ?? [];
+        $queueFile = __DIR__ . '/monitor_data_plugin_requests.json';
+        
+        if (file_exists($queueFile)) {{
+            $requests = json_decode(file_get_contents($queueFile), true) ?: [];
+            $requests = array_filter($requests, function($r) use ($processedIds) {{
+                return !in_array($r['id'] ?? '', $processedIds);
+            }});
+            file_put_contents($queueFile, json_encode(array_values($requests), JSON_PRETTY_PRINT), LOCK_EX);
+        }}
+        
+        http_response_code(200);
+        echo json_encode(['success' => true, 'message' => 'Processed requests cleared']);
         exit;
     }}
 
