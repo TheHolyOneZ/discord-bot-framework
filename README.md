@@ -32,7 +32,7 @@
 <details>
 <summary><strong>Click to expand</strong></summary>
   
-- [Important Notice / Data Protection](#Important-Notice-/-Data-Protection)
+- [Important Notice / Data Protection](#important-notice--data-protection)
 - [🌟 What Makes This Framework Special](#-what-makes-this-framework-special)
   - [🏗️ Enterprise-Grade Architecture](#️-enterprise-grade-architecture)
   - [🎯 Developer Experience](#-developer-experience)
@@ -3878,6 +3878,7 @@ IMPORTANT NOTE: If you are using this framework, please be aware that you are so
 
 
 ---
+
 
 
 
