@@ -1381,7 +1381,7 @@ echo json_encode([
                 }
                 fw_section = self.bot.config.get("framework", {}) or {}
                 framework_info = {
-                    "version": "1.5.3",
+                    "version": "1.5.4",
                     "recommended_python": fw_section.get("recommended_python", "3.12.7"),
                     "python_runtime": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
                     "docs_url": "https://zsync.eu/zdbf",
@@ -3070,6 +3070,7 @@ echo json_encode([
             (output_dir / "get_transcript.php").write_text(self._generate_get_transcript_php(), encoding='utf-8')
             (output_dir / "download_transcript.php").write_text(self._generate_download_transcript_php(), encoding='utf-8')
             (output_dir / "delete_ticket.php").write_text(self._generate_delete_ticket_php(), encoding='utf-8')
+            (output_dir / "privacy_api.php").write_text(self._generate_privacy_api_php(), encoding='utf-8')
             (output_dir / "transcript_view.php").write_text(self._generate_transcript_view_php(), encoding='utf-8')
 
             # Security: Generate .htaccess files to protect sensitive files
@@ -3331,6 +3332,7 @@ echo json_encode([
             (output_dir / "get_transcript.php").write_text(self._generate_get_transcript_php(), encoding='utf-8')
             (output_dir / "download_transcript.php").write_text(self._generate_download_transcript_php(), encoding='utf-8')
             (output_dir / "delete_ticket.php").write_text(self._generate_delete_ticket_php(), encoding='utf-8')
+            (output_dir / "privacy_api.php").write_text(self._generate_privacy_api_php(), encoding='utf-8')
             (output_dir / "transcript_view.php").write_text(self._generate_transcript_view_php(), encoding='utf-8')
 
             # Security: Generate .htaccess files to protect sensitive files
@@ -11851,6 +11853,7 @@ echo json_encode([
                             Details
                         </button>
                         <div id="lm-user-pill" class="lm-user-pill"></div>
+                        <button id="privacy-settings-btn" class="header-info-button" onclick="openPrivacyModal()">Privacy Settings</button>
                     </div>
                 </div>
                 <div class="main-header-metrics">
@@ -14720,6 +14723,33 @@ if (typeof window !== 'undefined') {
         </div>
     </div>
 
+        <div id="privacy-modal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <div class="modal-title">Privacy Settings</div>
+                    <button class="close-button" onclick="closePrivacyModal()">&times;</button>
+                </div>
+                <div id="privacy-modal-body" style="padding: 24px;">
+                    <p style="font-size:14px; color: var(--text-secondary); margin-bottom: 20px;">Your privacy is important. Here you can control how your data is handled within the dashboard.</p>
+                    <div style="background: rgba(0,0,0,0.2); border-radius: 12px; padding: 16px; border: 1px solid var(--border);">
+                        <div style="display: flex; align-items: center; justify-content: space-between;">
+                            <div>
+                                <label for="modal-log-ip-toggle" style="font-size: 14px; font-weight: 600; color: #cbd5e1; cursor: pointer; margin: 0;">Allow IP Address Logging</label>
+                                <p style="font-size: 12px; color: #9ca3af; margin-top: 4px;">When enabled, your IP address is recorded in the audit log for security purposes.</p>
+                            </div>
+                            <div class="toggle-pill" id="modal-log-ip-toggle-pill" onclick="this.classList.toggle('on')">
+                                <span class="toggle-pill-knob"></span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="actions" style="margin-top: 24px; display:flex; justify-content: flex-end; gap: 12px;">
+                         <button class="button button-secondary" onclick="closePrivacyModal()">Cancel</button>
+                         <button class="button button-primary" onclick="savePrivacySettings()">Save Changes</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
     <script>
 <?php
     $u = lm_current_user();
@@ -17508,25 +17538,15 @@ if (typeof window !== 'undefined') {
         }
 
         function getFiles(path) {
-            let current = currentFileTree;
-            const parts = path.split('/').filter(p => p);
-            for(let part of parts) {
-                current = current[part];
-                if(!current) return [];
+            // Normalize path to match how it's stored: remove leading './' if present
+            const normalizedPath = path.startsWith('./') ? path.substring(2) : path;
+            const entry = currentFileTree[normalizedPath];
+
+            if (entry && entry.files && Array.isArray(entry.files)) {
+                return entry.files;
             }
 
-            if(Array.isArray(current)) return current;
-
-            const folders = [];
-            const files = [];
-            for(let key in current) {
-                if(typeof current[key] === 'object' && !Array.isArray(current[key]) && key !== 'files' && key !== 'loaded') {
-                    folders.push({ name: key, type: 'folder' });
-                } else if (key === 'files' && Array.isArray(current[key])) {
-                    return current[key];
-                }
-            }
-            return [...folders, ...files];
+            return [];
         }
 
         function renderBreadcrumb() {
@@ -21664,6 +21684,49 @@ if (typeof window !== 'undefined') {
             }
         }
         
+
+        function openPrivacyModal() {
+            fetch('privacy_api.php')
+                .then(res => res.json())
+                .then(data => {
+                    if (data.success) {
+                        const toggle = document.getElementById('modal-log-ip-toggle-pill');
+                        if (data.log_ip) {
+                            toggle.classList.add('on');
+                        } else {
+                            toggle.classList.remove('on');
+                        }
+                    }
+                });
+            document.getElementById('privacy-modal').classList.add('active');
+        }
+
+        function closePrivacyModal() {
+            document.getElementById('privacy-modal').classList.remove('active');
+        }
+
+        function savePrivacySettings() {
+            const toggle = document.getElementById('modal-log-ip-toggle-pill');
+            const log_ip = toggle.classList.contains('on');
+            
+            fetch('privacy_api.php', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ log_ip: log_ip })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    showNotification('Privacy settings saved!', 'success');
+                    // Refresh permissions to get updated session values
+                    refreshPermissions();
+                } else {
+                    showNotification('Error saving settings: ' + data.error, 'error');
+                }
+                closePrivacyModal();
+            });
+        }
+
         /* DASHBOARD_PLUGINS_JS_PLACEHOLDER */
 
 </script>
@@ -22471,10 +22534,18 @@ function lm_ensure_schema() {
             display_name VARCHAR(128) NOT NULL,\r
             avatar_url VARCHAR(255) NULL,\r
             role VARCHAR(16) NOT NULL,\r
+            log_ip INTEGER NOT NULL DEFAULT 1,\r
             created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,\r
             updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP\r
         );\r
     ");
+
+    // Best-effort migration: add log_ip if an older table exists without it
+    try {
+        $pdo->exec("ALTER TABLE dashboard_users ADD COLUMN log_ip INTEGER NOT NULL DEFAULT 1");
+    } catch (Throwable $e) {
+        // Ignore if column already exists
+    }
 
     // Audit logs
     $pdo->exec("\r
@@ -22940,7 +23011,7 @@ function lm_log_audit(string $action, ?string $targetType = null, ?string $targe
             actor_user_id, actor_discord_id, action, target_type, target_id, ip_address, user_agent, meta_json
         ) VALUES (:uid, :did, :action, :tt, :tid, :ip, :ua, :meta)');
 
-        $ip = $_SERVER['REMOTE_ADDR'] ?? null;
+        $ip = ($_SESSION['log_ip'] ?? false) ? ($_SERVER['REMOTE_ADDR'] ?? null) : null;
         $ua = $_SERVER['HTTP_USER_AGENT'] ?? null;
 
         $stmt->execute([
@@ -23995,6 +24066,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'start_oauth') {
 
     $state = bin2hex(random_bytes(16));
     $_SESSION['lm_oauth_state'] = $state;
+    $_SESSION['log_ip_preference'] = $_GET['log_ip'] ?? '1';
 
     $params = [
         'client_id' => $clientId,
@@ -24413,6 +24485,33 @@ if (isset($_GET['action']) && $_GET['action'] === 'start_oauth') {
             color: #93c5fd;
         }
         
+        .privacy-toggle {
+            appearance: none;
+            width: 40px;
+            height: 22px;
+            background: rgba(148, 163, 184, 0.3);
+            border-radius: 999px;
+            position: relative;
+            cursor: pointer;
+            transition: all 0.2s ease-in-out;
+        }
+        .privacy-toggle::before {
+            content: '';
+            position: absolute;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: white;
+            top: 3px;
+            left: 3px;
+            transition: all 0.2s ease-in-out;
+        }
+        .privacy-toggle:checked {
+            background: #5865F2;
+        }
+        .privacy-toggle:checked::before {
+            transform: translateX(18px);
+        }
         .login-button-row {
             margin-top: 8px;
             display: flex;
@@ -24568,6 +24667,18 @@ if (isset($_GET['action']) && $_GET['action'] === 'start_oauth') {
                     This dashboard uses Discord OAuth2 with the <code>identify</code> scope only. Your Discord ID and name are stored
                     in the local <code>dashboard.sqlite</code> database for access control and audit logging.
                 </div>
+                <div>
+                <div class="login-section-label">Privacy Notice</div>
+                <div class="login-callout" style="font-size: 11px; line-height: 1.5;">
+                    After you login, your IP address may be logged in our database. The owner of this framework, TheHolyOneZ, does NOT have access to it or can see it. It will be logged in the database of the user who owns this bot right now! So be aware that when you login, the owner would be able to see your IP address inside the audit logs. If you want this to NOT happen, please toggle this switch off.
+                </div>
+                <div style="margin-top: 12px; display: flex; align-items: center; justify-content: space-between; padding: 10px; background: rgba(0,0,0,0.2); border-radius: 8px;">
+                    <label for="log-ip-toggle" style="font-size: 13px; color: #cbd5e1; cursor: pointer; margin: 0;">Allow IP Address Logging</label>
+                    <input type="checkbox" id="log-ip-toggle" class="privacy-toggle" checked>
+                </div>
+            </div>
+
+            <div class="login-button-row">
                 <div class="login-button-row">
                     <?php if ($oauthConfigured): ?>
                         <a href="?action=start_oauth" class="btn-discord">
@@ -24585,6 +24696,22 @@ if (isset($_GET['action']) && $_GET['action'] === 'start_oauth') {
             </div>
         </div>
     </div>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const toggle = document.getElementById('log-ip-toggle');
+            const link = document.querySelector('a.btn-discord');
+            if (toggle && link) {
+                const updateLink = () => {
+                    const url = new URL(link.href, window.location.origin);
+                    url.searchParams.set('log_ip', toggle.checked ? '1' : '0');
+                    link.href = url.toString();
+                };
+                toggle.addEventListener('change', updateLink);
+                // Set initial state
+                updateLink();
+            }
+        });
+    </script>
 </body>
 </html>
 '''
@@ -24708,16 +24835,21 @@ try {
         $config['setup_token'] = null;
         lm_save_config($config);
 
-        $stmt = $pdo->prepare('INSERT INTO dashboard_users (discord_user_id, display_name, avatar_url, role) VALUES (:did, :name, :avatar, :role)');
+        $log_ip = ($_SESSION['log_ip_preference'] ?? '1') === '1' ? 1 : 0;
+        unset($_SESSION['log_ip_preference']);
+
+        $stmt = $pdo->prepare('INSERT INTO dashboard_users (discord_user_id, display_name, avatar_url, role, log_ip) VALUES (:did, :name, :avatar, :role, :log_ip)');
         $stmt->execute([
             ':did' => $discordId,
             ':name' => $displayName,
             ':avatar' => $avatarUrl,
             ':role' => 'OWNER',
+            ':log_ip' => $log_ip,
         ]);
 
         $userId = (int)$pdo->lastInsertId();
         $_SESSION['lm_user_id'] = $userId;
+        $_SESSION['log_ip'] = (bool)$log_ip;
         lm_log_audit('DASHBOARD_CLAIMED', 'USER', $discordId, []);
         lm_log_audit('LOGIN_SUCCESS', 'USER', $discordId, ['role' => 'OWNER']);
     } else {
@@ -25310,6 +25442,17 @@ HTML;
             ':avatar' => $avatarUrl,
             ':id' => $existing['id'],
         ]);
+
+        // If a preference was passed from the login form, update it in the DB
+        if (isset($_SESSION['log_ip_preference'])) {
+            $log_ip = ($_SESSION['log_ip_preference'] ?? '1') === '1' ? 1 : 0;
+            $upd = $pdo->prepare('UPDATE dashboard_users SET log_ip = :log_ip, updated_at = CURRENT_TIMESTAMP WHERE id = :id');
+            $upd->execute([':log_ip' => $log_ip, ':id' => $existing['id']]);
+            $_SESSION['log_ip'] = (bool)$log_ip;
+            unset($_SESSION['log_ip_preference']);
+        } else {
+            $_SESSION['log_ip'] = (bool)($existing['log_ip'] ?? true);
+        }
 
         $_SESSION['lm_user_id'] = $existing['id'];
         lm_log_audit('LOGIN_SUCCESS', 'USER', $discordId, ['role' => $existing['role'] ?? 'UNKNOWN']);
@@ -27178,6 +27321,58 @@ echo json_encode([
     'success' => true,
     'message' => 'Deletion queued. Bot will process it shortly.'
 ]);
+?>'''
+
+    def _generate_privacy_api_php(self) -> str:
+        """Generate PHP endpoint for updating privacy settings."""
+        return '''<?php
+require_once __DIR__ . '/lm_auth.php';
+
+lm_start_session_if_needed();
+lm_ensure_schema();
+$user = lm_current_user();
+if (!$user) {
+    http_response_code(403);
+    header('Content-Type: application/json');
+    echo json_encode(['error' => 'Not logged in']);
+    exit;
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $input = json_decode(file_get_contents('php://input'), true);
+    $log_ip = isset($input['log_ip']) ? (bool)$input['log_ip'] : false;
+
+    try {
+        $pdo = lm_db();
+        $stmt = $pdo->prepare('UPDATE dashboard_users SET log_ip = :log_ip WHERE id = :id');
+        $stmt->execute([':log_ip' => $log_ip ? 1 : 0, ':id' => $user['id']]);
+        
+        $_SESSION['log_ip'] = $log_ip;
+        
+        lm_log_audit('PRIVACY_UPDATE', 'USER', $user['discord_user_id'], ['log_ip' => $log_ip]);
+
+        header('Content-Type: application/json');
+        echo json_encode(['success' => true, 'message' => 'Privacy settings updated.']);
+    } catch (Throwable $e) {
+        http_response_code(500);
+        header('Content-Type: application/json');
+        echo json_encode(['error' => 'Database error: ' . $e->getMessage()]);
+    }
+    exit;
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'GET') {
+    header('Content-Type: application/json');
+    echo json_encode([
+        'success' => true,
+        'log_ip' => isset($_SESSION['log_ip']) ? (bool)$_SESSION['log_ip'] : true
+    ]);
+    exit;
+}
+
+http_response_code(405);
+header('Content-Type: application/json');
+echo json_encode(['error' => 'Method not allowed']);
 ?>'''
 
     def _generate_transcript_view_php(self) -> str:
