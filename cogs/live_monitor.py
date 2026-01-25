@@ -75,6 +75,7 @@ By using or modifying this framework, you agree to comply with this notice
 and the LICENSE file located in the main project directory.
 """
 
+
 from discord.ext import commands, tasks
 import discord
 from discord import app_commands
@@ -125,7 +126,7 @@ class LiveMonitor(commands.Cog):
 
         self._fileops_lock = asyncio.Lock()
 
-        # Dashboard Plugin System
+
         self._dashboard_plugins = []
         self._plugins_discovered = False
 
@@ -239,9 +240,9 @@ class LiveMonitor(commands.Cog):
         except Exception as e:
             logger.error(f"Live Monitor: Failed to save config: {e}")
     
-    # ═══════════════════════════════════════════════════════════════════════════════
-    # DASHBOARD PLUGIN SYSTEM
-    # ═══════════════════════════════════════════════════════════════════════════════
+
+
+
     
     def _discover_dashboard_plugins(self) -> List[Dict[str, Any]]:
         """
@@ -261,7 +262,7 @@ class LiveMonitor(commands.Cog):
             logger.info("Dashboard Plugin System: extensions/ folder not found")
             return plugins
         
-        # Scan all .py files recursively
+
         for py_file in extensions_dir.rglob("*.py"):
             try:
                 plugin = self._extract_plugin_from_file(py_file)
@@ -271,7 +272,7 @@ class LiveMonitor(commands.Cog):
             except Exception as e:
                 logger.error(f"Dashboard Plugin System: Error scanning {py_file}: {e}")
         
-        # Sort by position
+
         plugins.sort(key=lambda p: p.get('position', 99))
         
         logger.info(f"Dashboard Plugin System: Found {len(plugins)} compatible plugin(s)")
@@ -289,18 +290,18 @@ class LiveMonitor(commands.Cog):
             logger.error(f"Could not read {file_path}: {e}")
             return None
         
-        # Quick check - does file contain the compatibility flag?
+
         if 'DASHBOARD_COMPATIBLE' not in content:
             return None
         
-        # Parse AST
+
         try:
             tree = ast.parse(content)
         except SyntaxError as e:
             logger.error(f"Syntax error in {file_path}: {e}")
             return None
         
-        # Extract module-level assignments
+
         assignments = {}
         for node in ast.walk(tree):
             if isinstance(node, ast.Assign):
@@ -316,28 +317,28 @@ class LiveMonitor(commands.Cog):
                         except Exception:
                             pass
         
-        # Check compatibility flag
+
         if assignments.get('DASHBOARD_COMPATIBLE') is not True:
             return None
         
-        # Get plugin config
+
         plugin_config = assignments.get('DASHBOARD_PLUGIN')
         if not plugin_config or not isinstance(plugin_config, dict):
             logger.warning(f"DASHBOARD_COMPATIBLE=True but no valid DASHBOARD_PLUGIN in {file_path}")
             return None
         
-        # Validate required fields
+
         if 'id' not in plugin_config or 'name' not in plugin_config:
             logger.warning(f"Plugin in {file_path} missing required 'id' or 'name' field")
             return None
         
-        # Extract HTML/CSS/JS using regex (more reliable for multiline strings)
+
         plugin_config['_html'] = self._extract_multiline_string(content, 'DASHBOARD_HTML')
         plugin_config['_css'] = self._extract_multiline_string(content, 'DASHBOARD_CSS')
         plugin_config['_js'] = self._extract_multiline_string(content, 'DASHBOARD_JS')
         plugin_config['_source_file'] = str(file_path)
         
-        # Ensure permissions structure exists
+
         if 'permissions' not in plugin_config:
             plugin_config['permissions'] = {}
         if 'view' not in plugin_config['permissions']:
@@ -390,7 +391,7 @@ class LiveMonitor(commands.Cog):
         return result
     
     def _extract_multiline_string(self, content: str, var_name: str) -> str:
-        """Extract a multiline string assignment from Python source code."""
+        
         patterns = [
             rf'{var_name}\s*=\s*"""(.*?)"""',
             rf"{var_name}\s*=\s*'''(.*?)'''",
@@ -476,7 +477,7 @@ class LiveMonitor(commands.Cog):
             html = plugin.get('_html', '')
             js = plugin.get('_js', '')
             
-            # Build the tab HTML using string concatenation to avoid f-string issues with curly braces
+
             tab_content = '''
             <!-- Plugin Tab: ''' + plugin_name + ''' -->
             <div id="tab-''' + plugin_id + '''" class="tab-content">
@@ -527,7 +528,7 @@ class LiveMonitor(commands.Cog):
         '''
     
     def _generate_plugin_tab_mapping_js(self, plugins: List[Dict]) -> str:
-        """Generate JavaScript to add plugin tabs to the permission mapping."""
+        """Generate JavaScript to add plugin tabs to the permission mappin"""
         if not plugins:
             return ""
         
@@ -657,7 +658,7 @@ class LiveMonitor(commands.Cog):
                 if action:
                     perm_map[plugin_id][action] = requires
         
-        # Convert to PHP array syntax
+
         def to_php_array(obj, indent=0):
             spaces = '    ' * indent
             if obj is None:
@@ -800,7 +801,7 @@ echo json_encode([
         base_url = str(self.config["website_url"]).rstrip("/")
         token = self.config.get("secret_token", "")
         
-        # Fetch pending requests
+
         try:
             async with aiohttp.ClientSession() as session:
                 url = f"{base_url}/monitor_data_plugin_requests.json"
@@ -827,7 +828,7 @@ echo json_encode([
             
             response = {'error': f'Plugin {plugin_id} not found or not loaded'}
             
-            # Find the cog for this plugin
+
             for cog in self.bot.cogs.values():
                 try:
                     cog_module = type(cog).__module__
@@ -847,7 +848,7 @@ echo json_encode([
                 except Exception as e:
                     logger.error(f"Error finding plugin cog: {e}")
             
-            # Send response back
+
             try:
                 response_url = f"{base_url}/receive.php?token={token}&package=plugin_response"
                 async with aiohttp.ClientSession() as session:
@@ -862,7 +863,7 @@ echo json_encode([
             
             processed_ids.append(request_id)
         
-        # Clear processed requests
+
         if processed_ids:
             try:
                 clear_url = f"{base_url}/receive.php?token={token}&package=plugin_requests_clear"
@@ -872,9 +873,9 @@ echo json_encode([
             except Exception:
                 pass
     
-    # ═══════════════════════════════════════════════════════════════════════════════
-    # END DASHBOARD PLUGIN SYSTEM
-    # ═══════════════════════════════════════════════════════════════════════════════
+
+
+
 
     def _log_event(self, event_type: str, details: Dict[str, Any]):
         self._event_log.append({
@@ -1381,7 +1382,7 @@ echo json_encode([
                 }
                 fw_section = self.bot.config.get("framework", {}) or {}
                 framework_info = {
-                    "version": "1.5.4",
+                    "version": "1.5.5",
                     "recommended_python": fw_section.get("recommended_python", "3.12.7"),
                     "python_runtime": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
                     "docs_url": "https://zsync.eu/zdbf",
@@ -1479,9 +1480,9 @@ echo json_encode([
                     "loaded_at": None,
                     "load_time": load_time,
                     "file_path": str(filepath),
-                    "deps_ok": True,  # Unknown, assume OK
-                    "has_conflicts": False,  # Unknown, assume no conflicts
-                    "has_cycle": False,  # Unknown, assume no cycle
+                    "deps_ok": True,  
+                    "has_conflicts": False,  
+                    "has_cycle": False,  
                     "scan_errors": [],
                     "dep_messages": [],
                     "conflict_messages": [],
@@ -1540,7 +1541,7 @@ echo json_encode([
 
 
         fileops_data = self._fileops_response or {}
-        self._fileops_response = None  # Reset after sending
+        self._fileops_response = None  
 
         recent_events = self._event_log[-30:]
         
@@ -1641,7 +1642,7 @@ echo json_encode([
                             processed_count += 1
                             logger.info(f"Live Monitor: Successfully processed deletion for ticket {ticket_id}")
                     
-                    # Only clear if we actually processed something
+
                     if processed_count > 0:
                         async with session.post(
                             deletion_queue_url,
@@ -2163,13 +2164,14 @@ echo json_encode([
 
                             self._fileops_response = {
                                 "type": "validate_zygnal_id",
+                                "command_type": "validate_zygnal_id",
                                 "request_id": request_id,
                                 "status": status,
                                 "data": data,
                                 "success": True
                             }
                             
-                            # Send response back directly
+
                             async with self._fileops_lock:
                                 try:
                                     base_url = self.config['website_url']
@@ -2187,11 +2189,12 @@ echo json_encode([
                     logger.error(f"Live Monitor: Validation failed: {e}")
                     self._fileops_response = {
                         "type": "validate_zygnal_id",
+                        "command_type": "validate_zygnal_id",
                         "request_id": request_id,
                         "success": False,
                         "error": str(e)
                     }
-                    # Send error response back
+
                     async with self._fileops_lock:
                         try:
                             base_url = self.config['website_url']
@@ -2245,10 +2248,10 @@ echo json_encode([
                             
                             if response.status == 200:
                                 try:
-                                    # First get text content to handle PHP warnings/errors that might precede JSON
+
                                     text_content = await response.text()
                                     
-                                    # Try to find JSON content if there's garbage before it (like PHP warnings)
+
                                     json_start = text_content.find('{')
                                     if json_start != -1:
                                         json_content = text_content[json_start:]
@@ -2318,233 +2321,390 @@ echo json_encode([
                                         logger.info(f"Live Monitor: [OK] Error response sent to dashboard")
                         except Exception as send_err:
                             logger.error(f"Live Monitor: [ERROR] Failed to send error response: {send_err}")
-            
+
             elif cmd_type == "download_marketplace_extension":
-
-                try:
-                    base_url = self.config['website_url']
-                    token = self.config['secret_token']
-                    url = f"{base_url}/receive.php?token={token}&package=fileops"
-                    async with aiohttp.ClientSession() as session:
-
-                        await session.post(url, json={}, timeout=aiohttp.ClientTimeout(total=10))
-                except:
-                    pass
-                
                 try:
                     extension_data = params.get("extension")
+                    request_id = params.get("request_id")
+
                     if not extension_data:
-                        self._fileops_response = {"success": False, "error": "No extension data provided"}
+
+                        self._fileops_response = {"success": False, "error": "No extension data provided", "request_id": request_id}
+
                     else:
+
                         zygnal_id_file = Path("./data/marketplace/ZygnalID.txt")
+
                         zygnal_id_file.parent.mkdir(parents=True, exist_ok=True)
-                        
+
+
+
+                        zygnal_id = None
+
                         if zygnal_id_file.exists():
+
                             with open(zygnal_id_file, 'r') as f:
+
                                 zygnal_id = f.read().strip()
-                        else:
-                            import secrets
-                            alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
-                            zygnal_id = ''.join(secrets.choice(alphabet) for _ in range(16))
-                            zygnal_id_file.parent.mkdir(parents=True, exist_ok=True)
-                            with open(zygnal_id_file, 'w') as f:
-                                f.write(zygnal_id)
-                        
-                        if extension_data.get('customUrl'):
-                            base_url = extension_data['customUrl']
-                            if base_url.startswith('http') and zygnal_id:
-                                sep = '&' if ('?' in base_url) else '?'
-                                download_url = f"{base_url}{sep}zygnalid={zygnal_id}"
-                            else:
-                                download_url = base_url
-                        else:
-                            extension_id = extension_data['id']
-                            download_url = f"https://zsync.eu/extension/download.php?id={extension_id}&zygnalid={zygnal_id}"
-                        
 
-                        response_text = None
-                        error = None
-                        max_retries = 3
-                        
-                        for attempt in range(max_retries):
-                            try:
-                                timeout = aiohttp.ClientTimeout(total=60)
-                                async with aiohttp.ClientSession(timeout=timeout) as session:
-                                    async with session.get(download_url) as response:
-                                        if response.status == 200:
-                                            response_text = await response.text()
-                                            break
-                                        elif response.status == 403:
-                                            error = "403"
-                                            break
-                                        elif response.status == 429:
-                                            retry_after = int(response.headers.get('Retry-After', 60))
-                                            if attempt < max_retries - 1:
-                                                logger.warning(f"Rate limited, retrying after {retry_after}s (attempt {attempt + 1}/{max_retries})")
-                                                await asyncio.sleep(retry_after)
-                                                continue
-                                            error = "Rate limited (max retries reached)"
-                                            break
-                                        else:
-                                            error = f"HTTP {response.status}"
-                                            break
-                            except asyncio.TimeoutError:
-                                if attempt < max_retries - 1:
-                                    logger.warning(f"Timeout, retrying (attempt {attempt + 1}/{max_retries})")
-                                    await asyncio.sleep(2 ** attempt)
-                                    continue
-                                error = "Timeout (max retries reached)"
-                                break
-                            except Exception as e:
-                                if attempt < max_retries - 1:
-                                    logger.warning(f"Error: {e}, retrying (attempt {attempt + 1}/{max_retries})")
-                                    await asyncio.sleep(2 ** attempt)
-                                    continue
-                                error = f"Error: {e}"
-                                break
-                        
 
-                        if error and ("403" in str(error) or "Forbidden" in str(error)):
-                            error_message = (
-                                "**ZygnalID Not Activated**\n\n"
-                                "Your ZygnalID is probably NOT activated or got deactivated.\n\n"
-                                "**How to activate:**\n"
-                                "1. Join the ZygnalBot Discord server: `gg/sgZnXca5ts`\n"
-                                "2. Create a ticket with the category **Zygnal Activation**\n"
-                                "3. Read the embed that got sent into the ticket\n"
-                                "4. Provide the information requested\n"
-                                "5. Wait for a supporter or TheHolyOneZ to activate it\n\n"
-                                f"Use `/marketplace myid` to view your ZygnalID"
-                            )
-                            logger.error("Download failed - 403 Forbidden (ZygnalID not activated)")
-                            self._fileops_response = {"success": False, "error": error_message, "error_type": "zygnal_id_not_activated"}
 
-                            try:
-                                base_url = self.config['website_url']
-                                token = self.config['secret_token']
-                                url = f"{base_url}/receive.php?token={token}&package=fileops"
-                                async with aiohttp.ClientSession() as session:
-                                    async with session.post(url, json=self._fileops_response, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                                        if resp.status == 200:
-                                            logger.info(f"Live Monitor: [OK] 403 error sent to dashboard")
-                            except Exception as send_err:
-                                logger.error(f"Live Monitor: [ERROR] Failed to send 403 error: {send_err}")
-                        elif error:
-                            self._fileops_response = {"success": False, "error": error}
-                        elif response_text:
-                            if ("invalid" in response_text.lower() and "zygnalid" in response_text.lower()) or "not activated" in response_text.lower():
-                                error_message = (
-                                    "Your ZygnalID is **invalid or not activated**.\n\n"
-                                    "**To activate your ID, follow these steps:**\n"
-                                    "1. Go to the official ZygnalBot Discord server: `gg/sgZnXca5ts`\n"
-                                    "2. Verify yourself on the server.\n"
-                                    "3. Open a ticket for **Zygnal ID Activation**.\n"
-                                    "4. Read the embed sent in the ticket and provide the necessary information to start the activation process.\n\n"
-                                    f"Your ZygnalID: {zygnal_id}"
-                                )
-                                logger.error("Download failed due to ZygnalID issue")
-                                self._fileops_response = {"success": False, "error": error_message, "error_type": "zygnal_id_not_activated"}
+                        if not zygnal_id:
+
+                            marketplace_cog = self.bot.get_cog("ExtensionMarketplace")
+
+                            if marketplace_cog and hasattr(marketplace_cog, 'ensure_zygnal_id'):
 
                                 try:
-                                    base_url = self.config['website_url']
-                                    token = self.config['secret_token']
-                                    url = f"{base_url}/receive.php?token={token}&package=fileops"
-                                    async with aiohttp.ClientSession() as session:
-                                        async with session.post(url, json=self._fileops_response, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                                            if resp.status == 200:
-                                                logger.info(f"Live Monitor: [OK] ZygnalID error sent to dashboard")
-                                except Exception as send_err:
-                                    logger.error(f"Live Monitor: [ERROR] Failed to send ZygnalID error: {send_err}")
-                            else:
-                                extensions_folder = Path("./extensions")
-                                extensions_folder.mkdir(parents=True, exist_ok=True)
-                                
-                                import re
-                                filename = f"{extension_data['title'].replace(' ', '_').lower()}.{extension_data['fileType']}"
-                                filename = re.sub(r'[^\w\-_\.]', '', filename)
-                                filepath = extensions_folder / filename
-                                
-                                with open(filepath, 'w', encoding='utf-8') as f:
-                                    f.write(response_text)
-                                
-                                logger.info(f"Successfully downloaded extension to {filepath}")
-                                
 
-                                filepath_str = str(filepath)
-                                # Always use forward slashes for web/JSON compatibility
-                                filepath_formatted = filepath_str.replace('\\', '/')
-                                
-                                self._fileops_response = {
-                                    "success": True,
-                                    "command_type": "download_marketplace_extension",
-                                    "message": f"Downloaded to {filepath}",
-                                    "filepath": filepath_formatted,
-                                    "filename": filename
-                                }
-                        else:
-                            self._fileops_response = {"success": False, "error": "Max retries exceeded"}
-                        
+                                    logger.info("Live Monitor: ZygnalID.txt not found or empty, attempting to generate via Marketplace cog...")
+
+                                    zygnal_id = await marketplace_cog.ensure_zygnal_id()
+
+                                    if zygnal_id:
+
+                                        logger.info("Live Monitor: Successfully generated new ZygnalID via Marketplace cog.")
+
+                                except Exception as e:
+
+                                    logger.error(f"Live Monitor: Error calling ensure_zygnal_id on Marketplace cog: {e}")
+
+
+
+                        if not zygnal_id:
+
+                            error_message = (
+
+                                "**ZygnalID Not Found**\n\n"
+
+                                "Your ZygnalID file is missing.\n\n"
+
+                                "**How to create one:**\n"
+
+                                "1. Go to your Discord server.\n"
+
+                                "2. Run the command `/marketplace myid`.\n"
+
+                                "3. Come back here and refresh the page.\n\n"
+
+                                "*Note: The `marketplace` extension must be loaded for automatic ID generation.*"
+
+                            )
+
+                            logger.error("Download failed - ZygnalID.txt not found and could not be generated.")
+
+                            self._fileops_response = {"success": False, "type": "download_marketplace_extension", "error": error_message, "error_type": "zygnal_id_not_found", "request_id": request_id}
+
+
+
+                        if zygnal_id:
+
+                            if extension_data.get('customUrl'):
+
+                                base_url = extension_data['customUrl']
+
+                                if base_url.startswith('http') and zygnal_id:
+
+                                    sep = '&' if ('?' in base_url) else '?'
+
+                                    download_url = f"{base_url}{sep}zygnalid={zygnal_id}"
+
+                                else:
+
+                                    download_url = base_url
+
+                            else:
+
+                                extension_id = extension_data['id']
+
+                                download_url = f"https://zsync.eu/extension/download.php?id={extension_id}&zygnalid={zygnal_id}"
+
+
+
+                            response_text = None
+
+                            error = None
+
+                            max_retries = 3
+
+
+
+                            for attempt in range(max_retries):
+
+                                try:
+
+                                    timeout = aiohttp.ClientTimeout(total=60)
+
+                                    async with aiohttp.ClientSession(timeout=timeout) as session:
+
+                                        async with session.get(download_url) as response:
+
+                                            if response.status == 200:
+
+                                                response_text = await response.text()
+
+                                                break
+
+                                            elif response.status == 403:
+
+                                                error = "403"
+
+                                                break
+
+                                            elif response.status == 429:
+
+                                                retry_after = int(response.headers.get('Retry-After', 60))
+
+                                                if attempt < max_retries - 1:
+
+                                                    logger.warning(f"Rate limited, retrying after {retry_after}s (attempt {attempt + 1}/{max_retries})")
+
+                                                    await asyncio.sleep(retry_after)
+
+                                                    continue
+
+                                                error = "Rate limited (max retries reached)"
+
+                                                break
+
+                                            else:
+
+                                                error = f"HTTP {response.status}"
+
+                                                break
+
+                                except asyncio.TimeoutError:
+
+                                    if attempt < max_retries - 1:
+
+                                        logger.warning(f"Timeout, retrying (attempt {attempt + 1}/{max_retries})")
+
+                                        await asyncio.sleep(2 ** attempt)
+
+                                        continue
+
+                                    error = "Timeout (max retries reached)"
+
+                                    break
+
+                                except Exception as e:
+
+                                    if attempt < max_retries - 1:
+
+                                        logger.warning(f"Error: {e}, retrying (attempt {attempt + 1}/{max_retries})")
+
+                                        await asyncio.sleep(2 ** attempt)
+
+                                        continue
+
+                                    error = f"Error: {e}"
+
+                                    break
+
+
+
+                            if error and ("403" in str(error) or "Forbidden" in str(error)):
+
+                                error_message = (
+
+                                    "**ZygnalID Not Activated**\n\n"
+
+                                    "Your ZygnalID is probably NOT activated or got deactivated.\n\n"
+
+                                    "**How to activate:**\n"
+
+                                    "1. Join the ZygnalBot Discord server: `gg/sgZnXca5ts`\n"
+
+                                    "2. Create a ticket with the category **Zygnal Activation**\n"
+
+                                    "3. Read the embed that got sent into the ticket\n"
+
+                                    "4. Provide the information requested\n"
+
+                                    "5. Wait for a supporter or TheHolyOneZ to activate it\n\n"
+
+                                    f"Use `/marketplace myid` to view your ZygnalID"
+
+                                )
+
+                                logger.error("Download failed - 403 Forbidden (ZygnalID not activated)")
+
+                                self._fileops_response = {"success": False, "type": "download_marketplace_extension", "error": error_message, "error_type": "zygnal_id_not_activated", "request_id": request_id}
+
+                            elif error:
+
+                                self._fileops_response = {"success": False, "type": "download_marketplace_extension", "error": error, "request_id": request_id}
+
+                            elif response_text:
+
+                                if ("invalid" in response_text.lower() and "zygnalid" in response_text.lower()) or "not activated" in response_text.lower():
+
+                                    error_message = (
+
+                                        "Your ZygnalID is **invalid or not activated**.\n\n"
+
+                                        "**To activate your ID, follow these steps:**\n"
+
+                                        "1. Go to the official ZygnalBot Discord server: `gg/sgZnXca5ts`\n"
+
+                                        "2. Verify yourself on the server.\n"
+
+                                        "3. Open a ticket for **Zygnal ID Activation**.\n"
+
+                                        "4. Read the embed sent in the ticket and provide the necessary information to start the activation process.\n\n"
+
+                                        f"Your ZygnalID: {zygnal_id}"
+
+                                    )
+
+                                    logger.error("Download failed due to ZygnalID issue")
+
+                                    self._fileops_response = {"success": False, "type": "download_marketplace_extension", "error": error_message, "error_type": "zygnal_id_not_activated", "request_id": request_id}
+
+                                else:
+
+                                    extensions_folder = Path("./extensions")
+
+                                    extensions_folder.mkdir(parents=True, exist_ok=True)
+
+
+
+                                    import re
+
+                                    filename = f"{extension_data['title'].replace(' ', '_').lower()}.{extension_data['fileType']}"
+                                    filename = re.sub(r'[^\w\-_\.]', '', filename)
+                                    filepath = extensions_folder / filename
+
+                                    with open(filepath, 'w', encoding='utf-8') as f:
+
+                                        f.write(response_text)
+
+
+
+                                    logger.info(f"Successfully downloaded extension to {filepath}")
+
+
+
+                                    filepath_str = str(filepath)
+
+                                    filepath_formatted = filepath_str.replace('\\', '/')
+
+
+
+                                    self._fileops_response = {
+
+                                        "success": True,
+
+                                        "type": "download_marketplace_extension",
+                                        "command_type": "download_marketplace_extension",
+
+                                                                                         "message": f"Downloaded to {filepath}",
+                                                    
+                                                                                            "filepath": filepath_formatted,
+                                                    
+                                                                                            "filename": filename,
+                                                    
+                                                                                                                                                "request_id": request_id
+                                                                                                        
+                                                                                                                                            }                            
+                            else:
+
+                                self._fileops_response = {"success": False, "error": "Max retries exceeded", "request_id": request_id}
+                                self._fileops_response = {"success": False, "type": "download_marketplace_extension", "error": "Max retries exceeded", "request_id": request_id}
+
+
 
                         if self._fileops_response:
-                            try:
-                                base_url = self.config['website_url']
-                                token = self.config['secret_token']
-                                url = f"{base_url}/receive.php?token={token}&package=fileops"
-                                async with aiohttp.ClientSession() as session:
-                                    async with session.post(url, json=self._fileops_response, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                                        if resp.status == 200:
-                                            logger.info(f"Live Monitor: [OK] Download response sent to dashboard")
-                                        else:
-                                            logger.warning(f"Live Monitor: [ERROR] Download response send failed with status {resp.status}")
-                            except Exception as send_err:
-                                logger.error(f"Live Monitor: [ERROR] Failed to send download response: {send_err}")
-                except Exception as e:
-                    logger.error(f"Marketplace download failed: {e}")
-                    self._fileops_response = {"success": False, "error": str(e)}
 
-                    try:
-                        base_url = self.config['website_url']
-                        token = self.config['secret_token']
-                        url = f"{base_url}/receive.php?token={token}&package=fileops"
-                        async with aiohttp.ClientSession() as session:
-                            async with session.post(url, json=self._fileops_response, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                                pass
-                    except:
-                        pass
+                            try:
+
+                                base_url = self.config['website_url']
+
+                                token = self.config['secret_token']
+
+                                url = f"{base_url}/receive.php?token={token}&package=fileops"
+
+                                async with aiohttp.ClientSession() as session:
+
+                                    async with session.post(url, json=self._fileops_response, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+
+                                        if resp.status == 200:
+
+                                            logger.info(f"Live Monitor: [OK] Download response sent to dashboard")
+
+                                        else:
+
+                                            logger.warning(f"Live Monitor: [ERROR] Download response send failed with status {resp.status}")
+
+                            except Exception as send_err:
+
+                                logger.error(f"Live Monitor: [ERROR] Failed to send download response: {send_err}")
+
+                except Exception as e:
+            
+                                logger.error(f"Marketplace download failed: {e}")
+            
+                                request_id = params.get("request_id")
+            
+                                self._fileops_response = {"success": False, "type": "download_marketplace_extension", "error": str(e), "request_id": request_id}
+            
+            
+            
+                                try:
+            
+                                    base_url = self.config['website_url']
+            
+                                    token = self.config['secret_token']
+            
+                                    url = f"{base_url}/receive.php?token={token}&package=fileops"
+            
+                                    async with aiohttp.ClientSession() as session:
+            
+                                        async with session.post(url, json=self._fileops_response, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+            
+                                            pass
+            
+                                except:
+            
+                                    pass
             
             elif cmd_type == "load_downloaded_extension":
                 try:
-                    # We accept 'filepath' OR 'filename' (safer)
+
                     filepath = params.get("filepath")
                     filename = params.get("filename")
                     
                     if not filepath and not filename:
-                        self._fileops_response = {"success": False, "error": "No filepath or filename provided"}
+                        self._fileops_response = {"success": False, "type": "load_downloaded_extension", "command_type": "load_downloaded_extension", "error": "No filepath or filename provided"}
                     else:
                         if filename:
-                            # If filename is provided, construct path securely
+
                             file_path = Path("./extensions") / filename
                         else:
-                            # Fallback to filepath, but normalize it
+
                             file_path = Path(filepath)
 
                         if not file_path.exists():
-                            self._fileops_response = {"success": False, "error": f"File not found: {file_path}"}
+                            self._fileops_response = {"success": False, "type": "load_downloaded_extension", "command_type": "load_downloaded_extension", "error": f"File not found: {file_path}"}
                         else:
                             extension_name = file_path.stem
                             try:
                                 await self.bot.load_extension(f"extensions.{extension_name}")
                                 self._fileops_response = {
                                     "success": True,
+                                    "type": "load_downloaded_extension",
+                                    "command_type": "load_downloaded_extension",
                                     "message": f"Loaded extension: {extension_name}",
                                     "extension_name": extension_name
                                 }
                             except Exception as load_err:
-                                # It might be already loaded, try to reload
+
                                 try:
                                     await self.bot.reload_extension(f"extensions.{extension_name}")
                                     self._fileops_response = {
                                         "success": True,
+                                        "type": "load_downloaded_extension",
+                                        "command_type": "load_downloaded_extension",
                                         "message": f"Reloaded extension: {extension_name}",
                                         "extension_name": extension_name
                                     }
@@ -2567,7 +2727,7 @@ echo json_encode([
                                 logger.error(f"Live Monitor: [ERROR] Failed to send load response: {send_err}")
                 except Exception as e:
                     logger.error(f"Load downloaded extension failed: {e}")
-                    self._fileops_response = {"success": False, "error": str(e)}
+                    self._fileops_response = {"success": False, "type": "load_downloaded_extension", "command_type": "load_downloaded_extension", "error": str(e)}
 
                     try:
                         base_url = self.config['website_url']
@@ -2608,7 +2768,7 @@ echo json_encode([
 
                     if files is not None:
                         response_data = {
-                            "type": "list_dir",
+                            "command_type": "list_dir",
                             "path": path,
                             "files": files,
                             "request_id": params.get("request_id")
@@ -2653,7 +2813,7 @@ echo json_encode([
                         return content, None
 
 
-                    max_size = 10 * 1024 * 1024  # 10MB limit
+                    max_size = 10 * 1024 * 1024  
                     content, error = await asyncio.to_thread(_read_file, path, max_size)
 
                     if error:
@@ -3049,7 +3209,7 @@ echo json_encode([
             )
             (output_dir / "lm_db.php").write_text(self._generate_lm_db_php(), encoding='utf-8')
             (output_dir / "lm_auth.php").write_text(self._generate_lm_auth_php(self._dashboard_plugins), encoding='utf-8')
-            # Generate plugin_api.php if there are dashboard plugins
+
             if self._dashboard_plugins:
                 (output_dir / "plugin_api.php").write_text(self._generate_plugin_api_php(self._dashboard_plugins), encoding='utf-8')
             (output_dir / "setup.php").write_text(self._generate_setup_php(), encoding='utf-8')
@@ -3073,10 +3233,10 @@ echo json_encode([
             (output_dir / "privacy_api.php").write_text(self._generate_privacy_api_php(), encoding='utf-8')
             (output_dir / "transcript_view.php").write_text(self._generate_transcript_view_php(), encoding='utf-8')
 
-            # Security: Generate .htaccess files to protect sensitive files
+
             (output_dir / ".htaccess").write_text(self._generate_htaccess(), encoding='utf-8')
             
-            # Create data directory with its own .htaccess for extra protection
+
             data_dir = output_dir / "data"
             data_dir.mkdir(exist_ok=True)
             (data_dir / ".htaccess").write_text(self._generate_data_htaccess(), encoding='utf-8')
@@ -3178,7 +3338,7 @@ echo json_encode([
                 await (ctx.send(embed=embed) if hasattr(ctx, 'send') else ctx.response.send_message(embed=embed))
                 return
             
-            # Update interval if provided
+
             if interval is not None:
                 if interval < 2 or interval > 60:
                     embed = discord.Embed(
@@ -3201,7 +3361,7 @@ echo json_encode([
                 self.send_status_loop.change_interval(seconds=effective_interval)
                 self.send_status_loop.start()
             else:
-                # Update interval on already running loop
+
                 self.send_status_loop.change_interval(seconds=effective_interval)
 
 
@@ -3245,7 +3405,7 @@ echo json_encode([
             if self.send_status_loop.is_running():
                 self.send_status_loop.cancel()
             
-            # Send final "disabled" status to website so it knows bot stopped
+
             try:
                 if self.config.get("website_url") and self.config.get("secret_token"):
                     base_url = self.config['website_url']
@@ -3311,7 +3471,7 @@ echo json_encode([
             )
             (output_dir / "lm_db.php").write_text(self._generate_lm_db_php(), encoding='utf-8')
             (output_dir / "lm_auth.php").write_text(self._generate_lm_auth_php(self._dashboard_plugins), encoding='utf-8')
-            # Generate plugin_api.php if there are dashboard plugins
+
             if self._dashboard_plugins:
                 (output_dir / "plugin_api.php").write_text(self._generate_plugin_api_php(self._dashboard_plugins), encoding='utf-8')
             (output_dir / "setup.php").write_text(self._generate_setup_php(), encoding='utf-8')
@@ -3335,10 +3495,10 @@ echo json_encode([
             (output_dir / "privacy_api.php").write_text(self._generate_privacy_api_php(), encoding='utf-8')
             (output_dir / "transcript_view.php").write_text(self._generate_transcript_view_php(), encoding='utf-8')
 
-            # Security: Generate .htaccess files to protect sensitive files
+
             (output_dir / ".htaccess").write_text(self._generate_htaccess(), encoding='utf-8')
             
-            # Create data directory with its own .htaccess for extra protection
+
             data_dir = output_dir / "data"
             data_dir.mkdir(exist_ok=True)
             (data_dir / ".htaccess").write_text(self._generate_data_htaccess(), encoding='utf-8')
@@ -6197,9 +6357,7 @@ echo json_encode([
             overflow-y: auto;
         }
         
-        /* ═══════════════════════════════════════════════════════════════════════
-           MARKDOWN RENDERING STYLES
-           ═══════════════════════════════════════════════════════════════════════ */
+        
         
         .md-h2 {
             font-size: 20px;
@@ -14468,11 +14626,11 @@ if (typeof window !== 'undefined') {
                                 </div>
                                 <div class="credits-info-item">
                                     <span class="credits-info-label">Ecosystem</span>
-                                    <span class="credits-info-value">ZygnalBot</span>
+                                    <span class="credits-info-value">Zygnal</span>
                                 </div>
                                 <div class="credits-info-item">
                                     <span class="credits-info-label">Overview</span>
-                                    <a href="https://zsync.eu/zygnalbot/zdbf" target="_blank" class="credits-info-link">zsync.eu/zygnalbot/zdbf</a>
+                                    <a href="https://zsync.eu/zdbf" target="_blank" class="credits-info-link">zsync.eu/zygnalbot/zdbf</a>
                                 </div>
                                 <div class="credits-info-item">
                                     <span class="credits-info-label">Repository</span>
@@ -15795,7 +15953,7 @@ if (typeof window !== 'undefined') {
             
             showNotification(`Downloading ${extension.title}...`, 'info');
             
-            sendCommandWithResponse('download_marketplace_extension', { extension }, (response) => {
+            sendCommandWithResponse('download_marketplace_extension', { extension, request_id: generateRequestId() }, (response) => {
                 console.log('[MARKETPLACE] Download response:', response);
                 restoreButton();
                 
@@ -15844,18 +16002,23 @@ if (typeof window !== 'undefined') {
             if (filenameOverride) {
                 filename = filenameOverride;
             } else {
-                // Use platform-appropriate path separator
                 const separator = (platformOS === 'Windows') ? '\\\\' : '/';
                 filename = filepath.split(separator).pop() || filepath.split(/[\\\\/]/).pop();
             }
-
-            const extensionNameFromFile = filename.replace(/\\.(py|pyw)$/, '');
-            const extensionPath = `extensions.${extensionNameFromFile}`;
             
-            console.log('[MARKETPLACE] Loading extension:', extensionPath, 'from filepath:', filepath, 'filename:', filename);
-            showNotification(`Loading ${extensionName}...`, 'info');
-            // Use load_downloaded_extension which handles both fresh loads and reloads better for marketplace flow
-            sendCommand('load_downloaded_extension', { filepath: filepath, filename: filename });
+            console.log('[MARKETPLACE] Loading extension from filepath:', filepath, 'filename:', filename);
+            showNotification(`Attempting to load ${extensionName}...`, 'info');
+
+            sendCommandWithResponse('load_downloaded_extension', { filepath: filepath, filename: filename }, (response) => {
+                console.log('[MARKETPLACE] Load response:', response);
+                if (response && response.success) {
+                    showNotification(response.message || `Successfully loaded ${extensionName}`, 'success');
+                    
+                    setTimeout(refreshPlugins, 1000);
+                } else {
+                    showNotification(response.error || `Failed to load ${extensionName}. Check bot logs.`, 'error');
+                }
+            });
         }
 
         function renderMarkdown(text) {
@@ -16186,9 +16349,9 @@ if (typeof window !== 'undefined') {
                         })
                         .then(fileops => {
                             if (fileops && (fileops.success !== undefined || fileops.error !== undefined)) {
-                                // Check if this response is for our command
-                                if (fileops.command_type && fileops.command_type !== expectedCommandType) {
-                                    console.log(`[FILEOPS] Ignoring response for ${fileops.command_type}, waiting for ${expectedCommandType}`);
+                                const responseType = fileops.command_type || fileops.type;
+                                if (responseType && responseType !== expectedCommandType) {
+                                    console.log(`[FILEOPS] Ignoring response for ${responseType}, waiting for ${expectedCommandType}`);
                                     return; // Continue polling
                                 }
                                 
@@ -17602,9 +17765,10 @@ if (typeof window !== 'undefined') {
 
             let fileIndex = 0;
             list.innerHTML = files.map((f, i) => {
+                const safeName = f.name.replace(/'/g, "\\\\'");
                 if(f.type === 'folder' || f.type === 'dir') {
                     return `
-                        <div class="file-row folder" onclick="openFolder('${f.name}')" oncontextmenu="openFileContextMenu(event, '${f.name}', true)">
+                        <div class="file-row folder" onclick="openFolder('${safeName}')" oncontextmenu="openFileContextMenu(event, '${safeName}', true)">
                             <div class="file-name">${f.name}</div>
                             <div class="file-meta">Folder</div>
                         </div>
@@ -17612,7 +17776,7 @@ if (typeof window !== 'undefined') {
                 }
                 const currentFileIndex = fileIndex++;
                 return `
-                    <div class="file-row" id="f-${currentFileIndex}" onclick="openFile(${currentFileIndex})" oncontextmenu="openFileContextMenu(event, '${f.name}', false)">
+                    <div class="file-row" id="f-${currentFileIndex}" onclick="openFileByName(this, '${safeName}')" oncontextmenu="openFileContextMenu(event, '${safeName}', false)">
                         <div class="file-name">${f.name}</div>
                         <div class="file-meta">${f.size || 'File'}</div>
                     </div>
@@ -17863,19 +18027,15 @@ if (typeof window !== 'undefined') {
             reloadCurrentDirectory();
         };
 
-        window.openFile = (fid) => {
-            console.log(`[EDITOR] openFile called with fid: ${fid}`);
+        window.openFileByName = (element, fileName) => {
+            console.log(`[EDITOR] openFileByName called for: ${fileName}`);
             
-            const files = getFiles(currentPath).filter(f => f.type === 'file');
-            console.log(`[EDITOR] Found ${files.length} files`);
-            
-            const file = files[fid];
+            const files = getFiles(currentPath);
+            const file = files.find(f => f.name === fileName && (f.type === 'file' || f.type !== 'dir' && f.type !== 'folder'));
             
             if (!file) {
-                console.error(`[EDITOR] ERROR: No file at index ${fid}. Total files: ${files.length}`);
-                console.log('[EDITOR] Available files:', files);
-                console.log('[EDITOR] Current path:', currentPath);
-                showNotification('Error opening file', 'error');
+                console.error(`[EDITOR] ERROR: File not found: ${fileName}`);
+                showNotification('Error opening file: not found', 'error');
                 return;
             }
 
@@ -17883,71 +18043,47 @@ if (typeof window !== 'undefined') {
 
             const fileBrowser = document.getElementById('file-browser-content');
             const unit = (fileBrowser && fileBrowser.querySelector('.explorer-unit')) || document.querySelector('#tab-files .explorer-unit');
-            const name = document.getElementById('fileName');
+            const nameEl = document.getElementById('fileName');
             const text = document.getElementById('fileContent');
             const editorPane = (fileBrowser && fileBrowser.querySelector('.editor-pane')) || document.querySelector('#tab-files .editor-pane');
             const filePane = (fileBrowser && fileBrowser.querySelector('.file-pane')) || document.querySelector('#tab-files .file-pane');
 
-            console.log('[EDITOR] Element check:', {
-                unit: !!unit,
-                name: !!name,
-                text: !!text,
-                editorPane: !!editorPane,
-                filePane: !!filePane
-            });
-
-            if (!unit || !name || !text || !editorPane || !filePane) {
+            if (!unit || !nameEl || !text || !editorPane || !filePane) {
                 console.error('[EDITOR] ERROR: Missing editor elements!');
                 showNotification('Editor not initialized', 'error');
                 return;
             }
-
-            console.log('[EDITOR] All elements found, proceeding...');
-
+            
             unit.querySelectorAll('.file-row').forEach(r => r.classList.remove('active'));
-            const rows = unit.querySelectorAll('.file-row:not(.folder)');
-            if(rows[fid]) rows[fid].classList.add('active');
+            if (element) {
+                element.classList.add('active');
+            }
 
-            name.innerText = file.name;
+            nameEl.innerText = file.name;
             const placeholder = `// Loading ${file.name}...\\n\\n// Please wait while content loads...`;
             text.value = addLineNumbers(placeholder);
             
-            console.log('[EDITOR] Adding editor-open class to:', unit);
             unit.classList.add('editor-open');
 
-            // WAIT for the unit to have actual width before proceeding
             function waitForWidth(attempt = 0) {
                 if (unit.offsetWidth > 0) {
-                    console.log('[EDITOR]  Unit has width:', unit.offsetWidth);
-                    
-                    console.log('[EDITOR] FORCING file-pane width to 420px...');
                     if (!filePane.style.width) {
                         filePane.style.width = '420px';
                     }
                     filePane.style.flexShrink = '0';
-                    
-                    console.log('[EDITOR] FORCING editor-pane to be visible with inline styles...');
                     editorPane.style.display = 'flex';
                     editorPane.style.flex = '1';
-                    
-                    console.log('[EDITOR]  Editor should be visible now!');
                 } else if (attempt < 20) {
-                    console.log('[EDITOR] ⏳ Waiting for width, attempt', attempt + 1);
                     setTimeout(() => waitForWidth(attempt + 1), 50);
-                } else {
-                    console.error('[EDITOR] ❌ Unit never got width after 1 second!');
                 }
             }
-
             waitForWidth();
             
             setTimeout(() => {
-                console.log('[EDITOR] Scrolling editor into view...');
                 editorPane.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
             }, 100);
 
             const filePath = currentPath ? currentPath + '/' + file.name : file.name;
-            console.log(`[EDITOR] Loading file from path: ${filePath}`);
             loadFile(filePath);
         };
         
@@ -21742,7 +21878,7 @@ if (typeof window !== 'undefined') {
         
         Also injects Dashboard Plugin System content.
         """
-        # Discover dashboard plugins
+
         if not self._plugins_discovered:
             self._dashboard_plugins = self._discover_dashboard_plugins()
             self._plugins_discovered = True
@@ -21751,13 +21887,13 @@ if (typeof window !== 'undefined') {
         
         base_html = self._generate_index_html(token)
         
-        # Inject plugin content into placeholders
+
         if plugins:
-            # Sidebar - plugin dropdown
+
             sidebar_html = self._generate_plugin_sidebar_html(plugins)
             base_html = base_html.replace('<!-- DASHBOARD_PLUGINS_SIDEBAR_PLACEHOLDER -->', sidebar_html)
             
-            # Drawer - plugin items (with different IDs for drawer)
+
             drawer_html = self._generate_plugin_sidebar_html(plugins)
             drawer_html = drawer_html.replace('lm-sidebar-item', 'lm-drawer-item')
             drawer_html = drawer_html.replace('lm-sidebar-group-label', 'lm-drawer-group-label')
@@ -21767,35 +21903,35 @@ if (typeof window !== 'undefined') {
             drawer_html = drawer_html.replace('togglePluginDropdown()', 'toggleDrawerPluginDropdown()')
             base_html = base_html.replace('<!-- DASHBOARD_PLUGINS_DRAWER_PLACEHOLDER -->', drawer_html)
             
-            # Tab content
+
             tabs_html = self._generate_plugin_tabs_html(plugins)
             base_html = base_html.replace('<!-- DASHBOARD_PLUGINS_TABS_PLACEHOLDER -->', tabs_html)
             
-            # CSS
+
             css_html = self._generate_plugin_dropdown_css()
             base_html = base_html.replace('/* DASHBOARD_PLUGINS_CSS_PLACEHOLDER */', css_html)
             
-            # JavaScript - dropdown and tab mapping
+
             js_html = self._generate_plugin_dropdown_js() + self._generate_plugin_tab_mapping_js(plugins)
             base_html = base_html.replace('/* DASHBOARD_PLUGINS_JS_PLACEHOLDER */', js_html)
             
-            # Permission definitions in the Roles & Access UI
+
             all_perms = self._get_all_plugin_permissions(plugins)
             
-            # View permissions for VIEW_PERM_DEFS array
+
             view_perms_js = ""
             for perm in all_perms['view']:
                 view_perms_js += f"{{ key: '{perm['key']}', label: '{perm['label']}' }},\n                "
             base_html = base_html.replace('/* DASHBOARD_PLUGINS_VIEW_PERMS_PLACEHOLDER */', view_perms_js.rstrip().rstrip(','))
             
-            # Action permissions for CONTROL_PERM_DEFS array
+
             action_perms_js = ""
             for perm in all_perms['actions']:
                 label = perm['label'].replace("'", "\\'")
                 action_perms_js += f"{{ key: '{perm['key']}', label: '{label}' }},\n                "
             base_html = base_html.replace('/* DASHBOARD_PLUGINS_ACTION_PERMS_PLACEHOLDER */', action_perms_js.rstrip().rstrip(','))
             
-            # Tab permission mappings for isTabAllowedByPerms and applyPermissionsToUI
+
             tab_map_js = ""
             for plugin in plugins:
                 plugin_id = plugin['id']
@@ -21804,7 +21940,7 @@ if (typeof window !== 'undefined') {
             base_html = base_html.replace('/* DASHBOARD_PLUGINS_TAB_MAP_PLACEHOLDER */', tab_map_js.rstrip().rstrip(','))
             base_html = base_html.replace('/* DASHBOARD_PLUGINS_TAB_PERM_MAP_PLACEHOLDER */', tab_map_js.rstrip().rstrip(','))
         else:
-            # No plugins - remove placeholders
+
             base_html = base_html.replace('<!-- DASHBOARD_PLUGINS_SIDEBAR_PLACEHOLDER -->', '')
             base_html = base_html.replace('<!-- DASHBOARD_PLUGINS_DRAWER_PLACEHOLDER -->', '')
             base_html = base_html.replace('<!-- DASHBOARD_PLUGINS_TABS_PLACEHOLDER -->', '')
@@ -23816,7 +23952,6 @@ function lm_render_error_page(int $code, string $title, string $message, string 
 
 ?>
 '''
-        # Inject plugin permissions for OWNER
         if plugins:
             plugin_perms_php = self._generate_plugin_owner_permissions_php(plugins)
             base_php = base_php.replace('/* DASHBOARD_PLUGINS_OWNER_PERMISSIONS_PLACEHOLDER */', plugin_perms_php)
