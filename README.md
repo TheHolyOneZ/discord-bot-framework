@@ -24,7 +24,18 @@
 <p align="center">
   🌐 <a href="https://zsync.eu/zdbf/">Website</a>
 </p>
+<div align="center">
 
+## 🆕 NEW: Free Dashboard Hosting for ZDBF!
+
+**🚀 ZORYX DashHost** - Host your Zoryx Discord Bot Framework dashboard for FREE  
+No PHP hosting required • Instant setup • All features included
+
+🔗 [Get Started](https://zsync.eu/zframedash/) • 📺 [Watch Tutorial](https://www.youtube.com/watch?v=TfSIV4mc_fo)
+
+---
+
+</div>
 ---
 
 ## 📑 Table of Contents
@@ -3878,6 +3889,7 @@ IMPORTANT NOTE: If you are using this framework, please be aware that you are so
 
 
 ---
+
 
 
 
