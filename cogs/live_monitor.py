@@ -1382,7 +1382,7 @@ echo json_encode([
                 }
                 fw_section = self.bot.config.get("framework", {}) or {}
                 framework_info = {
-                    "version": "1.5.5",
+                    "version": "1.5.6",
                     "recommended_python": fw_section.get("recommended_python", "3.12.7"),
                     "python_runtime": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
                     "docs_url": "https://zsync.eu/zdbf",
@@ -2769,6 +2769,7 @@ echo json_encode([
                     if files is not None:
                         response_data = {
                             "command_type": "list_dir",
+                            "type": "list_dir",
                             "path": path,
                             "files": files,
                             "request_id": params.get("request_id")
@@ -3547,6 +3548,101 @@ echo json_encode([
                 await ctx.send(embed=embed, files=files)
             else:
                 await ctx.followup.send(embed=embed, files=files)
+    
+    @app_commands.command(name="zframedash", description="Directly enable sending to a ZFrame dashboard")
+    @app_commands.describe(
+        action="Action to perform",
+        url="Dashboard URL",
+        secret_token="Secret token",
+        interval="Update interval in seconds (2-60)"
+    )
+    @app_commands.choices(action=[
+        app_commands.Choice(name="Enable", value="enable"),
+    ])
+    @app_commands.check(lambda interaction: interaction.client.is_owner(interaction.user))
+    async def zframedash_slash(
+        self,
+        interaction: discord.Interaction,
+        action: str,
+        url: Optional[str] = None,
+        secret_token: Optional[str] = None,
+        interval: Optional[int] = None
+    ):
+        await self._zframedash_logic(interaction, action, url, secret_token, interval)
+    
+    async def _zframedash_logic(self, ctx, action: str, url: Optional[str], secret_token: Optional[str], interval: Optional[int]):
+        if action != "enable":
+            embed = discord.Embed(
+                title="Invalid action",
+                color=0xff0000,
+                description="Only 'Enable' is supported for this command"
+            )
+            await (ctx.send(embed=embed) if hasattr(ctx, 'send') else ctx.response.send_message(embed=embed))
+            return
+        
+        if not url or not secret_token:
+            embed = discord.Embed(
+                title="Missing parameters",
+                color=0xff0000,
+                description="Provide URL and Secret token"
+            )
+            embed.add_field(
+                name="Usage",
+                value="/zframedash action:Enable URL:<your_url> Secret_token:<token> interval:<2-60>",
+                inline=False
+            )
+            await (ctx.send(embed=embed) if hasattr(ctx, 'send') else ctx.response.send_message(embed=embed))
+            return
+        
+        if not url.startswith("http://") and not url.startswith("https://"):
+            url = "https://" + url
+        
+        if interval is not None:
+            if interval < 2 or interval > 60:
+                embed = discord.Embed(
+                    title="Invalid interval",
+                    color=0xff0000,
+                    description="Interval must be between 2 and 60 seconds"
+                )
+                await (ctx.send(embed=embed) if hasattr(ctx, 'send') else ctx.response.send_message(embed=embed))
+                return
+        
+        self.config["website_url"] = url.rstrip("/")
+        self.config["secret_token"] = secret_token
+        self.config["update_interval"] = interval or self.config.get("update_interval", 5)
+        self.config["enabled"] = True
+        self._save_config()
+        
+        self.is_enabled = True
+        effective_interval = self.config.get("update_interval", 5)
+        
+        if not self.send_status_loop.is_running():
+            self.send_status_loop.change_interval(seconds=effective_interval)
+            self.send_status_loop.start()
+        else:
+            self.send_status_loop.change_interval(seconds=effective_interval)
+        
+        try:
+            await self._sync_assets_to_server_once()
+        except Exception as e:
+            logger.error(f"Live Monitor: Asset sync on zframedash enable failed: {e}")
+        
+        embed = discord.Embed(
+            title="ZFrame Dash Enabled",
+            color=0x00ff00,
+            description="Bot is now sending data to the dashboard"
+        )
+        embed.add_field(
+            name="Dashboard URL",
+            value=f"{self.config['website_url']}/index.php",
+            inline=False
+        )
+        embed.add_field(
+            name="Update Interval",
+            value=f"Every {effective_interval} seconds",
+            inline=True
+        )
+        await (ctx.send(embed=embed) if hasattr(ctx, 'send') else ctx.response.send_message(embed=embed))
     
     def _generate_index_html(self, token: str) -> str:
         return '''<!DOCTYPE html>
