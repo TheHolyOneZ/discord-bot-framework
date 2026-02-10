@@ -7,7 +7,7 @@ All notable changes to this project will be documented in this file.
 ### ✨ Added
 
 - **New Cog: `GeminiService` - AI Assistant**
-  - Integrated a powerful AI assistant powered by the Google Gemini Pro model to provide deep insights into the bot's operation.
+  - Integrated a powerful AI assistant powered by the Google Gemini to provide deep insights into the bot's operation.
 
 - **New Slash Command: `/ask_zdbf`**
   - A comprehensive command with multiple actions to query the AI about different aspects of the framework.

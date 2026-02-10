@@ -295,7 +295,7 @@ No PHP hosting required • Instant setup • All features included
 
 **🤖 AI Assistant (`cogs/GeminiService.py`)**
 - **Powered by Google Gemini Pro:**
-  - This cog integrates the advanced capabilities of the Google Gemini Pro model to serve as an intelligent AI assistant for the Zoryx Discord Bot Framework. It provides natural language understanding and generation, making complex bot operations and data accessible through simple queries.
+  - This cog integrates the advanced capabilities of the Google Gemini to serve as an intelligent AI assistant for the Zoryx Discord Bot Framework. It provides natural language understanding and generation, making complex bot operations and data accessible through simple queries.
 - **Deep Contextual Awareness:**
   - The AI assistant's power lies in its ability to dynamically pull real-time data and context from various core framework components, enabling it to provide highly accurate and relevant answers.
   - **Seamless Integration with Framework Cogs:**
