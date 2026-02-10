@@ -38,7 +38,7 @@ No PHP hosting required • Instant setup • All features included
 
 🔗 [Get Started](https://zsync.eu/zframedash/) • 📺 [Watch Tutorial](https://www.youtube.com/watch?v=TfSIV4mc_fo)
 
----
+
 
 </div>
 ---
@@ -3936,6 +3936,7 @@ IMPORTANT NOTE: If you are using this framework, please be aware that you are so
 
 
 ---
+
 
 
 
