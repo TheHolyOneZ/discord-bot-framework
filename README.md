@@ -3878,8 +3878,8 @@ Need help? Have questions?
 
 ### Framework Website
 
-- **ZygnalBot Framework**: https://zygnalbot.com/bot-framework/
-- **Extension Marketplace**: https://zygnalbot.com/extension/
+- **ZygnalBot Framework**: https://zsync.eu/zdbf/
+- **Extension Marketplace**: https://zsync.eu/extension/
 
 
 ### Learning Resources
@@ -3921,7 +3921,7 @@ IMPORTANT NOTE: If you are using this framework, please be aware that you are so
 **TheHolyOneZ**
 
 - **GitHub**: [@TheHolyOneZ](https://github.com/TheHolyOneZ)
-- **Website**: [zygnalbot.com/bot-framework](https://zygnalbot.com/bot-framework/)
+- **Website**: [zygnalbot.com/bot-framework](https://zsync.eu/zdbf/)
 - **Discord**: theholyonez
 
 ---
@@ -3932,7 +3932,7 @@ IMPORTANT NOTE: If you are using this framework, please be aware that you are so
 
 **Made with 💜 by TheHolyOneZ**
 
-[GitHub Repository](https://github.com/TheHolyOneZ/discord-bot-framework) | [Website](https://zygnalbot.com/bot-framework/) | Discord = gg/sgZnXca5ts
+[GitHub Repository](https://github.com/TheHolyOneZ/discord-bot-framework) | [Website](https://zsync.eu/zdbf/) | Discord = gg/sgZnXca5ts
 
 
 ---
