@@ -1,5 +1,5 @@
-# The command below is for Linux servers. If you have problems installing it with pip on Windows, it sometimes can't find the +cpui version. (e.g., Pterodactyl). Remove the "#" if you want to download Torch.
-# --extra-index-url https://download.pytorch.org/whl/cpu
+# Works on Windows and Linux. If pip can’t find the +cpu PyTorch build (e.g., Pterodactyl), remove the # to enable this line.
+--extra-index-url https://download.pytorch.org/whl/cpu
 
 
 
@@ -34,6 +34,7 @@ rich==14.0.0
 # So if you install all that directly, you can, 99% of the time, just install, load them, and it works.
 # If you install all of them now, you won't have problems unless you break something or I forgot a requirement. 
 # If this happens, go on, join the Discord, and I'll help you properly.
+
 
 
 
