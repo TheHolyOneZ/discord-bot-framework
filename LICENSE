@@ -32,6 +32,8 @@ ADDITIONAL TERMS:
      intact. Additional information may be added, but the original credits must
      not be removed, replaced, or hidden.
 
+6. The `cogs/GeminiService.py` file is subject to its own standalone, source-available license embedded within its docstring. This license has specific restrictions on copying, modification, and use, and these terms supersede the general MIT License for that specific file. Refer to the docstring within `cogs/GeminiService.py` for full details.
+
 3. Altering, deleting, or renaming the author's name "TheHolyOneZ" in this
    license or within the Credits Button is strictly prohibited.
 

@@ -22,6 +22,11 @@
 </p>
 
 <p align="center">
+  **✨ NEW FEATURE (v1.6.0.1): AI Assistant (GeminiService Cog)**
+  <br>Interact with your bot using natural language to get insights into its framework, plugins, diagnostics, database, files, and more!
+</p>
+
+<p align="center">
   🌐 <a href="https://zsync.eu/zdbf/">Website</a>
 </p>
 <div align="center">
@@ -66,6 +71,7 @@ No PHP hosting required • Instant setup • All features included
   - [📊 Framework Diagnostics Commands](#-framework-diagnostics-commands)
   - [🪝 Event Hooks Commands](#-event-hooks-commands)
   - [📡 Live Monitor Commands](#-live-monitor-commands)
+  - [🤖 AI Assistant Commands](#-ai-assistant-commands)
   - [🔧 Owner-Only Commands](#-owner-only-commands)
 - [🛒 Extension Marketplace](#-extension-marketplace)
 - [🔧 Creating Extensions](#-creating-extensions)
@@ -286,6 +292,26 @@ No PHP hosting required • Instant setup • All features included
   - Command type indicators: ⚡ (hybrid), 🔸 (prefix-only), 🔹 (converted from slash)
   - Automatic updates when commands are converted
   - Real-time command count tracking
+
+**🤖 AI Assistant (`cogs/GeminiService.py`)**
+- **Powered by Google Gemini Pro:**
+  - This cog integrates the advanced capabilities of the Google Gemini Pro model to serve as an intelligent AI assistant for the Zoryx Discord Bot Framework. It provides natural language understanding and generation, making complex bot operations and data accessible through simple queries.
+- **Deep Contextual Awareness:**
+  - The AI assistant's power lies in its ability to dynamically pull real-time data and context from various core framework components, enabling it to provide highly accurate and relevant answers.
+  - **Seamless Integration with Framework Cogs:**
+    - **`PluginRegistry`:** Fetches live data on all installed extensions, their metadata, dependencies, and potential conflicts to answer questions about your bot's plugins.
+    - **`FrameworkDiagnostics`:** Accesses current health reports, performance metrics (CPU, memory, event loop lag), and error rates to provide on-demand diagnostic summaries.
+    - **`SlashCommandLimiter`:** Understands the bot's slash command usage, including which commands have been converted to prefix commands due to Discord's API limits, and why.
+    - **`EventHooks` & `EventHooksCreater`:** Provides insights into the internal event system, registered hooks, execution history, and user-created automations, helping you understand how the bot responds to events.
+  - **Direct File & Database Introspection:**
+    - **File Content Analysis:** Can read and summarize the content of any specified file within the bot's directory (with robust security checks to prevent path traversal), allowing the AI to explain code, configurations, or logs.
+    - **Database Schema Querying:** Interacts with the bot's SQLite databases to answer natural language questions about table schemas, data structure, and even specific data points (e.g., "How many users have configured custom prefixes?").
+    - **`README.md` Smart Search:** Utilizes advanced search capabilities to find and synthesize information directly from the bot's `README.md` file, making documentation queries instant and efficient.
+- **Key Features for Enhanced Bot Management:**
+  - **Natural Language Interaction:** Users can ask complex questions in plain English, eliminating the need to memorize specific commands or data structures.
+  - **Interactive Help Menu:** A paginated, button-driven help menu guides users through the `/ask_zdbf` command's extensive capabilities, ensuring ease of discovery and use.
+  - **Robust Error Handling & Timeout Prevention:** Implements immediate deferral of Discord interactions and comprehensive error handling, ensuring a smooth user experience even during lengthy AI processing times.
+  - **Secure Operations:** All file and data access through the AI assistant is safeguarded by the framework's atomic file system and strict path validation, ensuring data integrity and preventing unauthorized access.
 
 **📡 Live Monitor (`cogs/live_monitor.py`)**
 
@@ -622,6 +648,7 @@ Actions:
 
 ✅ **Hybrid Commands** - Both prefix and slash command support  
 ✅ **Permission Framework** - Multi-tier role-based access control  
+✅ **AI Assistant** - Gemini-powered natural language introspection  
 ✅ **Command Autocomplete** - Dynamic suggestions for slash commands  
 ✅ **Cooldown Management** - Built-in rate limiting  
 ✅ **Auto-Delete Messages** - Automatic cleanup of responses  
@@ -784,7 +811,8 @@ discord-bot-framework/
 │   ├── plugin_registry.py       # Plugin metadata & dependency tracking
 │   ├── framework_diagnostics.py # Health monitoring
 │   ├── live_monitor.py          # Web dashboard & remote management
-│   └── slash_command_limiter.py # Slash command protection
+│   ├── slash_command_limiter.py # Slash command protection
+│   └── GeminiService.py         # AI assistant powered by Google Gemini
 │
 ├── data/                        # Auto-generated data directory
 │   ├── main.db                  # Global SQLite database
@@ -885,33 +913,33 @@ discord-bot-framework/
 
 ### 🔌 Plugin Registry Commands
 
-| Command | Description | Cooldown | Hybrid |
-|---------|-------------|----------|--------|
-| `!pr_list` / `/pr_list` | List all registered plugins with status indicators | 10s | ✅ |
-| `!pr_info <name>` / `/pr_info` | Detailed information about a specific plugin | 10s | ✅ |
-| `!pr_validate <name>` | Validate plugin dependencies and conflicts (Owner) | - | ✅ |
-| `!pr_enforce <mode>` | Toggle dependency/conflict enforcement (Owner) | - | ✅ |
-| `!pr_alert_channel [channel]` | Set alert channel for registry warnings (Owner) | - | ✅ |
+| Command | Description | AI Query |
+|---------|-------------|----------|
+| `!pr_list` / `/pr_list` | List all registered plugins with status indicators | `/ask_zdbf action:plugins` |
+| `!pr_info <name>` / `/pr_info` | Detailed information about a specific plugin | `/ask_zdbf action:plugins query:"tell me about [plugin]"` |
+| `!pr_validate <name>` | Validate plugin dependencies and conflicts (Owner) | `/ask_zdbf action:plugins query:"does [plugin] have issues?"` |
+| `!pr_enforce <mode>` | Toggle dependency/conflict enforcement (Owner) | - |
+| `!pr_alert_channel [channel]` | Set alert channel for registry warnings (Owner) | - |
 
 ### 📊 Framework Diagnostics Commands
 
-| Command | Description | Cooldown | Hybrid |
-|---------|-------------|----------|--------|
-| `!fw_diagnostics` / `/fw_diagnostics` | Display framework health and diagnostics (Owner) | - | ✅ |
-| `!fw_alert_channel` / `/fw_alert_channel` | Set alert channel for framework diagnostics (Owner) | - | ✅ |
-| `!slashlimit` / `/slashlimit` | Check slash command usage and limits | 10s | ✅ |
+| Command | Description | AI Query |
+|---------|-------------|----------|
+| `!fw_diagnostics` / `/fw_diagnostics` | Display framework health and diagnostics (Owner) | `/ask_zdbf action:diagnose` |
+| `!fw_alert_channel` / `/fw_alert_channel` | Set alert channel for framework diagnostics (Owner) | - |
+| `!slashlimit` / `/slashlimit` | Check slash command usage and limits | `/ask_zdbf action:slash` |
 
 
 ### 🪝 Event Hooks Commands
 
-| Command | Description | Cooldown | Hybrid |
-|---------|-------------|----------|--------|
-| `!eh_list` / `/eh_list` | Display registered hooks with metrics (Owner) | - | ✅ |
-| `!eh_history [limit]` / `/eh_history` | Display hook execution history (Owner) | - | ✅ |
-| `!eh_disable <hook_id>` | Disable a problematic hook (Owner) | - | ✅ |
-| `!eh_enable <hook_id>` | Re-enable a disabled hook (Owner) | - | ✅ |
-| `!eh_reset_circuit <hook_id>` | Reset circuit breaker for hook (Owner) | - | ✅ |
-| `!eh_alert_channel [channel]` | Set alert channel for event hooks (Owner) | - | ✅ |
+| Command | Description | AI Query |
+|---------|-------------|----------|
+| `!eh_list` / `/eh_list` | Display registered hooks with metrics (Owner) | `/ask_zdbf action:hooks` |
+| `!eh_history [limit]` / `/eh_history` | Display hook execution history (Owner) | `/ask_zdbf action:hooks query:"show hook history"` |
+| `!eh_disable <hook_id>` | Disable a problematic hook (Owner) | - |
+| `!eh_enable <hook_id>` | Re-enable a disabled hook (Owner) | - |
+| `!eh_reset_circuit <hook_id>` | Reset circuit breaker for hook (Owner) | - |
+| `!eh_alert_channel [channel]` | Set alert channel for event hooks (Owner) | - |
 
 ### 📡 Live Monitor Commands
 
@@ -925,6 +953,25 @@ discord-bot-framework/
 
 **Note:** Live Monitor requires a PHP web server (e.g., Strato, Hostinger, any cPanel host). See the [Using Live Monitor](#using-live-monitor) section for complete setup instructions.
 
+### 🤖 AI Assistant Commands
+
+| Command | Description | Cooldown | Hybrid |
+|---------|-------------|----------|--------|
+| `/ask_zdbf <action> [query]` | Ask the AI assistant about the bot, its code, or data | 15s | ❌ (Slash Only) |
+
+**Actions for `/ask_zdbf`:**
+- **`help`**: Shows an interactive help menu for the AI assistant.
+- **`framework`**: Ask a general question about the bot's architecture.
+- **`plugins`**: Get an AI-powered analysis of installed plugins.
+- **`diagnose`**: Receive a health report summary from the AI.
+- **`database`**: Ask a question about the database schema in natural language.
+- **`file`**: Ask a question about a specific file's content.
+- **`extension`**: Inspect an extension file from the `/extensions` folder.
+- **`slash`**: Inquire about the slash command auto-conversion system.
+- **`hooks`**: Ask about the internal framework (EventHooks) event system.
+- **`automations`**: Ask about user-created automations.
+- **`readme`**: Ask a question about the bot's `README.md` file.
+- **`permission`**: (Owner Only) Manage permissions for the AI assistant.
 
 ### 🔧 Owner-Only Commands
 

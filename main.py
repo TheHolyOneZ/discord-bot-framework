@@ -328,7 +328,16 @@ class BotFrameWork(commands.AutoShardedBot):
         
         self.log_rotation_task.start()
         self.db_maintenance_task.start()
+
+        # Manually load the atomic_file_system cog from the root directory (Mainly for GeminiService.py)
+        # Added In V1.6.0.1
+        try:
+            await self.load_extension("atomic_file_system")
+            logger.info("Framework utility cog loaded: atomic_file_system")
+        except Exception as e:
+            logger.error(f"Failed to load atomic_file_system: {e}")
     
+
     async def load_all_extensions(self):
         loaded = 0
         failed = 0
@@ -963,14 +972,14 @@ async def shardinfo_command(ctx):
     except:
         pass
 
-@bot.hybrid_command(name="atomictest", help="Test atomic file operations")
+@bot.hybrid_command(name="atomic_test_main", help="Test atomic file operations (from main.py)")
 @is_bot_owner()
-async def atomictest_command(ctx):
+async def atomic_test_main_command(ctx):
     if ctx.interaction:
-        if not await check_app_command_permissions(ctx.interaction, "atomictest"):
+        if not await check_app_command_permissions(ctx.interaction, "atomic_test_main"):
             return
     embed = discord.Embed(
-        title="🧪 Atomic File Operations Test",
+        title="🧪 Atomic File Operations Test (Main)",
         description="Running tests...",
         color=0xffff00,
         timestamp=discord.utils.utcnow()
@@ -978,7 +987,7 @@ async def atomictest_command(ctx):
     msg = await ctx.send(embed=embed)
     
     results = []
-    test_file = "./data/atomic_test.json"
+    test_file = "./data/atomic_test_main.json"
     
     try:
         test_data = {"test": "data", "timestamp": datetime.now().isoformat(), "count": 42}
@@ -1006,7 +1015,7 @@ async def atomictest_command(ctx):
         tasks = []
         for i in range(10):
             test_concurrent = {"concurrent": i, "timestamp": datetime.now().isoformat()}
-            tasks.append(global_file_handler.atomic_write_json(f"./data/test_{i}.json", test_concurrent))
+            tasks.append(global_file_handler.atomic_write_json(f"./data/test_main_{i}.json", test_concurrent))
         
         start = time.time()
         await asyncio.gather(*tasks)
@@ -1015,11 +1024,11 @@ async def atomictest_command(ctx):
         
         for i in range(10):
             try:
-                os.remove(f"./data/test_{i}.json")
+                os.remove(f"./data/test_main_{i}.json")
             except:
                 pass
         
-        embed.title = "✅ Atomic File Operations Test Complete"
+        embed.title = "✅ Atomic File Operations Test Complete (Main)"
         embed.description = "```\n" + "\n".join(results) + "```"
         embed.color = 0x00ff00
         embed.add_field(
@@ -1029,10 +1038,10 @@ async def atomictest_command(ctx):
         )
         
     except Exception as e:
-        embed.title = "❌ Test Failed"
+        embed.title = "❌ Test Failed (Main)"
         embed.description = f"```py\n{str(e)[:200]}```"
         embed.color = 0xff0000
-        logger.error(f"Atomic test error: {e}")
+        logger.error(f"Atomic test error (Main): {e}")
         logger.debug(traceback.format_exc())
     
     await msg.edit(embed=embed)
@@ -1712,20 +1721,8 @@ async def config_command(ctx, command_name: str = None, role: discord.Role = Non
     await ctx.send(embed=embed)
     try:
         await ctx.message.delete()
-    except:
+    except: 
         pass
-
-
-
-
-
-
-
-
-
-
-
-
 
 @bot.hybrid_command(name="dbstats", help="Display database connection statistics (Bot Owner Only)")
 @is_bot_owner()
@@ -1923,51 +1920,6 @@ async def integrity_check_command(ctx):
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 @bot.hybrid_command(name="discordbotframework", aliases=["framework", "botinfo"], help="Display bot framework information")
 @commands.cooldown(1, 10, commands.BucketType.user)
 @has_command_permission()
@@ -1983,28 +1935,24 @@ async def framework_command(ctx):
     )
     
     features = [
-        "• Dynamic Extension Loading System",
-        "• Hot-Reload Capability",
-        "• Atomic File Operations & Caching",
-        "• Per-Guild Database System",
-        "• Automatic Sharding Support",
-        "• Role-Based Command Permissions",
-        "• Advanced Help Menu with Categories",
-        "• Interactive Dropdown Menus & Pagination",
-        "• Database Management (SQLite + WAL)",
-        "• Metrics & Statistics Tracking",
-        "• Command Usage Analytics",
-        "• Automatic Error Handling",
-        "• Safe Rotating Log System",
-        "• Custom Prefix Per Guild",
-        "• Hybrid Commands (Prefix & Slash)",
-        "• Auto-Delete Success Messages",
-        "• Whitespace-Tolerant Extension Names",
-        "• Configuration System (JSON)",
-        "• Improved Slash Command Sync",
-        "• Bot Owner & Guild Owner Permissions",
-        "• LRU Cache with Memory Limits",
-        "• Connection Pooling"
+        "• **Atomic File System**: Safe, thread-safe file and database operations to prevent data corruption.",
+        "• **Per-Guild Database System**: Each server gets its own isolated database for custom settings.",
+        "• **Internal Event Hooks**: Allows extensions to communicate and interact programmatically.",
+        "• **User-Created Automations**: Build custom automations (welcome messages, reaction roles) with an advanced conditional engine.",
+        "• **Framework Health Diagnostics**: Monitors bot performance, system metrics, and event loop lag.",
+        "• **AI Assistant (Google Gemini)**: Inspect the bot's code and functionality using natural language.",
+        "• **Plugin & Dependency Management**: Tracks extensions, dependencies, and detects conflicts.",
+        "• **Automatic Slash Command Fallback**: Intelligently converts slash commands to prefix commands when Discord's 100-command limit is reached.",
+        "• **Live Monitoring Dashboard**: Real-time bot statistics, system health, command usage, and remote control capabilities via a web interface.",
+        "• **Hot-Reload Capability**: Reload extensions without restarting the bot.",
+        "• **Role-Based Command Permissions**: Restrict command usage to specific roles.",
+        "• **Automatic Sharding Support**: Scales to a large number of servers with ease.",
+        "• **Advanced Help Menu**: An interactive, category-based help menu.",
+        "• **Comprehensive Logging System**: Advanced logging with rotation and cleanup.",
+        "• **Metrics & Statistics Tracking**: Detailed usage and performance metrics for commands and events.",
+        "• **Customizable Bot Status**: Dynamic bot status updates based on server count and other metrics.",
+        "• **Persistent Configuration System**: Secure and reliable JSON-based configuration management.",
+        "• **Efficient Command Handling**: Optimized command processing and cooldowns."
     ]
     
     embed.add_field(
