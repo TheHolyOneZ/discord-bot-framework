@@ -41,7 +41,7 @@ No PHP hosting required • Instant setup • All features included
 
 
 </div>
----
+
 
 ## 📑 Table of Contents
 
@@ -3936,6 +3936,7 @@ IMPORTANT NOTE: If you are using this framework, please be aware that you are so
 
 
 ---
+
 
 
 
