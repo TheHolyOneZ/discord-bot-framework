@@ -782,6 +782,38 @@ class SafeDatabaseManager:
         except Exception as e:
             logger.error(f"SafeDatabaseManager: Error setting prefix for guild {guild_id}: {e}")
     
+    async def get_guild_mention_prefix_enabled(self, guild_id: int) -> Optional[bool]:
+        """Get whether mention prefix is enabled for guild"""
+        conn = await self._get_guild_connection(guild_id)
+        
+        try:
+            async with conn.execute(
+                "SELECT value FROM guild_settings WHERE key = 'mention_prefix_enabled'"
+            ) as cursor:
+                row = await cursor.fetchone()
+                if row:
+                    # Convert string "1" or "0" to boolean
+                    return row['value'] == '1'
+                return None  # No setting, will use global default
+        except Exception as e:
+            logger.error(f"SafeDatabaseManager: Error getting mention prefix setting for guild {guild_id}: {e}")
+            return None
+    
+    async def set_guild_mention_prefix_enabled(self, guild_id: int, enabled: bool):
+        """Set whether mention prefix is enabled for guild"""
+        conn = await self._get_guild_connection(guild_id)
+        
+        try:
+            value = '1' if enabled else '0'
+            await conn.execute(
+                "INSERT OR REPLACE INTO guild_settings (key, value) VALUES ('mention_prefix_enabled', ?)",
+                (value,)
+            )
+            await conn.commit()
+            logger.info(f"SafeDatabaseManager: Set mention prefix for guild {guild_id}: {enabled}")
+        except Exception as e:
+            logger.error(f"SafeDatabaseManager: Error setting mention prefix for guild {guild_id}: {e}")
+    
     async def increment_command_usage(self, command_name: str):
         """Increment global command usage counter"""
         if not self.conn:

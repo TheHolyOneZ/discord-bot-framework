@@ -458,18 +458,33 @@ class BotFrameWork(commands.AutoShardedBot):
         await self.wait_until_ready()
     
     async def get_prefix(self, message: discord.Message):
+        # Determine the base prefix (guild-specific or global)
         if not message.guild:
-            return self.config.get("prefix", "!")
+            base_prefix = self.config.get("prefix", "!")
+            # For DMs, use global config setting
+            allow_mention = self.config.get("allow_mention_prefix", True)
+        else:
+            cached_prefix = await self.prefix_cache.get(message.guild.id)
+            if cached_prefix:
+                base_prefix = cached_prefix
+            else:
+                custom_prefix = await self.db.get_guild_prefix(message.guild.id)
+                base_prefix = custom_prefix if custom_prefix else self.config.get("prefix", "!")
+                await self.prefix_cache.set(message.guild.id, base_prefix)
+            
+            # Check per-guild mention prefix setting (falls back to global config)
+            allow_mention = await self.db.get_guild_mention_prefix_enabled(message.guild.id)
+            if allow_mention is None:
+                # No guild setting, use global config
+                allow_mention = self.config.get("allow_mention_prefix", True)
         
-        cached_prefix = await self.prefix_cache.get(message.guild.id)
-        if cached_prefix:
-            return cached_prefix
-        
-        custom_prefix = await self.db.get_guild_prefix(message.guild.id)
-        result = custom_prefix if custom_prefix else self.config.get("prefix", "!")
-        
-        await self.prefix_cache.set(message.guild.id, result)
-        return result
+        # Add mention prefix support if enabled
+        if allow_mention:
+            # Return both mention and regular prefix
+            return commands.when_mentioned_or(base_prefix)(self, message)
+        else:
+            # Return only the regular prefix
+            return base_prefix
     
     async def sync_commands(self, force: bool = False):
         if self._slash_synced and not force:
@@ -825,10 +840,25 @@ async def help_command(ctx):
     if isinstance(prefix, list):
         prefix = prefix[0]
     
+    # Build prefix info string - check per-guild setting
+    if ctx.guild:
+        allow_mention = await bot.db.get_guild_mention_prefix_enabled(ctx.guild.id)
+        if allow_mention is None:
+            # No guild setting, use global config
+            allow_mention = bot.config.get("allow_mention_prefix", True)
+    else:
+        # DM, use global config
+        allow_mention = bot.config.get("allow_mention_prefix", True)
+    
+    if allow_mention:
+        prefix_info = f"Current Prefix: {prefix} or @{bot.user.name}"
+    else:
+        prefix_info = f"Current Prefix: {prefix}"
+    
     embed = discord.Embed(
         title="📚 Help Menu",
         description="**Select a category from the dropdown menu**\n\n"
-                    f"```Available Categories: {len(categories)}\nCurrent Prefix: {prefix}```",
+                    f"```Available Categories: {len(categories)}\n{prefix_info}```",
         color=0x2b2d31,
         timestamp=discord.utils.utcnow()
     )
@@ -2399,10 +2429,25 @@ class BackButton(discord.ui.Button):
         
         total_categories = len(categories)
         
+        # Build prefix info string - check per-guild setting
+        if interaction.guild:
+            allow_mention = await interaction.client.db.get_guild_mention_prefix_enabled(interaction.guild.id)
+            if allow_mention is None:
+                # No guild setting, use global config
+                allow_mention = interaction.client.config.get("allow_mention_prefix", True)
+        else:
+            # DM, use global config
+            allow_mention = interaction.client.config.get("allow_mention_prefix", True)
+        
+        if allow_mention:
+            prefix_info = f"Current Prefix: {self.prefix} or @{interaction.client.user.name}"
+        else:
+            prefix_info = f"Current Prefix: {self.prefix}"
+        
         embed = discord.Embed(
             title="📚 Help Menu",
             description="**Select a category from the dropdown menu**\n\n"
-                        f"```Available Categories: {total_categories}\nCurrent Prefix: {self.prefix}```",
+                        f"```Available Categories: {total_categories}\n{prefix_info}```",
             color=0x2b2d31,
             timestamp=discord.utils.utcnow()
         )
@@ -2458,6 +2503,7 @@ class CreditsButton(discord.ui.Button):
                 "• Command Usage Analytics\n"
                 "• Configuration System (JSON)\n"
                 "• Custom Prefix Per Guild\n"
+                "• @Mention Prefix Support\n"
                 "• Auto-Delete Messages\n"
                 "• Whitespace-Tolerant Extensions\n"
                 "• Advanced Error Handling\n"

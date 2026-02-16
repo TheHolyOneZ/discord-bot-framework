@@ -22,7 +22,12 @@
 </p>
 
 <p align="center">
-  **✨ NEW FEATURE (v1.6.0.1): AI Assistant (GeminiService Cog)**
+  **✨ NEW FEATURE (v1.6.1.0): @Mention Prefix & Per-Guild Configuration**
+  <br>Users can now invoke commands using @BotName, and server admins can configure bot behavior per-guild with the new Guild Settings cog!
+</p>
+
+<p align="center">
+  **🎯 PREVIOUS: AI Assistant (GeminiService Cog) - v1.6.0.1**
   <br>Interact with your bot using natural language to get insights into its framework, plugins, diagnostics, database, files, and more!
 </p>
 
@@ -38,10 +43,10 @@ No PHP hosting required • Instant setup • All features included
 
 🔗 [Get Started](https://zsync.eu/zframedash/) • 📺 [Watch Tutorial](https://www.youtube.com/watch?v=TfSIV4mc_fo)
 
-
+---
 
 </div>
-
+---
 
 ## 📑 Table of Contents
 
@@ -65,6 +70,7 @@ No PHP hosting required • Instant setup • All features included
 - [📁 Project Structure](#-project-structure)
 - [🎮 Built-in Commands](#-built-in-commands)
   - [👥 User Commands](#-user-commands)
+  - [⚙️ Guild Settings Commands](#️-guild-settings-commands)
   - [🛒 Marketplace Commands](#-marketplace-commands)
   - [Atomic File System Commands](#atomic-file-system-commands)
   - [🔌 Plugin Registry Commands](#-plugin-registry-commands)
@@ -135,10 +141,13 @@ No PHP hosting required • Instant setup • All features included
 
 **Hybrid Command System**
 - Seamless prefix and slash command support
+- **@Mention prefix support** - Users can invoke commands with `@BotName command`
+- **Per-guild mention prefix configuration** - Admins control @mention availability per server
 - Automatic command type indicators in help menu
 - Slash command limit protection (100 command cap)
 - Graceful degradation to prefix-only mode
 - Visual indicators: ⚡ (hybrid), 🔸 (prefix-only), 🔹 (limit reached)
+- Help menu adapts to show available invocation methods
 
 **Web-Based Monitoring Dashboard**
 - Real-time bot status via Live Monitor cog (~12,000+ lines)
@@ -312,6 +321,35 @@ No PHP hosting required • Instant setup • All features included
   - **Interactive Help Menu:** A paginated, button-driven help menu guides users through the `/ask_zdbf` command's extensive capabilities, ensuring ease of discovery and use.
   - **Robust Error Handling & Timeout Prevention:** Implements immediate deferral of Discord interactions and comprehensive error handling, ensuring a smooth user experience even during lengthy AI processing times.
   - **Secure Operations:** All file and data access through the AI assistant is safeguarded by the framework's atomic file system and strict path validation, ensuring data integrity and preventing unauthorized access.
+
+**⚙️ Guild Settings (`cogs/guild_settings.py`)**
+- **Per-Guild Configuration Management:**
+  - Server administrators control bot behavior independently for their server
+  - Settings stored in per-guild database with automatic persistence
+  - Graceful fallback to global configuration if no guild-specific setting exists
+- **@Mention Prefix Configuration:**
+  - Enable/disable @mention prefix (`@BotName command`) per server
+  - Check current status with detailed command invocation methods display
+  - Independent control over user experience preferences
+- **Comprehensive Settings Dashboard:**
+  - View all server configuration at a glance with `!serversettings`
+  - Shows custom prefix, mention prefix status, and server information
+  - Lists all available command invocation methods for users
+- **Administrator-Only Access:**
+  - All configuration commands require Administrator permission
+  - Guild context validation (cannot be used in DMs)
+  - Comprehensive error handling with clear feedback
+- **Extensible Architecture:**
+  - Built on modular design for easy addition of more guild settings
+  - Clean separation of concerns with dedicated cog
+  - Full audit logging for all configuration changes
+- **User-Friendly Interface:**
+  - Rich embed responses with visual indicators
+  - Clear success/error messages
+  - Status checking before changes
+- **Commands:**
+  - `!mentionprefix enable/disable/status` - Control @mention prefix
+  - `!serversettings` - View all server configuration
 
 **📡 Live Monitor (`cogs/live_monitor.py`)**
 
@@ -647,6 +685,7 @@ Actions:
 ### Command System
 
 ✅ **Hybrid Commands** - Both prefix and slash command support  
+✅ **@Mention Prefix** - Invoke commands with @BotName syntax (configurable per-guild)  
 ✅ **Permission Framework** - Multi-tier role-based access control  
 ✅ **AI Assistant** - Gemini-powered natural language introspection  
 ✅ **Command Autocomplete** - Dynamic suggestions for slash commands  
@@ -675,7 +714,8 @@ Actions:
 
 ### Configuration
 
-✅ **Per-Guild Settings** - Custom prefixes and configurations  
+✅ **Per-Guild Settings** - Custom prefixes, @mention controls, and configurations  
+✅ **Guild Settings Dashboard** - View all server settings at a glance  
 ✅ **JSON Config System** - Centralized configuration  
 ✅ **Command Permissions** - Granular role requirements  
 ✅ **Extension Blacklist** - Selective loading control  
@@ -887,6 +927,17 @@ discord-bot-framework/
 | `!shardinfo` / `/shardinfo` | Shard information and distribution | 10s | ✅ |
 | `!setprefix <prefix>` | Set custom prefix for your server (Admin only) | - | ✅ |
 | `!config [cmd] [role]` | Configure command permissions (Owner only) | - | ✅ |
+
+### ⚙️ Guild Settings Commands
+
+| Command | Description | Permission | Hybrid |
+|---------|-------------|------------|--------|
+| `!mentionprefix enable` / `/mentionprefix enable` | Enable @mention prefix for this server | Administrator | ✅ |
+| `!mentionprefix disable` / `/mentionprefix disable` | Disable @mention prefix for this server | Administrator | ✅ |
+| `!mentionprefix status` / `/mentionprefix status` | Check current @mention prefix setting | Administrator | ✅ |
+| `!serversettings` / `/serversettings` | View all server configuration settings | Administrator | ✅ |
+
+**Note:** The @mention prefix feature allows users to invoke commands using `@BotName command` syntax. Server administrators can enable or disable this independently for their server. If no setting is configured, the bot uses the global default from `config.json`.
 
 ### 🛒 Marketplace Commands
 
@@ -1803,6 +1854,7 @@ On first run, the bot creates config.json with default settings:
 
 {
     "prefix": "!",
+    "allow_mention_prefix": true,
     "owner_ids": [],
     "auto_reload": true,
     "status": {
@@ -1848,6 +1900,14 @@ prefix (string)
 Default command prefix
 Default: "!"
 Per-guild overrides supported via !setprefix
+
+allow_mention_prefix (boolean)
+
+Enable @mention as command prefix
+Default: true
+Allows users to invoke commands with @BotName command
+Per-guild overrides supported via !mentionprefix
+Example: @BotName help works like !help when enabled
 
 owner_ids (array)
 
@@ -3936,12 +3996,3 @@ IMPORTANT NOTE: If you are using this framework, please be aware that you are so
 
 
 ---
-
-
-
-
-
-
-
-
-
