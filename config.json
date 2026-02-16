@@ -1,5 +1,6 @@
 {
   "prefix": "!",
+  "allow_mention_prefix": true,
   "owner_ids": [],
   "auto_reload": true,
   
