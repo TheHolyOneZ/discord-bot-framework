@@ -38,6 +38,9 @@
     "enable_plugin_registry": true,
     "enable_framework_diagnostics": true,
     "enable_slash_command_limiter": true,
-    "_comment": "Set any to false to disable that framework feature"
+    "enable_shard_monitor": true,
+    "enable_shard_manager": true,
+    "enable_backup_restore": true,
+    "_comment": "Set any to false to disable that framework feature. Shard cogs also respect .env toggles (ENABLE_SHARD_MONITOR, ENABLE_SHARD_MANAGER)"
   }
 }
