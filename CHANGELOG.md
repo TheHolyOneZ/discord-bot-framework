@@ -322,7 +322,6 @@ Major update (+616 lines, 3998 → 4614):
 ### ❤️ Credits
 
 Developed for the **Zoryx Discord Bot Framework** by **TheHolyOneZ**  
-Shard system implementation assistance by Claude (Anthropic)
 
 ---
 
