@@ -1,0 +1,87 @@
+# ═══════════════════════════════════════════════════════════
+#  Zoryx Discord Bot Framework — Environment Configuration
+# ═══════════════════════════════════════════════════════════
+
+# ─── Core (Required) ─────────────────────────────────────
+DISCORD_TOKEN=your_discord_bot_token_here
+BOT_OWNER_ID=your_discord_user_id_here
+
+
+# ─── AI Assistant (Optional) ─────────────────────────────
+GEMINI_API_KEY=your_gemini_api_key_here
+
+# ─── Backup & Restore ────────────────────────────────────
+# Full guild snapshot system for disaster recovery, migrations, and auditing
+# Commands: /backup, /backupcreate, /backuprestore, /backupview, /backupdelete, etc.
+ENABLE_BACKUP_RESTORE=true
+BACKUP_MAX_PER_GUILD=25
+BACKUP_COOLDOWN=300
+BACKUP_AUTO_INTERVAL=0
+BACKUP_RETENTION_DAYS=0
+
+# ─── Sharding (Basic) ────────────────────────────────────
+# Total number of shards for your bot (Discord requires sharding at 2500+ guilds)
+# Default: 1 (no sharding)
+SHARD_COUNT=1
+
+# Specific shard IDs for this process (comma-separated)
+# Leave empty to run all shards in one process
+# Example: SHARD_IDS=0,1,2 (this process handles shards 0, 1, and 2)
+SHARD_IDS=
+
+# ─── Shard Monitor Cog ───────────────────────────────────
+# Enables real-time shard health monitoring, latency tracking, alerts
+# Commands: /shardmonitor, /sharddetails, /shardhealth, /shardalerts, /shardreset
+# All commands are BOT OWNER ONLY
+ENABLE_SHARD_MONITOR=true
+
+# Number of consecutive shard failures before sending an alert
+# Range: 1-20, Default: 3
+SHARD_ALERT_THRESHOLD=3
+
+# ─── Shard Manager Cog (Multi-Process / Multi-Server) ────
+# Enables cross-shard IPC communication for running shards across
+# multiple processes or servers. DISABLED by default — only enable
+# when you actually need multi-process sharding.
+# Commands: /clusters, /ipcstatus, /broadcastmsg
+# All commands are BOT OWNER ONLY
+ENABLE_SHARD_MANAGER=false
+
+# IPC mode: 'server' for the primary cluster, 'client' for secondary clusters
+# You need exactly ONE server and one or more clients
+SHARD_IPC_MODE=server
+
+# IPC server address
+# Use 127.0.0.1 for same-machine multi-process
+# Use 0.0.0.0 for multi-server (remote connections)
+SHARD_IPC_HOST=127.0.0.1
+
+# IPC server port
+SHARD_IPC_PORT=20000
+
+# Shared authentication secret — MUST match on ALL clusters!
+# Generate a strong random string for production
+SHARD_IPC_SECRET=change_me_please
+
+# Unique name for this cluster (for identification in logs and commands)
+SHARD_CLUSTER_NAME=cluster-0
+
+# ═══════════════════════════════════════════════════════════
+#  Example Multi-Process Setup (same machine)
+# ═══════════════════════════════════════════════════════════
+#
+#  Process 1 (.env):
+#    SHARD_COUNT=6
+#    SHARD_IDS=0,1,2
+#    ENABLE_SHARD_MANAGER=true
+#    SHARD_IPC_MODE=server
+#    SHARD_CLUSTER_NAME=cluster-0
+#
+#  Process 2 (.env.cluster1):
+#    SHARD_COUNT=6
+#    SHARD_IDS=3,4,5
+#    ENABLE_SHARD_MANAGER=true
+#    SHARD_IPC_MODE=client
+#    SHARD_CLUSTER_NAME=cluster-1
+#
+# ═══════════════════════════════════════════════════════════

@@ -1,6 +1,6 @@
 MIT License + Additional Terms
 
-Copyright (c) 2025 TheHolyOneZ
+Copyright (c) 2025-2026 TheHolyOneZ
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -33,6 +33,24 @@ ADDITIONAL TERMS:
      not be removed, replaced, or hidden.
 
 6. The `cogs/GeminiService.py` file is subject to its own standalone, source-available license embedded within its docstring. This license has specific restrictions on copying, modification, and use, and these terms supersede the general MIT License for that specific file. Refer to the docstring within `cogs/GeminiService.py` for full details.
+
+7. The `cogs/backup_restore.py` file is subject to its own standalone, source-available
+   license embedded within its docstring. This license restricts copying (no more than
+   4 consecutive lines without permission), redistribution, and use outside the ZDBF
+   ecosystem. These terms supersede the general MIT License for that specific file.
+   Refer to the docstring within `cogs/backup_restore.py` for full details.
+
+8. The `cogs/shard_monitor.py` file is subject to its own standalone, source-available
+   license embedded within its docstring. This license restricts copying (no more than
+   4 consecutive lines without permission), redistribution, and use outside the ZDBF
+   ecosystem. These terms supersede the general MIT License for that specific file.
+   Refer to the docstring within `cogs/shard_monitor.py` for full details.
+
+9. The `cogs/shard_manager.py` file is subject to its own standalone, source-available
+   license embedded within its docstring. This license restricts copying (no more than
+   4 consecutive lines without permission), redistribution, and use outside the ZDBF
+   ecosystem. These terms supersede the general MIT License for that specific file.
+   Refer to the docstring within `cogs/shard_manager.py` for full details.
 
 3. Altering, deleting, or renaming the author's name "TheHolyOneZ" in this
    license or within the Credits Button is strictly prohibited.
@@ -144,6 +162,189 @@ PROTECTED COMPONENTS SUMMARY
 | Repository link              | Must link to original GitHub                  |
 | !discordbotframework command | Must remain with original features            |
 | Live Monitor Credits tab     | Separately copyrighted, NOT MIT licensed      |
+| cogs/GeminiService.py        | Source-available, own license in docstring     |
+| cogs/backup_restore.py       | Source-available, own license in docstring     |
+| cogs/shard_monitor.py        | Source-available, own license in docstring     |
+| cogs/shard_manager.py        | Source-available, own license in docstring     |
+| Marketplace extensions       | Ecosystem-only, no redistribution             |
+
+================================================================================
+CONTACT
+================================================================================
+
+Author: TheHolyOneZ
+GitHub: https://github.com/TheHolyOneZ
+Repository: https://github.com/TheHolyOneZ/discord-bot-framework
+Website: https://zsync.eu/zdbf/
+Discord: gg/sgZnXca5ts
+MIT License + Additional Terms
+
+Copyright (c) 2025-2026 TheHolyOneZ
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+ADDITIONAL TERMS:
+
+1. The file main.py, and any version or derivative thereof, remains under
+   the MIT License and can be freely modified, provided that this license
+   and the original copyright notice remain intact.
+
+2. The CreditsButton class (as originally defined in the Software) must
+   remain present in all distributed, forked, or modified versions of the Software.
+   Its functionality and visibility must not be removed or obscured.
+   Specifically:
+   - The Credits Button must continue to exist and be displayed in the same
+     interface location as in the original version.
+   - The Credits Button must contain visible credit to the original author,
+     "TheHolyOneZ", and a link or reference to the original repository:
+     https://github.com/TheHolyOneZ/discord-bot-framework
+   - The textual credit contents (embed fields such as "Created By", "License",
+     and related original attribution text) must remain clearly visible and
+     intact. Additional information may be added, but the original credits must
+     not be removed, replaced, or hidden.
+
+6. The `cogs/GeminiService.py` file is subject to its own standalone, source-available license embedded within its docstring. This license has specific restrictions on copying, modification, and use, and these terms supersede the general MIT License for that specific file. Refer to the docstring within `cogs/GeminiService.py` for full details.
+
+7. The `cogs/backup_restore.py` file is subject to its own standalone, source-available
+   license embedded within its docstring. This license restricts copying (no more than
+   4 consecutive lines without permission), redistribution, and use outside the ZDBF
+   ecosystem. These terms supersede the general MIT License for that specific file.
+   Refer to the docstring within `cogs/backup_restore.py` for full details.
+
+8. The `cogs/shard_monitor.py` file is subject to its own standalone, source-available
+   license embedded within its docstring. This license restricts copying (no more than
+   4 consecutive lines without permission), redistribution, and use outside the ZDBF
+   ecosystem. These terms supersede the general MIT License for that specific file.
+   Refer to the docstring within `cogs/shard_monitor.py` for full details.
+
+9. The `cogs/shard_manager.py` file is subject to its own standalone, source-available
+   license embedded within its docstring. This license restricts copying (no more than
+   4 consecutive lines without permission), redistribution, and use outside the ZDBF
+   ecosystem. These terms supersede the general MIT License for that specific file.
+   Refer to the docstring within `cogs/shard_manager.py` for full details.
+
+3. Altering, deleting, or renaming the author's name "TheHolyOneZ" in this
+   license or within the Credits Button is strictly prohibited.
+
+4. The discordbotframework command (including its aliases framework and
+   botinfo) as defined in the Software must remain intact. This includes
+   its function body and the original list of "Framework Features" and "User
+   Commands" in its generated embed. Functionality or content that provides
+   credit or information about the original framework must not be removed,
+   modified, or obscured. Additional fields or information may be added.
+
+5. Live Monitor Dashboard (cogs/live_monitor.py) License and Identity Protection
+
+The Live Monitor Dashboard, including but not limited to its name, branding,
+identity, and Credits tab, is NOT covered by the MIT License governing the
+remainder of the Software and is separately copyrighted.
+
+Protected components include, but are not limited to:
+- The names “Zoryx”, “Zoryx Framework”, and “Zoryx Discord Bot Framework”
+- The author name “TheHolyOneZ”
+- The Live Monitor Dashboard Credits tab, including its layout, wording,
+  structure, and crown SVG artwork
+
+The Credits tab MUST:
+- Remain clearly visible at all times
+- Remain unaltered in wording, layout, and visual design
+- Not be hidden, removed, renamed, duplicated, repositioned, minimized,
+  or visually obscured in any way
+
+Users ARE permitted to:
+- Customize styling, layout, or functionality of the dashboard outside
+  the protected Credits section
+- Extend the dashboard with new features, integrations, or additional tabs
+
+If a new tab is added, it MUST:
+- Be clearly labeled as the modifier’s own work
+- Accurately describe the modifications or additions made
+- Include wording such as:
+  “Tab created by <YourName>. Added custom functionality on top of the existing Zoryx system.”
+
+Users MUST NOT:
+- Claim authorship of framework code or systems they did not create
+- Present themselves as the original creator of the framework
+- Imply ownership of backend logic they did not meaningfully modify
+- Modify backend logic in a way that introduces security risks
+- Remove, obscure, or misrepresent attribution to the original author
+- Modify the framework with intent to mislead, damage reputation,
+  or misrepresent authorship
+
+Any violation of this section constitutes a breach of license and intent,
+unless explicit, direct permission is granted by TheHolyOneZ.
+
+
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+================================================================================
+MARKETPLACE LICENSE
+================================================================================
+
+Extensions downloaded through the Extension Marketplace have additional terms:
+
+1. ECOSYSTEM ONLY
+   Extensions are only usable within the ZygnalBot ecosystem, which includes
+   the Zoryx Discord Bot Framework and related authorized systems.
+
+2. ATTRIBUTION PROTECTION
+   The following names and identifiers cannot be removed or altered in any
+   marketplace extension:
+   - ZygnalBot
+   - zygnalbot
+   - TheHolyOneZ
+   - TheZ
+
+3. INDIVIDUAL LICENSES
+   Each extension may have its own additional license terms. Users must
+   respect and comply with individual extension licenses.
+
+4. NO REDISTRIBUTION
+   Extensions cannot be redistributed outside of authorized ZygnalBot systems.
+   This includes but is not limited to: uploading to other platforms, sharing
+   source code publicly, or including in other bot frameworks.
+
+5. ZYGNALID REQUIRED
+   A valid, activated ZygnalID is required for marketplace access. ZygnalIDs
+   are unique 16-character identifiers tied to each bot installation.
+
+VIOLATIONS:
+Violations of these terms will result in:
+- Immediate ZygnalID deactivation
+- Permanent service ban from marketplace and support
+- Potential legal action for severe or repeated violations
+
+================================================================================
+PROTECTED COMPONENTS SUMMARY
+================================================================================
+
+| Component                    | Protection Level                              |
+|------------------------------|-----------------------------------------------|
+| main.py                      | MIT License (freely modifiable)               |
+| CreditsButton class          | Must remain visible and functional            |
+| "TheHolyOneZ" attribution    | Cannot be removed or altered                  |
+| Repository link              | Must link to original GitHub                  |
+| !discordbotframework command | Must remain with original features            |
+| Live Monitor Credits tab     | Separately copyrighted, NOT MIT licensed      |
+| cogs/GeminiService.py        | Source-available, own license in docstring     |
+| cogs/backup_restore.py       | Source-available, own license in docstring     |
+| cogs/shard_monitor.py        | Source-available, own license in docstring     |
+| cogs/shard_manager.py        | Source-available, own license in docstring     |
 | Marketplace extensions       | Ecosystem-only, no redistribution             |
 
 ================================================================================
