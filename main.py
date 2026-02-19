@@ -100,7 +100,7 @@ class PrefixCache:
             for gid in expired:
                 del self._cache[gid]
 
-BOT_OWNER_ONLY_COMMANDS = ["reload", "load", "unload", "sync", "atomictest", "cachestats", "shardinfo", "dbstats", "integritycheck", "cleanup"]
+BOT_OWNER_ONLY_COMMANDS = ["reload", "load", "unload", "sync", "atomictest", "cachestats", "shardinfo", "dbstats", "integritycheck", "cleanup", "shardmonitor", "sharddetails", "shardhealth", "shardalerts", "shardreset", "clusters", "ipcstatus", "broadcastmsg"]
 
 
 def is_bot_owner():
@@ -219,7 +219,7 @@ class BotFrameWork(commands.AutoShardedBot):
             logger.info("Created cogs directory for framework modules")
             return
         
-        load_order = ["event_hooks", "plugin_registry", "framework_diagnostics"]
+        load_order = ["event_hooks", "plugin_registry", "framework_diagnostics", "shard_monitor", "shard_manager"]
         
         for cog_name in load_order:
             cog_file = cogs_path / f"{cog_name}.py"
@@ -527,6 +527,15 @@ class BotFrameWork(commands.AutoShardedBot):
         if hasattr(self, 'db_maintenance_task'):
             self.db_maintenance_task.cancel()
         
+        # Gracefully unload shard manager IPC before closing
+        shard_manager_cog = self.get_cog("ShardManager")
+        if shard_manager_cog:
+            try:
+                await shard_manager_cog._shutdown_ipc()
+                logger.info("IPC connections closed")
+            except Exception as e:
+                logger.error(f"Error shutting down IPC: {e}")
+        
         if self.db:
             await self.db.backup()
             await self.db.close()
@@ -603,7 +612,10 @@ async def on_ready():
         f"**Uptime:** {uptime_str}\n"
         f"**Servers:** [bold]{len(bot.guilds)}[/bold] | **Users:** [bold]{len(bot.users)}[/bold]\n"
         f"**Commands:** [bold]{len(bot.tree.get_commands())}[/bold] (Slash)\n"
-        f"**Shards:** [bold]{bot.shard_count}[/bold]"
+        f"**Shards:** [bold]{bot.shard_count}[/bold]\n"
+        f"**Shard IDs:** [bold]{', '.join(str(s) for s in bot.shards.keys()) if bot.shards else '0'}[/bold]\n"
+        f"**Shard Monitor:** [bold]{'Enabled' if os.getenv('ENABLE_SHARD_MONITOR', 'true').lower() in ('true', '1', 'yes') else 'Disabled'}[/bold]\n"
+        f"**Shard Manager:** [bold]{'Enabled' if os.getenv('ENABLE_SHARD_MANAGER', 'false').lower() in ('true', '1', 'yes') else 'Disabled'}[/bold]"
     )
     
     panel = Panel(
@@ -618,7 +630,7 @@ async def on_ready():
     
     logger.info(f"Bot is online as {bot.user} (ID: {bot.user.id})")
     logger.info(f"Bot Owner ID: {BOT_OWNER_ID}")
-    logger.info(f"Connected to {len(bot.guilds)} servers across {bot.shard_count} shard(s)")
+    logger.info(f"Connected to {len(bot.guilds)} servers across {bot.shard_count} shard(s) (IDs: {', '.join(str(s) for s in bot.shards.keys()) if bot.shards else '0'})")
     logger.info(f"Serving {len(bot.users)} users")
     logger.info(f"Registered commands: {len(bot.tree.get_commands())}")
     logger.info(f"Latency: {bot.latency*1000:.2f}ms")

@@ -22,13 +22,13 @@
 </p>
 
 <p align="center">
-  **✨ NEW FEATURE (v1.6.1.0): @Mention Prefix & Per-Guild Configuration**
-  <br>Users can now invoke commands using @BotName, and server admins can configure bot behavior per-guild with the new Guild Settings cog!
+  **✨ NEW FEATURE (v1.7.0.0): Advanced Shard System & Backup/Restore**
+  <br>Real-time shard health monitoring with interactive dashboards, IPC-based cross-shard communication, and full guild backup/restore with interactive dashboards — all togglable via .env!
 </p>
 
 <p align="center">
-  **🎯 PREVIOUS: AI Assistant (GeminiService Cog) - v1.6.0.1**
-  <br>Interact with your bot using natural language to get insights into its framework, plugins, diagnostics, database, files, and more!
+  **🎯 PREVIOUS: @Mention Prefix & Per-Guild Configuration (v1.6.1.0)**
+  <br>Users can now invoke commands using @BotName, and server admins can configure bot behavior per-guild with the new Guild Settings cog!
 </p>
 
 <p align="center">
@@ -78,12 +78,18 @@ No PHP hosting required • Instant setup • All features included
   - [🪝 Event Hooks Commands](#-event-hooks-commands)
   - [📡 Live Monitor Commands](#-live-monitor-commands)
   - [🤖 AI Assistant Commands](#-ai-assistant-commands)
+  - [📊 Shard Monitor Commands](#-shard-monitor-commands)
+  - [🌐 Shard Manager Commands](#-shard-manager-commands)
+  - [💾 Backup & Restore Commands](#-backup--restore-commands)
   - [🔧 Owner-Only Commands](#-owner-only-commands)
 - [🛒 Extension Marketplace](#-extension-marketplace)
 - [🔧 Creating Extensions](#-creating-extensions)
 - [⚙️ Configuration Guide](#️-configuration-guide)
 - [🗄️ Database System](#️-database-system)
 - [📊 Framework Cogs System](#-framework-cogs-system)
+- [📊 Shard Monitor System](#-shard-monitor-system)
+- [🌐 Shard Manager System](#-shard-manager-system)
+- [💾 Backup & Restore System](#-backup--restore-system)
 - [🛠 Troubleshooting](#-troubleshooting)
 - [📈 Performance Tips](#-performance-tips)
 - [📜 License](#-license)
@@ -351,6 +357,84 @@ No PHP hosting required • Instant setup • All features included
   - `!mentionprefix enable/disable/status` - Control @mention prefix
   - `!serversettings` - View all server configuration
 
+**📊 Shard Monitor (`cogs/shard_monitor.py`)**
+- **Real-Time Shard Health Monitoring** (Bot Owner Only)
+  - Interactive dashboard with button navigation (Overview, Health, Latency, Events tabs)
+  - Per-shard metrics: latency, uptime, messages, commands, connects, disconnects
+  - Automatic health checks every 60 seconds with three-tier status (🟢🟡🔴)
+  - Configurable alert system with persistent channel configuration
+- **Comprehensive Health Checks:**
+  - Latency threshold detection (>1s warning, >2s critical)
+  - Activity monitoring (no events for 5+ minutes triggers warning)
+  - Consecutive failure tracking with configurable threshold
+  - Disconnect/reconnect tracking with downtime calculation
+- **Background Tasks:**
+  - Metrics collection every 30 seconds
+  - Health check evaluation every 60 seconds
+  - Persistent metrics saved to disk every 5 minutes
+- **Event Tracking:**
+  - `on_shard_connect`, `on_shard_disconnect`, `on_shard_resumed`, `on_shard_ready`
+  - Per-shard message and command counters
+  - Guild join/leave tracking per shard
+- **.env Toggleable:** `ENABLE_SHARD_MONITOR=true/false`
+- **Commands:**
+  - `!shardmonitor` - Interactive dashboard with button navigation
+  - `!sharddetails <id>` - Deep-dive into a specific shard
+  - `!shardhealth` - Quick health report for all shards
+  - `!shardalerts #channel [threshold]` - Configure alert system
+  - `!shardreset [shard_id]` - Reset collected metrics
+
+**🌐 Shard Manager (`cogs/shard_manager.py`)**
+- **Multi-Process & Multi-Server Sharding** (Bot Owner Only)
+  - IPC (Inter-Process Communication) system for cross-shard coordination
+  - Run shards across multiple processes on the same machine or different servers
+  - TCP-based length-prefixed protocol with authentication
+  - Automatic reconnection with exponential backoff (5s → 120s max)
+- **Cluster Architecture:**
+  - One primary cluster (IPC server mode) + one or more secondary clusters (IPC client mode)
+  - Shared secret authentication prevents unauthorized connections
+  - Heartbeat system with 30-second intervals for connection health
+  - Automatic cluster join/leave notifications
+- **Cross-Shard Communication:**
+  - Stats broadcasting between all clusters every 60 seconds
+  - Global guild/user/shard count aggregation
+  - Broadcast messaging to all connected clusters
+  - Safe preset query system (no arbitrary code execution)
+- **Security:**
+  - Authentication via shared secret (SHARD_IPC_SECRET)
+  - 1MB message size limit, nonce-based deduplication
+  - 10-second auth timeout for unauthenticated connections
+- **.env Toggleable:** `ENABLE_SHARD_MANAGER=true/false` (disabled by default)
+- **Commands:**
+  - `!clusters` - Show all connected clusters with stats and health
+  - `!ipcstatus` - IPC connection diagnostics
+  - `!broadcastmsg <message>` - Broadcast to all clusters
+
+**💾 Backup & Restore (`cogs/backup_restore.py`) — v2.1.0**
+- **Full Guild Configuration Snapshots** (Administrator / Bot Owner)
+  - Captures roles, channels, categories, permissions, emojis, stickers, server settings, bot settings
+  - **Member role assignments** — saves which members have which roles (requires Members Intent)
+  - Supports text, voice, forum, and stage channels with full permission overwrites
+  - Atomic file system integration for zero-corruption storage
+- **Interactive Dashboard (`/backup`)** with **5 tabs:**
+  - 📊 Overview — Storage, latest backup, server stats, cooldown timer
+  - 📦 Backups — Paginated list with member snapshot counts
+  - 🔍 Compare — Drift analysis: current state vs latest backup
+  - 📜 Audit Log — All backup operations tracked
+  - 📈 Analytics — Trends, frequency, top creators
+  - 🗑️ Quick Delete — Dropdown selector from dashboard with pin protection
+- **Selective Restore Engine:**
+  - Toggle components: roles, categories, channels, member roles, bot settings
+  - **Role Sync toggle** (off by default): full rewind adds missing + removes extra roles per member
+  - Creates only missing items, reapplies member role assignments
+  - Recreates permission overwrites with role ID mapping
+  - Real-time progress updates and detailed results
+- **Auto-Backup Scheduler** with per-guild intervals, pinning, notes, integrity verification
+- **13 Hybrid Commands:**
+  - `!backup` / `!backupcreate` / `!backuprestore` / `!backupview` / `!backupdelete` / `!backuplist`
+  - `!backuppin` / `!backupnote` / `!backupverify` / `!backupschedule` / `!backupdiff`
+  - `!backupexport` / `!backupstats` (Bot Owner only)
+
 **📡 Live Monitor (`cogs/live_monitor.py`)**
 
 - **Web-based dashboard for real-time bot monitoring and remote management**  
@@ -594,6 +678,7 @@ Actions:
 - Atomic file operations prevent corruption
 - Database WAL mode for ACID compliance
 - Automatic backups before shutdown
+- Guild configuration snapshots with checksums
 - File locking mechanism
 - Cache invalidation on writes
 - Secure temporary file handling
@@ -615,6 +700,8 @@ Actions:
 - Extension load time analysis
 - Database connection monitoring
 - Cache performance metrics
+- Per-shard health checks with three-tier status (🟢🟡🔴)
+- Automatic shard health alerts to configurable channels
 
 **Diagnostics Dashboard**
 - System information (Python version, platform, architecture)
@@ -681,6 +768,9 @@ Actions:
 ✅ **Metrics Collection** - Real-time command tracking and analytics  
 ✅ **Framework Cogs** - Modular internal components with event system  
 ✅ **Auto-Sharding** - Built-in support for large-scale deployments  
+✅ **Shard Monitor** - Real-time health, latency, and event tracking per shard  
+✅ **Shard Manager** - IPC-based multi-process and multi-server shard coordination  
+✅ **Backup & Restore** - Full guild snapshots with interactive dashboard and smart restore  
 
 ### Command System
 
@@ -729,6 +819,9 @@ Actions:
 ✅ **Performance Metrics** - Load times and query tracking  
 ✅ **Health Monitoring** - System diagnostics and alerts  
 ✅ **Hook History** - Event system execution tracking  
+✅ **Shard Monitoring** - Real-time per-shard health, latency, and event tracking  
+✅ **Multi-Cluster Stats** - Cross-shard stat aggregation via IPC  
+✅ **Backup Snapshots** - Full guild configuration backup with integrity checksums  
 
 ---
 
@@ -797,6 +890,25 @@ SHARD_COUNT=1
 
 # Can be commented out depending on your needs. If you want to use auto-sharding, leave (SHARD_IDS) commented out. 
 # SHARD_IDS=0,1
+
+# Shard Monitor (real-time shard health monitoring)
+ENABLE_SHARD_MONITOR=true
+SHARD_ALERT_THRESHOLD=3
+
+# Shard Manager (multi-process/multi-server IPC — disabled by default)
+ENABLE_SHARD_MANAGER=false
+SHARD_IPC_MODE=server
+SHARD_IPC_HOST=127.0.0.1
+SHARD_IPC_PORT=20000
+SHARD_IPC_SECRET=change_me_please
+SHARD_CLUSTER_NAME=cluster-0
+
+# Backup & Restore (enabled by default)
+ENABLE_BACKUP_RESTORE=true
+BACKUP_MAX_PER_GUILD=25
+BACKUP_COOLDOWN=300
+BACKUP_AUTO_INTERVAL=0
+BACKUP_RETENTION_DAYS=0
 ```
 
 **Getting Your User ID:**
@@ -816,6 +928,8 @@ In the Discord Developer Portal:
    - ✅ Presence Intent
    - ✅ Server Members Intent
    - ✅ Message Content Intent
+
+> **Note:** Server Members Intent is required for the Backup & Restore system to capture member role assignments. Without it, backups will still work but member roles will be empty.
 
 ### 5. Run the Bot
 ```bash
@@ -852,6 +966,11 @@ discord-bot-framework/
 │   ├── framework_diagnostics.py # Health monitoring
 │   ├── live_monitor.py          # Web dashboard & remote management
 │   ├── slash_command_limiter.py # Slash command protection
+│   ├── shard_monitor.py         # Real-time shard health monitoring
+│   ├── shard_manager.py         # Multi-process IPC shard management
+│   ├── backup_restore.py        # Backup & Restore system
+│   ├── SHARD_MONITOR_DOCS.md   # Shard Monitor documentation
+│   ├── SHARD_MANAGER_DOCS.md   # Shard Manager documentation
 │   └── GeminiService.py         # AI assistant powered by Google Gemini
 │
 ├── data/                        # Auto-generated data directory
@@ -865,6 +984,16 @@ discord-bot-framework/
 │   ├── framework_diagnostics.json # System diagnostics
 │   ├── framework_health.json    # Health monitoring data
 │   ├── live_monitor_config.json # Live Monitor settings
+│   ├── shard_monitor/           # Shard monitor data
+│   │   ├── shard_metrics.json   # Periodic metrics snapshot
+│   │   └── alert_config.json    # Alert channel & threshold config
+│   ├── shard_manager/           # Shard manager data (reserved)
+│   ├── backups/                 # Backup snapshots
+│   │   └── [guild_id]/          # Per-guild backup data
+│   │       ├── index.json       # Backup index/metadata
+│   │       ├── audit_log.json   # Backup audit trail (last 200 entries)
+│   │       ├── schedule.json    # Auto-backup schedule config
+│   │       └── [backup_id].json # Individual snapshots (with member roles)
 │   └── marketplace/
 │       ├── ZygnalID.txt         # Unique bot identifier
 │       └── license_accepted.json # License acceptance tracking
@@ -904,6 +1033,7 @@ discord-bot-framework/
 │
 ├── config.json                  # Bot configuration (auto-generated)
 ├── .env                         # Environment variables (YOU CREATE THIS)
+├── .env.example                 # Environment variable reference template
 ├── requirements.txt             # Python dependencies
 ├── README.md                    # This file
 ├── LICENSE                      # MIT License
@@ -1024,6 +1154,104 @@ discord-bot-framework/
 - **`readme`**: Ask a question about the bot's `README.md` file.
 - **`permission`**: (Owner Only) Manage permissions for the AI assistant.
 
+### 📊 Shard Monitor Commands
+
+> **All commands are Bot Owner Only** (`BOT_OWNER_ID` from `.env`)  
+> Toggle: `ENABLE_SHARD_MONITOR=true/false` in `.env`
+
+| Command | Description | Cooldown | Hybrid |
+|---------|-------------|----------|--------|
+| `!shardmonitor` / `/shardmonitor` | Interactive dashboard with button navigation (Overview, Health, Latency, Events) | 10s | ✅ |
+| `!sharddetails <id>` / `/sharddetails` | Detailed metrics for a specific shard (guilds, members, latency, reliability, errors) | 10s | ✅ |
+| `!shardhealth` / `/shardhealth` | Health check report for all shards with critical/warning/healthy breakdown | 30s | ✅ |
+| `!shardalerts [#channel] [threshold]` / `/shardalerts` | Configure alert channel and failure threshold for automatic health alerts | - | ✅ |
+| `!shardreset [shard_id]` / `/shardreset` | Reset metrics for a specific shard or all shards (-1 for all) | - | ✅ |
+
+**Interactive Dashboard Tabs (`/shardmonitor`):**
+
+| Tab | Button | What It Shows |
+|-----|--------|---------------|
+| Overview | 📊 | Cluster stats, per-shard summary, alert config |
+| Health | 🏥 | Health report with healthy/warning/critical breakdown |
+| Latency | 📡 | Visual latency bars per shard, cluster latency statistics |
+| Events | 📈 | Per-shard event counters (messages, commands, connects, errors) |
+| Refresh | 🔄 | Refreshes the currently active tab with latest data |
+
+**Health Check Thresholds:**
+
+| Condition | Status | Icon |
+|-----------|--------|------|
+| Average latency > 1000ms | Warning | 🟡 |
+| Average latency > 2000ms | Critical | 🔴 |
+| No activity for 5+ minutes | Warning | 🟡 |
+| 3+ consecutive failures | Warning | 🟡 |
+| 5+ consecutive failures | Critical | 🔴 |
+| Currently disconnected | Critical | 🔴 |
+| Recently disconnected (<60s) | Warning | 🟡 |
+
+### 🌐 Shard Manager Commands
+
+> **All commands are Bot Owner Only** (`BOT_OWNER_ID` from `.env`)  
+> Toggle: `ENABLE_SHARD_MANAGER=true/false` in `.env` (disabled by default)  
+> Only needed for multi-process or multi-server deployments
+
+| Command | Description | Cooldown | Hybrid |
+|---------|-------------|----------|--------|
+| `!clusters` / `/clusters` | Show all connected shard clusters with stats, health, and global totals | 10s | ✅ |
+| `!ipcstatus` / `/ipcstatus` | IPC system diagnostics (mode, host, port, connected clients, heartbeats) | 10s | ✅ |
+| `!broadcastmsg <message>` / `/broadcastmsg` | Broadcast a text message to all connected clusters via IPC | - | ✅ |
+
+### 💾 Backup & Restore Commands
+
+> **Administrator** permission required (Bot Owner has full access)
+> Toggle: `ENABLE_BACKUP_RESTORE=true/false` in `.env` (enabled by default)
+> Useful for server migrations, disaster recovery, configuration auditing, and member role recovery
+
+| Command | Description | Cooldown | Hybrid |
+|---------|-------------|----------|--------|
+| `!backup` / `/backup` | Interactive dashboard with Overview, Backups, Compare, Audit, and Analytics tabs | 10s | ✅ |
+| `!backupcreate [label]` / `/backupcreate` | Create a full guild snapshot (roles, channels, member roles, permissions, settings) | 5min/guild | ✅ |
+| `!backuprestore <id>` / `/backuprestore` | Selective restore with component toggles (roles, categories, channels, member roles, bot settings) | - | ✅ |
+| `!backupview <id>` / `/backupview` | Detailed backup inspection (contents, roles, settings, member count, checksum) | - | ✅ |
+| `!backupdelete <id>` / `/backupdelete` | Delete a backup with confirmation (respects pin protection) | - | ✅ |
+| `!backuplist` / `/backuplist` | Paginated list of all backups with metadata | - | ✅ |
+| `!backuppin <id>` / `/backuppin` | Pin/unpin a backup to protect from deletion and retention cleanup | - | ✅ |
+| `!backupnote <id> <text>` / `/backupnote` | Add or update a note on a backup (up to 500 chars) | - | ✅ |
+| `!backupverify <id>` / `/backupverify` | Verify backup integrity via SHA-256 checksum | - | ✅ |
+| `!backupschedule <action>` / `/backupschedule` | Configure auto-backup schedule (enable/disable/status, 1-168h interval) | - | ✅ |
+| `!backupdiff <a> <b>` / `/backupdiff` | Compare two backups side by side (roles, channels, members added/removed) | - | ✅ |
+| `!backupexport <id>` / `/backupexport` | Export backup as downloadable JSON file | - | ✅ (Bot Owner only) |
+| `!backupstats` / `/backupstats` | Global backup statistics across all guilds | - | ✅ (Bot Owner only) |
+
+**Interactive Dashboard Tabs (`/backup`):**
+
+| Tab | Button | What It Shows |
+|-----|--------|---------------|
+| Overview | 📊 | Storage usage bar, latest backup, current guild stats, cooldown timer |
+| Backups | 📦 | Paginated list of all backups with ID, label, author, member snapshots, size |
+| Compare | 🔍 | Drift analysis: current state vs latest backup with change recommendation |
+| Audit Log | 📜 | Chronological log of all backup operations (create, delete, restore, pin, verify) |
+| Analytics | 📈 | Trends over time, top creators, backup frequency, member snapshot stats |
+| Refresh | 🔄 | Refreshes the currently active tab |
+| Delete | 🗑️ | Quick-delete via dropdown selector (ephemeral, respects pin protection) |
+| ◀ ▶ | Pagination | Navigate through paginated list and audit pages |
+
+**What Gets Backed Up:**
+
+| Category | Details |
+|----------|---------|
+| Roles | Name, color, hoist, mentionable, permissions value, position |
+| Categories | Name, position, NSFW flag, full permission overwrites (target, allow, deny) |
+| Text Channels | Name, topic, slowmode, NSFW, category, auto-archive duration, full permission overwrites |
+| Voice Channels | Name, bitrate, user limit, RTC region, category, full permission overwrites |
+| Forum Channels | Name, topic, NSFW, slowmode, category, permission overwrites |
+| Stage Channels | Name, topic, category, permission overwrites |
+| Emojis | Name, animated flag, URL, managed status |
+| Stickers | Name, description, emoji |
+| Server Settings | Verification level, notification level, content filter, AFK timeout/channel, system channel, locale, boost bar |
+| **Member Roles** | **Per-member role assignments for all non-bot members (requires Members Intent)** |
+| Bot Settings | Custom prefix, mention prefix enabled/disabled |
+
 ### 🔧 Owner-Only Commands
 
 | Command | Description | Access |
@@ -1038,6 +1266,16 @@ discord-bot-framework/
 | `!dbstats` | Display database connection stats | Bot Owner |
 | `!integritycheck` | Run full system integrity check | Bot Owner |
 | `!cleanup` | Clean up system cache and temp files | Bot Owner |
+| `!shardmonitor` | Interactive shard monitoring dashboard | Bot Owner |
+| `!sharddetails <id>` | Detailed metrics for specific shard | Bot Owner |
+| `!shardhealth` | Health check report for all shards | Bot Owner |
+| `!shardalerts [#ch] [n]` | Configure shard alert channel and threshold | Bot Owner |
+| `!shardreset [id]` | Reset shard metrics (-1 for all) | Bot Owner |
+| `!clusters` | Show all connected shard clusters (requires Shard Manager) | Bot Owner |
+| `!ipcstatus` | IPC system diagnostics (requires Shard Manager) | Bot Owner |
+| `!broadcastmsg <msg>` | Broadcast message to all clusters (requires Shard Manager) | Bot Owner |
+| `!backupexport <id>` | Export backup as JSON file | Bot Owner |
+| `!backupstats` | Global backup statistics across all guilds | Bot Owner |
 
 ---
 
@@ -1888,7 +2126,9 @@ On first run, the bot creates config.json with default settings:
         "enable_event_hooks": true,
         "enable_plugin_registry": true,
         "enable_framework_diagnostics": true,
-        "enable_slash_command_limiter": true
+        "enable_slash_command_limiter": true,
+        "enable_shard_monitor": true,
+        "enable_shard_manager": true
     }
 }
 ```
@@ -2028,6 +2268,18 @@ framework.enable_slash_command_limiter (boolean)
 Enable Slash Command Limiter
 Default: true
 
+framework.enable_shard_monitor (boolean)
+
+Enable Shard Monitor cog
+Default: true
+Also controlled by `ENABLE_SHARD_MONITOR` env variable (.env takes precedence)
+
+framework.enable_shard_manager (boolean)
+
+Enable Shard Manager cog (multi-process IPC)
+Default: true (but .env default is `false` which takes precedence)
+Also controlled by `ENABLE_SHARD_MANAGER` env variable (.env takes precedence)
+
 Command Permissions
 Configure role-based command access:
 
@@ -2090,12 +2342,31 @@ SHARD_COUNT=2
 
 # SHARD_IDS can be commented out
 SHARD_IDS=0,1
+
+# Shard Monitor
+ENABLE_SHARD_MONITOR=true
+SHARD_ALERT_THRESHOLD=3
+
+# Shard Manager (multi-process/multi-server)
+ENABLE_SHARD_MANAGER=false
+SHARD_IPC_MODE=server
+SHARD_IPC_HOST=127.0.0.1
+SHARD_IPC_PORT=20000
+SHARD_IPC_SECRET=change_me_please
+SHARD_CLUSTER_NAME=cluster-0
 ```
 ### Sharding Configuration:
 
-- SHARD_COUNT: Total number of shards
-- SHARD_IDS: Comma-separated list of shard IDs to run
-  - Leave empty for auto-sharding
+- `SHARD_COUNT`: Total number of shards (Discord requires sharding at 2500+ guilds)
+- `SHARD_IDS`: Comma-separated list of shard IDs for this process (leave empty for auto-sharding)
+- `ENABLE_SHARD_MONITOR`: Enable/disable real-time shard health monitoring (default: `true`)
+- `SHARD_ALERT_THRESHOLD`: Consecutive failures before alert fires (default: `3`)
+- `ENABLE_SHARD_MANAGER`: Enable/disable IPC-based multi-process sharding (default: `false`)
+- `SHARD_IPC_MODE`: `server` for primary cluster, `client` for secondary clusters
+- `SHARD_IPC_HOST`: IPC bind address (`127.0.0.1` for local, `0.0.0.0` for remote)
+- `SHARD_IPC_PORT`: IPC server port (default: `20000`)
+- `SHARD_IPC_SECRET`: Shared authentication secret (MUST match on all clusters)
+- `SHARD_CLUSTER_NAME`: Unique name to identify this cluster in logs and commands
 
 
 ### 🗄️ Database System
@@ -3203,6 +3474,531 @@ bot = BotFrameWork(
 
 ---
 
+## 📊 Shard Monitor System
+
+### Overview
+
+The Shard Monitor (`cogs/shard_monitor.py`) provides real-time visibility into your bot's shard health, latency, events, and reliability. It features an interactive dashboard with button navigation, automatic health alerts, persistent metrics, and detailed per-shard diagnostics.
+
+**All commands are restricted to the Bot Owner (`BOT_OWNER_ID` from `.env`).** No regular users or guild owners can access shard monitoring data.
+
+### Enabling / Disabling
+
+The Shard Monitor uses a **dual-toggle system**:
+
+1. **`.env` toggle** (takes precedence):
+```env
+ENABLE_SHARD_MONITOR=true    # Enable the cog
+ENABLE_SHARD_MONITOR=false   # Disable the cog completely
+```
+
+2. **`config.json` toggle** (secondary):
+```json
+"framework": {
+    "enable_shard_monitor": true
+}
+```
+
+The cog's `setup()` function checks the `.env` variable first. If disabled, the cog never loads:
+
+```python
+async def setup(bot):
+    enabled = os.getenv("ENABLE_SHARD_MONITOR", "true").lower()
+    if enabled not in ("true", "1", "yes"):
+        logger.info("ShardMonitor cog is DISABLED via ENABLE_SHARD_MONITOR env var")
+        return
+    await bot.add_cog(ShardMonitor(bot))
+```
+
+### How It Works
+
+The Shard Monitor runs three background tasks that collect and evaluate data:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Shard Monitor Tasks                        │
+│                                                              │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐   │
+│  │ collect_     │  │ health_      │  │ save_metrics     │   │
+│  │ metrics      │  │ check        │  │                  │   │
+│  │ (30s loop)   │  │ (60s loop)   │  │ (5min loop)      │   │
+│  │              │  │              │  │                  │   │
+│  │ Records      │  │ Evaluates    │  │ Persists to      │   │
+│  │ latency from │  │ health for   │  │ shard_metrics    │   │
+│  │ each shard   │  │ all shards   │  │ .json on disk    │   │
+│  │              │  │ Sends alerts │  │                  │   │
+│  └──────────────┘  └──────────────┘  └──────────────────┘   │
+│                                                              │
+│  Event Listeners:                                            │
+│  on_message → per-shard message counter                      │
+│  on_command → per-shard command counter                       │
+│  on_shard_connect → connection tracking + downtime end       │
+│  on_shard_disconnect → disconnection tracking + downtime     │
+│  on_shard_resumed → reconnection tracking                    │
+│  on_shard_ready → ready event tracking                       │
+│  on_guild_join → per-shard guild join counter                │
+│  on_guild_remove → per-shard guild leave counter             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Using the Interactive Dashboard
+
+Run `!shardmonitor` or `/shardmonitor` to get the interactive dashboard:
+
+```bash
+!shardmonitor
+```
+
+The dashboard displays with **navigation buttons** at the bottom:
+
+- **📊 Overview** — Cluster-wide stats, per-shard summary, alert configuration
+- **🏥 Health** — Full health report with critical/warning/healthy breakdown
+- **📡 Latency** — Visual latency bars per shard with min/avg/max statistics
+- **📈 Events** — Per-shard counters for messages, commands, connects, disconnects, errors
+- **🔄 Refresh** — Refresh the current tab with latest data
+
+Only the command author can interact with the buttons (validated via `interaction_check`).
+
+### Detailed Shard Inspection
+
+```bash
+# Inspect shard 0 in detail
+!sharddetails 0
+```
+
+Shows:
+- Basic info: guilds, members, current/avg/min/max latency
+- Activity: messages processed, commands executed, guild joins/leaves
+- Reliability: uptime %, connect/disconnect/reconnect counts
+- Errors: total count, consecutive failures, last error details with timestamp
+- Connection history: last connect/disconnect timestamps
+
+### Configuring Alerts
+
+```bash
+# Set alert channel with custom threshold
+!shardalerts #shard-alerts 5
+
+# Disable alerts
+!shardalerts
+```
+
+Alert configuration persists to `./data/shard_monitor/alert_config.json`:
+
+```json
+{
+  "alert_channel_id": 1234567890123456789,
+  "alert_threshold": 5
+}
+```
+
+When an unhealthy shard is detected during the 60-second health check cycle, an embed is sent to the configured channel showing the affected shards and their issues.
+
+### Resetting Metrics
+
+```bash
+# Reset a specific shard
+!shardreset 0
+
+# Reset ALL shards
+!shardreset -1
+```
+
+### Testing the Shard Monitor
+
+**Step 1 — Single shard (simplest test):**
+```env
+SHARD_COUNT=1
+ENABLE_SHARD_MONITOR=true
+```
+Start the bot. Wait 30 seconds, then run `!shardmonitor`. You should see shard 0 with health status 🟢.
+
+**Step 2 — Two shards in one process:**
+```env
+SHARD_COUNT=2
+SHARD_IDS=
+ENABLE_SHARD_MONITOR=true
+```
+Now `!shardmonitor` shows two shards. Check latency and guild distribution.
+
+---
+
+## 🌐 Shard Manager System
+
+### Overview
+
+The Shard Manager (`cogs/shard_manager.py`) enables running your bot's shards across **multiple processes or even different servers**. It provides an IPC (Inter-Process Communication) layer using TCP sockets so separate processes can coordinate, share stats, and communicate.
+
+**All commands are Bot Owner Only.** The cog is **disabled by default** — only enable it when you actually need multi-process sharding.
+
+### When Do You Need This?
+
+| Scenario | Need Shard Manager? |
+|----------|---------------------|
+| < 2,500 guilds | ❌ No — single process is fine |
+| 2,500 - 5,000 guilds | Maybe — if you experience performance issues |
+| 5,000+ guilds | ✅ Yes — split across processes |
+| Multiple servers/VPS | ✅ Yes — essential for coordination |
+| Just want monitoring | ❌ No — use Shard Monitor instead |
+
+Discord **requires** sharding at 2,500 guilds and **recommends** it earlier for larger guilds.
+
+### Architecture
+
+```
+┌──────────────────────────────────────────────────┐
+│                   IPC Network                     │
+│                                                   │
+│  ┌─────────────┐    TCP/IP    ┌─────────────┐    │
+│  │  Cluster 0   │◄──────────►│  Cluster 1   │    │
+│  │  (Server)    │             │  (Client)    │    │
+│  │  Shards 0-2  │             │  Shards 3-5  │    │
+│  │  500 guilds  │             │  500 guilds  │    │
+│  └─────────────┘             └─────────────┘    │
+│         ▲                                         │
+│         │           TCP/IP                        │
+│         └──────────────────►┌─────────────┐      │
+│                              │  Cluster 2   │     │
+│                              │  (Client)    │     │
+│                              │  Shards 6-8  │     │
+│                              │  500 guilds  │     │
+│                              └─────────────┘     │
+└──────────────────────────────────────────────────┘
+```
+
+- **One cluster runs as `server`** (IPC server mode) — hosts the TCP server
+- **Additional clusters run as `client`** — connect to the server
+- All clusters exchange stats, health data, and can broadcast messages
+
+### Enabling the Shard Manager
+
+```env
+ENABLE_SHARD_MANAGER=true
+```
+
+And in `config.json`:
+```json
+"framework": {
+    "enable_shard_manager": true
+}
+```
+
+### Same-Machine Multi-Process Setup
+
+For a bot with 6 shards split across 2 processes on the **same machine**:
+
+**Process 1 (`.env`):**
+```env
+DISCORD_TOKEN=your_token
+BOT_OWNER_ID=123456789
+SHARD_COUNT=6
+SHARD_IDS=0,1,2
+ENABLE_SHARD_MANAGER=true
+SHARD_IPC_MODE=server
+SHARD_IPC_HOST=127.0.0.1
+SHARD_IPC_PORT=20000
+SHARD_IPC_SECRET=my_super_secret_key_123
+SHARD_CLUSTER_NAME=cluster-0
+```
+
+**Process 2 (`.env.cluster1`):**
+```env
+DISCORD_TOKEN=your_token
+BOT_OWNER_ID=123456789
+SHARD_COUNT=6
+SHARD_IDS=3,4,5
+ENABLE_SHARD_MANAGER=true
+SHARD_IPC_MODE=client
+SHARD_IPC_HOST=127.0.0.1
+SHARD_IPC_PORT=20000
+SHARD_IPC_SECRET=my_super_secret_key_123
+SHARD_CLUSTER_NAME=cluster-1
+```
+
+Start Process 1 first (the server), then Process 2. The client will auto-connect.
+
+### Multi-Server Setup (Different Machines)
+
+Same concept, but change the IPC host:
+
+**Server A (primary):**
+```env
+SHARD_IPC_MODE=server
+SHARD_IPC_HOST=0.0.0.0
+SHARD_IPC_PORT=20000
+SHARD_IPC_SECRET=very_long_random_secret_here
+SHARD_CLUSTER_NAME=us-east-1
+SHARD_COUNT=9
+SHARD_IDS=0,1,2
+```
+
+**Server B (secondary):**
+```env
+SHARD_IPC_MODE=client
+SHARD_IPC_HOST=<Server_A_IP_Address>
+SHARD_IPC_PORT=20000
+SHARD_IPC_SECRET=very_long_random_secret_here
+SHARD_CLUSTER_NAME=us-west-1
+SHARD_COUNT=9
+SHARD_IDS=3,4,5
+```
+
+> ⚠️ **Important:** The `SHARD_IPC_SECRET` **must be identical** on ALL clusters. The server must bind to `0.0.0.0` (not `127.0.0.1`) for remote connections. Ensure the port is open in your firewall.
+
+### IPC Protocol Details
+
+The IPC system uses a **length-prefixed TCP protocol**:
+
+```
+┌────────────┬──────────────────────────┐
+│ 4 bytes    │ N bytes                  │
+│ (uint32 BE)│ (JSON payload)           │
+│ = N        │                          │
+└────────────┴──────────────────────────┘
+```
+
+**Message Types:**
+
+| Operation | Direction | Description |
+|-----------|-----------|-------------|
+| `auth` | Client → Server | Authentication with secret + cluster info |
+| `auth_response` | Server → Client | Success/failure response |
+| `heartbeat` | Client → Server | Keep-alive (every 30s) with guild count |
+| `heartbeat_ack` | Server → Client | Heartbeat acknowledgement |
+| `stats_broadcast` | Bidirectional | Cluster statistics update (every 60s) |
+| `cluster_join` | Server → Clients | New cluster connected notification |
+| `cluster_leave` | Server → Clients | Cluster disconnected notification |
+| `broadcast_message` | Bidirectional | Text message broadcast from owner |
+
+**Security:**
+- Shared secret authentication on every connection
+- 1MB max message size, nonce deduplication
+- 10-second auth timeout for unauthenticated connections
+- No arbitrary code execution — only safe preset queries
+
+### Auto-Reconnection
+
+The IPC client has built-in reconnection with exponential backoff:
+
+| Attempt | Delay |
+|---------|-------|
+| 1st | 5 seconds |
+| 2nd | 10 seconds |
+| 3rd | 20 seconds |
+| 4th | 40 seconds |
+| ... | up to 120 seconds max |
+
+On successful reconnection, the delay resets to 5 seconds.
+
+### Using Cluster Commands
+
+```bash
+# View all connected clusters
+!clusters
+
+# Check IPC connection diagnostics
+!ipcstatus
+
+# Broadcast a message to all clusters
+!broadcastmsg Deploying update in 5 minutes
+```
+
+`/clusters` shows:
+- Per-cluster stats (guilds, users, shards, latency, uptime)
+- Connection health indicators (🟢🟡🔴)
+- Global totals across all clusters
+- IPC server/client status
+
+### Testing the Shard Manager
+
+**Same machine, two processes:**
+
+1. Set up two copies of your bot directory (or use different `.env` files)
+2. Configure Process 1 as `server` with `SHARD_IDS=0`, Process 2 as `client` with `SHARD_IDS=1`
+3. Start Process 1 first, then Process 2
+4. Run `!clusters` on either process — should show both clusters
+5. Run `!ipcstatus` to verify the TCP connection
+6. Run `!broadcastmsg Hello from cluster-0` to test broadcast
+
+---
+
+## 💾 Backup & Restore System
+
+### Architecture
+
+```
+┌──────────────────────────────────────────────────────┐
+│              Backup & Restore v2.1.0                  │
+│                                                       │
+│  ┌──────────┐    ┌───────────┐    ┌──────────────┐   │
+│  │ Snapshot  │───▶│  Atomic   │───▶│   Storage    │   │
+│  │ Capture   │    │  File Sys │    │   Index      │   │
+│  └──────────┘    └───────────┘    └──────────────┘   │
+│       │                                │              │
+│       ▼                                ▼              │
+│  ┌──────────┐  ┌──────────┐  ┌──────────────────┐   │
+│  │ Roles    │  │ Channels │  │  Member Roles     │   │
+│  │ Perms    │  │ Overwrites│  │  (per-user)      │   │
+│  └──────────┘  └──────────┘  └──────────────────┘   │
+│                                                       │
+│  ┌─────────────────────────────────────────────────┐ │
+│  │       Interactive Dashboard (5 Tabs)             │ │
+│  │  Overview │ Backups │ Compare │ Audit │ Stats    │ │
+│  └─────────────────────────────────────────────────┘ │
+│                                                       │
+│  ┌─────────────────────────────────────────────────┐ │
+│  │              Safety & Protection                 │ │
+│  │  Cooldowns │ Pins │ Checksums │ Audit Log        │ │
+│  └─────────────────────────────────────────────────┘ │
+│                                                       │
+│  ┌─────────────────────────────────────────────────┐ │
+│  │           Automation & Scheduling                │ │
+│  │  Auto-Backup │ Retention Cleanup │ Scheduling    │ │
+│  └─────────────────────────────────────────────────┘ │
+└──────────────────────────────────────────────────────┘
+```
+
+### Getting Started
+
+1. **Enable the cog** (enabled by default):
+```env
+ENABLE_BACKUP_RESTORE=true
+```
+
+2. **Create your first backup:**
+```
+/backupcreate Before server reorganization
+```
+
+3. **View the dashboard:**
+```
+/backup
+```
+
+4. **Restore if needed (with selective component toggles):**
+```
+/backuprestore abc123def456
+```
+
+5. **Pin important backups to protect them:**
+```
+/backuppin abc123def456
+```
+
+6. **Set up auto-backups:**
+```
+/backupschedule enable 24
+```
+
+### Permission Model
+
+| User Level | Create | Restore | View | Delete | Pin | Schedule | Diff | Export | Stats |
+|-----------|--------|---------|------|--------|-----|----------|------|--------|-------|
+| Bot Owner | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Administrator | ✅ | ✅ | ✅ | ✅ own + admin | ✅ | ✅ | ✅ | ❌ | ❌ |
+| Regular User | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ENABLE_BACKUP_RESTORE` | `true` | Enable/disable the Backup & Restore cog |
+| `BACKUP_MAX_PER_GUILD` | `25` | Maximum backup snapshots per guild |
+| `BACKUP_COOLDOWN` | `300` | Seconds between backup creations per guild |
+| `BACKUP_AUTO_INTERVAL` | `0` | Hours between auto-backups (0 = disabled, set > 0 to enable scheduler loop) |
+| `BACKUP_RETENTION_DAYS` | `0` | Days to keep unpinned backups (0 = keep forever) |
+
+### config.json
+
+```json
+"framework": {
+    "enable_backup_restore": true
+}
+```
+
+### Member Role Snapshots
+
+The backup system captures which roles each non-bot member has at backup time. On restore, it reapplies those roles to members who are still in the server.
+
+**Requirements:**
+- **Members Gateway Intent** must be enabled in your bot's Developer Portal settings
+- Without this intent, member roles will be empty in backups (everything else still works)
+
+**How it works:**
+1. During backup: chunks the guild to load all members, saves their non-managed, non-default role IDs and names
+2. During restore (safe mode, default): for each member still in the server, adds back roles they're missing
+3. During restore (Role Sync ON): adds missing roles AND removes roles the member has now but didn't have at backup time — fully rewinding their roles to the exact backup state
+4. Rate-limited at ~2 members/sec to respect Discord API limits
+
+**Role Sync example:**
+- Backup state: TheZ1 has `Member, Admin, Helper, HR`
+- Current state: TheZ1 has `Member, HR, Noob`
+- Safe mode (default): adds `Admin, Helper` back. `Noob` stays.
+- Role Sync ON: adds `Admin, Helper` back. Removes `Noob`. TheZ1 is exactly as they were.
+
+### Safety Features
+
+**Abuse Prevention:**
+- 5-minute cooldown between backup creations (bot owner gets bypass notification instead of silent skip)
+- Maximum 25 backups per guild — delete old ones to free space
+- Backup label length limited to 100 characters
+- Interaction author verification on all buttons — only the command invoker can interact
+
+**Pin Protection:**
+- Pinned backups cannot be deleted manually or by retention cleanup
+- Pin/unpin with `/backuppin <id>`
+
+**Restore Protection:**
+- Selective component toggles — choose exactly what to restore
+- **Role Sync mode** (off by default) — destructive mode that removes roles not in backup. Protected behind explicit toggle.
+- Two-step confirmation dialog with danger-colored button
+- Restore only creates missing items — never deletes existing ones
+- Per-guild restore lock prevents concurrent restore operations
+- Real-time progress updates during restore
+- Detailed error reporting if any items fail to create
+
+**Data Integrity:**
+- SHA-256 checksum stored per backup, verifiable with `/backupverify`
+- Atomic file system integration prevents corruption during writes
+- Individual snapshot files with UUID-based IDs
+
+**Timezone Handling:**
+- All timestamps stored as UTC-aware ISO 8601 strings
+- Discord's `<t:epoch:R>` formatting displays correctly in every user's local timezone
+- Backward-compatible with legacy naive timestamps from older backup versions
+
+### Restore Behavior
+
+The restore engine is non-destructive and selective. It compares the backup snapshot against the current guild state and only creates items that are missing:
+
+| Scenario | Behavior |
+|----------|----------|
+| Role exists (by name) | Skipped — existing role kept |
+| Role missing | Created with backed-up permissions, color, and settings |
+| Channel exists (by name) | Skipped — existing channel kept |
+| Channel missing | Created with backed-up topic, slowmode, overwrites, and category |
+| Category exists (by name) | Skipped — existing category kept |
+| Category missing | Created with backed-up permission overwrites |
+| Member still in server | Missing roles from backup are re-applied |
+| Member still in server (Role Sync ON) | Roles fully rewound: missing roles added, extra roles removed |
+| Member left server | Skipped — cannot apply roles to absent members |
+| Bot prefix in backup | Restored to guild database with cache invalidation |
+| Mention prefix setting | Restored to guild database |
+
+### Testing
+
+1. Run `/backup` to open the dashboard — explore all 5 tabs
+2. Run `/backupcreate Test backup` to create a snapshot
+3. Run `/backupview <id>` to inspect it — check member role count
+4. Run `/backup` → Compare tab to see drift analysis
+5. Delete a test channel, then run `/backuprestore <id>` to restore it
+6. Verify the channel was recreated with correct settings and permissions
+7. Run `/backuppin <id>` to protect important backups
+8. Run `/backupverify <id>` to confirm integrity
+9. Run `/backupdiff <id_a> <id_b>` to compare two backups
+
+---
+
 ## 🛠 Troubleshooting
 
 ### Bot Won't Start
@@ -3459,6 +4255,70 @@ Solution:
 4. Use manual reload: `!reload extension_name`
 5. Check logs for reload errors
 
+### Shard Monitor Issues
+
+**Cog doesn't load:**
+
+Solution:
+1. Check `.env` has `ENABLE_SHARD_MONITOR=true`
+2. Check `config.json` has `"enable_shard_monitor": true`
+3. Verify the file exists at `cogs/shard_monitor.py`
+4. Check logs: `grep "ShardMonitor" botlogs/current_run.log`
+
+**No metrics showing / "No activity" warnings:**
+
+Solution:
+1. Wait 30+ seconds after startup for first collection cycle
+2. The 5-minute inactivity threshold may trigger on low-traffic bots
+3. Run `!shardreset -1` to reset all metrics and start fresh
+
+**Alerts not firing:**
+
+Solution:
+1. Verify alert channel is set: `!shardalerts #channel`
+2. Check `./data/shard_monitor/alert_config.json` exists
+3. Ensure bot has Send Messages permission in the alert channel
+4. Wait for the 60-second health check cycle
+
+### Shard Manager Issues
+
+**Cog doesn't load:**
+
+Solution:
+1. Check `.env` has `ENABLE_SHARD_MANAGER=true`
+2. Note: it's disabled by default (`false`)
+
+**"Auth failed" when connecting:**
+
+Solution:
+1. Verify `SHARD_IPC_SECRET` is **identical** on all clusters
+2. Check for trailing whitespace in the `.env` value
+3. Ensure the server cluster is running before starting clients
+
+**Can't connect from another machine:**
+
+Solution:
+1. Server must use `SHARD_IPC_HOST=0.0.0.0` (not `127.0.0.1`)
+2. Check firewall allows port `SHARD_IPC_PORT` (default: 20000)
+3. Verify the client's `SHARD_IPC_HOST` points to the server's IP address
+4. Check logs for connection errors: `grep "IPC" botlogs/current_run.log`
+
+**"Using default secret" warning:**
+
+Solution:
+Set a proper secret in `.env`:
+```env
+SHARD_IPC_SECRET=my_long_random_secret_string_here
+```
+
+**Cluster shows 🔴 (disconnected):**
+
+Solution:
+1. Check if the remote process is still running
+2. Heartbeat timeout is 120 seconds — wait and check again
+3. Check network connectivity between machines
+4. Client auto-reconnects with exponential backoff (5s → 120s)
+
 ### Help Menu Issues
 
 **Commands not showing:**
@@ -3476,6 +4336,39 @@ Solution:
 2. Check view hasn't timed out (180s)
 3. Verify bot has "Use Application Commands" permission
 4. Try rerunning command
+
+### Backup & Restore Issues
+
+**Backup creation fails:**
+
+Solution:
+1. Check `./data/backups/` directory has write permissions
+2. Verify you haven't hit the 25-backup limit: `/backup` → Overview tab
+3. Wait for cooldown to expire (5 minutes between backups)
+4. Check bot logs for `BackupRestore:` error messages
+
+**Restore not creating items:**
+
+Solution:
+1. Restore only creates **missing** items — it skips existing roles/channels by name
+2. Ensure bot has **Administrator** permission in the server
+3. Ensure bot's role is **above** the roles it needs to create in the role hierarchy
+4. Check the results embed for "Skipped" and "Failed" counts
+
+**Permission denied on backup commands:**
+
+Solution:
+1. Backup commands require **Administrator** permission or **Bot Owner** status
+2. `/backupexport` is restricted to Bot Owner only
+3. Non-admin users cannot delete backups they didn't create
+4. Ensure the command is not disabled in `config.json` (`enable_backup_restore: false`)
+
+**Backup data directory not found:**
+
+Solution:
+1. The `./data/backups/` directory is auto-created on first use
+2. Check filesystem permissions for the bot process
+3. Verify the atomic file system is working: `!atomictest`
 
 ---
 
@@ -3667,9 +4560,33 @@ async def background_task(self):
 
 For bots in 2000+ guilds:
 ```.env
-# Enable sharding
+# Basic sharding (single process, multiple shards)
 SHARD_COUNT=2
 SHARD_IDS=0,1
+```
+
+**Enable shard monitoring for visibility:**
+```.env
+ENABLE_SHARD_MONITOR=true
+```
+
+**For large bots (5000+ guilds), use multi-process sharding:**
+```.env
+# Process 1: shards 0-2
+SHARD_COUNT=6
+SHARD_IDS=0,1,2
+ENABLE_SHARD_MANAGER=true
+SHARD_IPC_MODE=server
+SHARD_IPC_SECRET=your_secret
+SHARD_CLUSTER_NAME=cluster-0
+
+# Process 2: shards 3-5
+SHARD_COUNT=6
+SHARD_IDS=3,4,5
+ENABLE_SHARD_MANAGER=true
+SHARD_IPC_MODE=client
+SHARD_IPC_SECRET=your_secret
+SHARD_CLUSTER_NAME=cluster-1
 ```
 
 **Benefits:**
@@ -3677,6 +4594,15 @@ SHARD_IDS=0,1
 - Reduces per-process memory
 - Improved stability
 - Better rate limit handling
+- Cross-shard stat aggregation via IPC
+- Automatic health monitoring and alerts
+
+**Monitoring Commands:**
+```bash
+!shardmonitor    # Interactive dashboard
+!shardhealth     # Quick health check
+!clusters        # View all clusters (requires Shard Manager)
+```
 
 ---
 
@@ -3981,7 +4907,7 @@ IMPORTANT NOTE: If you are using this framework, please be aware that you are so
 **TheHolyOneZ**
 
 - **GitHub**: [@TheHolyOneZ](https://github.com/TheHolyOneZ)
-- **Website**: [zygnalbot.com/bot-framework](https://zsync.eu/zdbf/)
+- **Website**: [zsync.eu/zdbf/](https://zsync.eu/zdbf/)
 - **Discord**: theholyonez
 
 ---
