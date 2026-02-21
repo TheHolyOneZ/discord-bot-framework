@@ -22,7 +22,7 @@
 </p>
 
 <p align="center">
-  **✨ NEW FEATURE (v1.7.0.0): Advanced Shard System & Backup/Restore**
+  **✨ NEW FEATURE (v1.7.1.0): Advanced Shard System & Backup/Restore**
   <br>Real-time shard health monitoring with interactive dashboards, IPC-based cross-shard communication, and full guild backup/restore with interactive dashboards — all togglable via .env!
 </p>
 
@@ -157,7 +157,7 @@ No PHP hosting required • Instant setup • All features included
 
 **Web-Based Monitoring Dashboard**
 - Real-time bot status via Live Monitor cog (~12,000+ lines)
-- 15+ dashboard tabs: Dashboard, Commands, Plugins, Hooks, Files, Chat, Guilds, Events, System, and more
+- 20 dashboard tabs: Dashboard, Commands, Plugins, Hooks, Hook Creator, Files, File Browser, Chat, Guilds, Events, System, Invite, Marketplace, Tickets, Database, Backups, Shards, Roles, Security, Credits
 - Remote extension management (load/unload/reload from browser)
 - Full file browser with read/write/delete operations
 - Chat console to send Discord messages from dashboard
@@ -456,13 +456,14 @@ No PHP hosting required • Instant setup • All features included
 - HTTPS recommended for security
 - No database server required (uses SQLite files)
 
-**Dashboard Tabs (15 total):**
+**Dashboard Tabs (20 total):**
 | Tab | Description |
 |-----|-------------|
 | Dashboard | Real-time bot stats, latency, uptime, guild/user counts |
 | Commands | All prefix/slash/hybrid commands with usage stats |
 | Plugins & Extensions | Loaded extensions, dependencies, conflicts, versions |
 | Event Hooks | Hook status, circuit breakers, execution metrics |
+| Hook Creator | Create custom event hooks from the dashboard |
 | File System | Directory statistics, cache hits/misses, file counts |
 | File Browser | Full file explorer with read/write/delete/rename/create |
 | Chat Console (EXPERIMENTAL) | Send messages to Discord channels from dashboard |
@@ -470,12 +471,14 @@ No PHP hosting required • Instant setup • All features included
 | Events | Recent command executions, errors, guild joins/leaves |
 | System | CPU, memory, threads, connections, platform info |
 | Bot Invite Helper | Generate invite links with permission calculator |
+| Marketplace | Browse and install extensions from the marketplace |
+| Tickets | Support ticket management and transcripts |
 | Database | Browse guild SQLite databases and tables |
+| Backup & Restore | Guild snapshot management, scheduled backups, restore operations |
+| Shard Manager | Real-time shard monitoring, IPC clusters, health diagnostics |
 | Roles & Access | Manage dashboard user roles (Owner/Helper/Visitor) |
 | Security & Logs | Audit logs, login history, security events |
 | Credits | Framework attribution (required to remain visible) |
-
-> **NOTE** The number of tabs, and the tabs themselves, may be greater in the latest version! Right now, there are around 18 tabs. I couldn't update the readme, though, so I made this quick note right here. Just know that there are more tabs and more features!
 
 
 **Generated PHP Files (quickstart creates these in `./live_monitor_website/`):**
