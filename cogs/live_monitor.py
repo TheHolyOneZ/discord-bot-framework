@@ -95,6 +95,7 @@ import platform
 import sys
 import ast
 import re
+import os
 logger = logging.getLogger('discord')
 
 
@@ -122,6 +123,8 @@ class LiveMonitor(commands.Cog):
         self._hook_execution_log = []
         self._max_hook_execution_log = 1000
         self._fileops_response = None
+        self._last_restore_result = None
+        self._last_backup_action_result = None
 
 
         self._fileops_lock = asyncio.Lock()
@@ -1382,7 +1385,7 @@ echo json_encode([
                 }
                 fw_section = self.bot.config.get("framework", {}) or {}
                 framework_info = {
-                    "version": "1.5.6",
+                    "version": "1.7.1.0",
                     "recommended_python": fw_section.get("recommended_python", "3.12.7"),
                     "python_runtime": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
                     "docs_url": "https://zsync.eu/zdbf",
@@ -1574,6 +1577,137 @@ echo json_encode([
             "recommended_buffer_ms": max(200, min(collection_duration_ms + 200, 500)),
         }
         
+        backup_data = {}
+        backup_cog = self.bot.get_cog("BackupRestore")
+        if backup_cog:
+            try:
+                stats = await backup_cog.storage.global_stats()
+                guild_list = []
+                all_recent = []
+                for d in backup_cog.storage.base_dir.iterdir():
+                    if not d.is_dir():
+                        continue
+                    try:
+                        gid = int(d.name)
+                        idx = await backup_cog.storage._rj(str(d / "index.json"), [])
+                        if idx:
+                            guild = self.bot.get_guild(gid)
+                            guild_name = guild.name if guild else f"Unknown ({gid})"
+                            sched = await backup_cog.storage.get_schedule(gid) or {}
+                            guild_list.append({
+                                "guild_id": str(gid),
+                                "guild_name": guild_name,
+                                "backup_count": len(idx),
+                                "pinned_count": sum(1 for b in idx if b.get("pinned")),
+                                "total_size": sum(b.get("size_bytes", 0) for b in idx),
+                                "schedule_enabled": sched.get("enabled", False),
+                                "schedule_interval": sched.get("interval_hours", 0),
+                                "retention_days": sched.get("retention_days", 0),
+                            })
+                            for b in idx[:10]:
+                                all_recent.append({**b, "guild_id": str(gid), "guild_name": guild_name})
+                    except Exception:
+                        continue
+                all_recent.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
+                recent_backups = all_recent[:25]
+                backup_data = {
+                    "total": stats.get("total", 0),
+                    "guilds": stats.get("guilds", 0),
+                    "size": stats.get("size", 0),
+                    "pinned": stats.get("pinned", 0),
+                    "max_per_guild": int(os.getenv("BACKUP_MAX_PER_GUILD", 25)),
+                    "cooldown": int(os.getenv("BACKUP_COOLDOWN", 300)),
+                    "auto_interval": int(os.getenv("BACKUP_AUTO_INTERVAL", 0)),
+                    "retention_days": int(os.getenv("BACKUP_RETENTION_DAYS", 0)),
+                    "guild_list": guild_list,
+                    "recent_backups": recent_backups,
+                    "restore_results": self._last_restore_result,
+                    "backup_action_result": self._last_backup_action_result,
+                }
+                self._last_restore_result = None
+                self._last_backup_action_result = None
+            except Exception as e:
+                logger.error(f"Live Monitor: Failed to collect backup data: {e}")
+
+        shard_data = {}
+        shard_monitor_cog = self.bot.get_cog("ShardMonitor")
+        shard_manager_cog = self.bot.get_cog("ShardManager")
+        if shard_monitor_cog:
+            try:
+                shard_list = []
+                healthy_count = 0
+                warning_count = 0
+                critical_count = 0
+                total_latency = 0
+                for sid, m in shard_monitor_cog.metrics.items():
+                    status = m.get_health_status()
+                    is_healthy, reason = m.is_healthy()
+                    if status == "🟢":
+                        healthy_count += 1
+                    elif status == "🟡":
+                        warning_count += 1
+                    else:
+                        critical_count += 1
+                    def _safe_float(v, default=0.0):
+                        import math
+                        if v is None or math.isnan(v) or math.isinf(v):
+                            return default
+                        return v
+                    cur_latency = _safe_float(m.get_current_latency() * 1000)
+                    total_latency += cur_latency
+                    guilds_on_shard = len([g for g in self.bot.guilds if g.shard_id == sid])
+                    shard_list.append({
+                        "shard_id": sid,
+                        "status": status,
+                        "health_reason": reason,
+                        "latency_current": round(cur_latency, 1),
+                        "latency_avg": round(_safe_float(m.get_avg_latency() * 1000), 1),
+                        "latency_min": round(_safe_float(m.get_min_latency() * 1000), 1),
+                        "latency_max": round(_safe_float(m.get_max_latency() * 1000), 1),
+                        "uptime_pct": round(_safe_float(m.get_uptime_percentage(), 100.0), 2),
+                        "guilds": guilds_on_shard,
+                        "messages": m.messages_processed,
+                        "commands": m.commands_executed,
+                        "connects": m.connect_count,
+                        "disconnects": m.disconnect_count,
+                        "reconnects": m.reconnect_count,
+                        "errors": m.error_count,
+                    })
+                avg_latency = round(total_latency / len(shard_monitor_cog.metrics), 1) if shard_monitor_cog.metrics else 0
+                shard_data["monitor"] = {
+                    "total_shards": len(shard_monitor_cog.metrics),
+                    "healthy": healthy_count,
+                    "warning": warning_count,
+                    "critical": critical_count,
+                    "avg_latency": avg_latency,
+                    "shards": shard_list,
+                }
+            except Exception as e:
+                logger.error(f"Live Monitor: Failed to collect shard monitor data: {e}")
+
+        if shard_manager_cog:
+            try:
+                local_stats = shard_manager_cog._get_local_stats()
+                cluster_list = [{"name": shard_manager_cog.cluster_name, "is_local": True, **local_stats}]
+                for name, stats in shard_manager_cog.cluster_stats.items():
+                    if name == shard_manager_cog.cluster_name:
+                        continue
+                    if time.time() - stats.get("last_update", 0) < 300:
+                        cluster_list.append({"name": name, "is_local": False, **stats})
+                ipc_clients = 0
+                if shard_manager_cog.ipc_server:
+                    ipc_clients = len(shard_manager_cog.ipc_server.clients)
+                shard_data["manager"] = {
+                    "ipc_mode": shard_manager_cog.ipc_mode,
+                    "cluster_name": shard_manager_cog.cluster_name,
+                    "ipc_clients": ipc_clients,
+                    "clusters": cluster_list,
+                    "total_guilds": sum(c.get("guild_count", 0) for c in cluster_list),
+                    "total_users": sum(c.get("user_count", 0) for c in cluster_list),
+                }
+            except Exception as e:
+                logger.error(f"Live Monitor: Failed to collect shard manager data: {e}")
+
         return {
             "timestamp": datetime.now().isoformat(),
             "bot": bot_info,
@@ -1592,6 +1726,8 @@ echo json_encode([
             "events": recent_events,
             "chat_history": chat_history,
             "hook_creator": hook_creator_data,
+            "backup_restore": backup_data,
+            "shard_info": shard_data,
         }
 
     async def _process_ticket_deletions(self):
@@ -1659,6 +1795,273 @@ echo json_encode([
             pass
         except Exception as e:
             logger.error(f"Live Monitor: Error processing ticket deletions: {e}")
+    
+    async def _process_backup_actions(self):
+        try:
+            website_url = self.config.get("website_url", "").rstrip('/')
+            if not website_url:
+                return
+            queue_url = f"{website_url}/monitor_data_backup_actions.json"
+            async with aiohttp.ClientSession() as session:
+                async with session.get(queue_url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+                    if resp.status != 200:
+                        return
+                    actions = await resp.json()
+                    if not actions or not isinstance(actions, list):
+                        return
+                    backup_cog = self.bot.get_cog("BackupRestore")
+                    if not backup_cog:
+                        return
+                    processed = 0
+                    for action in actions:
+                        act = action.get("action")
+                        guild_id = action.get("guild_id")
+                        if not act or not guild_id:
+                            continue
+                        guild = self.bot.get_guild(int(guild_id))
+
+                        if act == "update_config":
+                            try:
+                                sched = await backup_cog.storage.get_schedule(int(guild_id)) or {}
+                                sched["enabled"] = action.get("schedule_enabled", False)
+                                sched["interval_hours"] = action.get("interval_hours", 24)
+                                sched["retention_days"] = action.get("retention_days", 0)
+                                await backup_cog.storage.set_schedule(int(guild_id), sched)
+                                await backup_cog.storage.audit(int(guild_id), "schedule", 0, details=f"Dashboard: {'Enabled' if sched['enabled'] else 'Disabled'} every {sched['interval_hours']}h, retention {sched['retention_days']}d")
+                                logger.info(f"Live Monitor: Updated backup config for guild {guild_id}")
+                            except Exception as e:
+                                logger.error(f"Live Monitor: Failed to update backup config: {e}")
+                            processed += 1
+                            continue
+
+                        if not guild:
+                            logger.warning(f"Live Monitor: Backup action guild not found: {guild_id}")
+                            self._last_restore_result = {"success": False, "title": "Guild Not Found", "created": 0, "skipped": 0, "failed": 0, "errors": [f"Guild {guild_id} not found"], "duration": "0"}
+                            processed += 1
+                            continue
+
+                        if act == "restore":
+                            backup_id = action.get("backup_id")
+                            components = set(action.get("components", ["roles", "channels", "categories", "bot_settings", "member_roles"]))
+                            role_sync = action.get("role_sync", False)
+                            await self._execute_dashboard_restore(backup_cog, guild, backup_id, components, role_sync)
+                            processed += 1
+
+                        elif act == "create":
+                            try:
+                                from cogs.backup_restore import BackupSnapshot
+                                label = action.get("label") or f"Dashboard Backup {guild.name}"
+                                t0 = time.time()
+                                snap = await BackupSnapshot.capture(guild, self.bot)
+                                entry = await backup_cog.storage.save(guild.id, snap, label[:100], 0)
+                                elapsed = round(time.time() - t0, 1)
+                                if entry:
+                                    await backup_cog.storage.audit(guild.id, "create", 0, entry["id"], f"Dashboard: {label}")
+                                    logger.info(f"Live Monitor: Dashboard backup created for {guild.name} ({entry['id']}) in {elapsed}s")
+                                    self._last_backup_action_result = {"success": True, "action": "create", "guild_id": str(guild.id), "backup_id": entry["id"], "label": label, "message": f"Backup created in {elapsed}s"}
+                                else:
+                                    self._last_backup_action_result = {"success": False, "action": "create", "guild_id": str(guild.id), "message": "Storage full or write failed"}
+                            except Exception as e:
+                                logger.error(f"Live Monitor: Failed to create backup for {guild_id}: {e}")
+                                self._last_backup_action_result = {"success": False, "action": "create", "guild_id": str(guild_id), "message": str(e)[:200]}
+                            processed += 1
+
+                        elif act == "delete":
+                            backup_id = action.get("backup_id")
+                            try:
+                                ok = await backup_cog.storage.delete(int(guild_id), backup_id, 0)
+                                if ok:
+                                    logger.info(f"Live Monitor: Dashboard deleted backup {backup_id} for guild {guild_id}")
+                                    self._last_backup_action_result = {"success": True, "action": "delete", "guild_id": str(guild_id), "backup_id": backup_id, "message": "Backup deleted"}
+                                else:
+                                    self._last_backup_action_result = {"success": False, "action": "delete", "guild_id": str(guild_id), "backup_id": backup_id, "message": "Not found or pinned"}
+                            except Exception as e:
+                                logger.error(f"Live Monitor: Failed to delete backup {backup_id}: {e}")
+                                self._last_backup_action_result = {"success": False, "action": "delete", "guild_id": str(guild_id), "backup_id": backup_id, "message": str(e)[:200]}
+                            processed += 1
+
+                        elif act == "toggle_pin":
+                            backup_id = action.get("backup_id")
+                            try:
+                                result = await backup_cog.storage.toggle_pin(int(guild_id), backup_id, 0)
+                                if result is not None:
+                                    state = "pinned" if result else "unpinned"
+                                    logger.info(f"Live Monitor: Dashboard {state} backup {backup_id} for guild {guild_id}")
+                                    self._last_backup_action_result = {"success": True, "action": "toggle_pin", "guild_id": str(guild_id), "backup_id": backup_id, "pinned": result, "message": f"Backup {state}"}
+                                else:
+                                    self._last_backup_action_result = {"success": False, "action": "toggle_pin", "guild_id": str(guild_id), "backup_id": backup_id, "message": "Backup not found"}
+                            except Exception as e:
+                                logger.error(f"Live Monitor: Failed to toggle pin {backup_id}: {e}")
+                                self._last_backup_action_result = {"success": False, "action": "toggle_pin", "guild_id": str(guild_id), "message": str(e)[:200]}
+                            processed += 1
+
+                    if processed > 0:
+                        token = self.config.get("secret_token", "")
+                        clear_url = f"{website_url}/receive.php?token={token}&package=backup_actions_clear"
+                        async with session.post(clear_url, data=json.dumps({"cleared": processed}), headers={'Content-Type': 'application/json'}, timeout=aiohttp.ClientTimeout(total=5)) as clear_resp:
+                            if clear_resp.status == 200:
+                                logger.info(f"Live Monitor: Cleared backup action queue ({processed} processed)")
+                            else:
+                                logger.warning(f"Live Monitor: Failed to clear backup action queue (HTTP {clear_resp.status})")
+        except asyncio.TimeoutError:
+            pass
+        except Exception as e:
+            logger.error(f"Live Monitor: Error processing backup actions: {e}")
+
+    async def _execute_dashboard_restore(self, backup_cog, guild, backup_id, components, role_sync):
+        res = {"created": 0, "skipped": 0, "failed": 0, "roles_added": 0, "roles_removed": 0, "members_processed": 0, "members_skipped": 0, "errors": [], "success": False, "title": "Restore Failed", "duration": "0"}
+        try:
+            snap = await backup_cog.storage.get_snap(guild.id, backup_id)
+            entry = await backup_cog.storage.get_entry(guild.id, backup_id)
+            if not snap or not entry:
+                res["errors"].append(f"Backup {backup_id} not found")
+                self._last_restore_result = res
+                return
+
+            lock = backup_cog._lock(guild.id)
+            if lock.locked():
+                res["errors"].append("Another restore is already running")
+                self._last_restore_result = res
+                return
+
+            async with lock:
+                t0 = time.time()
+                role_map = {}
+                cat_map = {}
+
+                if "roles" in components:
+                    existing = {r.name.lower(): r for r in guild.roles}
+                    for rd in reversed(snap.get("roles", [])):
+                        n = rd["name"]
+                        if n.lower() in existing:
+                            role_map[rd["id"]] = existing[n.lower()]
+                            res["skipped"] += 1
+                            continue
+                        try:
+                            nr = await guild.create_role(name=n, color=discord.Color(rd.get("color", 0)), hoist=rd.get("hoist", False), mentionable=rd.get("mentionable", False), permissions=discord.Permissions(rd.get("permissions_value", 0)), reason=f"Dashboard restore: {backup_id}")
+                            role_map[rd["id"]] = nr
+                            res["created"] += 1
+                            await asyncio.sleep(1)
+                        except Exception as e:
+                            res["failed"] += 1
+                            res["errors"].append(f"Role '{n}': {str(e)[:50]}")
+                else:
+                    for r in guild.roles:
+                        role_map[r.id] = r
+
+                if "categories" in components:
+                    existing = {c.name.lower(): c for c in guild.categories}
+                    for cd in snap.get("categories", []):
+                        n = cd["name"]
+                        if n.lower() in existing:
+                            cat_map[cd["id"]] = existing[n.lower()]
+                            res["skipped"] += 1
+                            continue
+                        try:
+                            ow = backup_cog._ow(cd.get("overwrites", []), guild, role_map)
+                            nc = await guild.create_category(name=n, overwrites=ow, reason=f"Dashboard restore: {backup_id}")
+                            cat_map[cd["id"]] = nc
+                            res["created"] += 1
+                            await asyncio.sleep(1)
+                        except Exception as e:
+                            res["failed"] += 1
+                            res["errors"].append(f"Category '{n}': {str(e)[:50]}")
+                else:
+                    for c in guild.categories:
+                        cat_map[c.id] = c
+
+                if "channels" in components:
+                    existing_text = {c.name.lower(): c for c in guild.text_channels}
+                    existing_voice = {c.name.lower(): c for c in guild.voice_channels}
+                    for ch in snap.get("text_channels", []):
+                        n = ch["name"]
+                        if n.lower() in existing_text:
+                            res["skipped"] += 1
+                            continue
+                        try:
+                            cat = cat_map.get(ch.get("category_id"))
+                            ow = backup_cog._ow(ch.get("overwrites", []), guild, role_map)
+                            await guild.create_text_channel(name=n, topic=ch.get("topic", ""), slowmode_delay=ch.get("slowmode_delay", 0), nsfw=ch.get("nsfw", False), category=cat, overwrites=ow, reason=f"Dashboard restore: {backup_id}")
+                            res["created"] += 1
+                            await asyncio.sleep(1)
+                        except Exception as e:
+                            res["failed"] += 1
+                            res["errors"].append(f"Text '{n}': {str(e)[:50]}")
+                    for ch in snap.get("voice_channels", []):
+                        n = ch["name"]
+                        if n.lower() in existing_voice:
+                            res["skipped"] += 1
+                            continue
+                        try:
+                            cat = cat_map.get(ch.get("category_id"))
+                            ow = backup_cog._ow(ch.get("overwrites", []), guild, role_map)
+                            await guild.create_voice_channel(name=n, bitrate=min(ch.get("bitrate", 64000), guild.bitrate_limit), user_limit=ch.get("user_limit", 0), category=cat, overwrites=ow, reason=f"Dashboard restore: {backup_id}")
+                            res["created"] += 1
+                            await asyncio.sleep(1)
+                        except Exception as e:
+                            res["failed"] += 1
+                            res["errors"].append(f"Voice '{n}': {str(e)[:50]}")
+
+                if "member_roles" in components:
+                    member_data = snap.get("member_roles", [])
+                    for md in member_data:
+                        member = guild.get_member(md.get("user_id", 0))
+                        if not member:
+                            res["members_skipped"] += 1
+                            continue
+                        try:
+                            target_roles = set()
+                            for rid in md.get("role_ids", []):
+                                r = role_map.get(rid)
+                                if r and not r.is_default() and r < guild.me.top_role:
+                                    target_roles.add(r)
+                            current = set(member.roles) - {guild.default_role}
+                            to_add = target_roles - current
+                            to_remove = (current - target_roles) if role_sync else set()
+                            changed = False
+                            if to_add:
+                                await member.add_roles(*to_add, reason=f"Dashboard restore: {backup_id}")
+                                res["roles_added"] += len(to_add)
+                                changed = True
+                            if to_remove:
+                                await member.remove_roles(*to_remove, reason=f"Dashboard restore: {backup_id}")
+                                res["roles_removed"] += len(to_remove)
+                                changed = True
+                            if changed:
+                                res["members_processed"] += 1
+                                await asyncio.sleep(0.5)
+                            else:
+                                res["members_skipped"] += 1
+                        except Exception as e:
+                            res["errors"].append(f"Member {member}: {str(e)[:50]}")
+
+                if "bot_settings" in components:
+                    bs = snap.get("bot_settings", {})
+                    if bs and hasattr(self.bot, "db") and self.bot.db:
+                        try:
+                            if bs.get("custom_prefix") is not None:
+                                await self.bot.db.set_guild_prefix(guild.id, bs["custom_prefix"])
+                                if hasattr(self.bot, "prefix_cache"):
+                                    await self.bot.prefix_cache.invalidate(guild.id)
+                            if bs.get("mention_prefix_enabled") is not None:
+                                await self.bot.db.set_guild_mention_prefix_enabled(guild.id, bs["mention_prefix_enabled"])
+                        except Exception as e:
+                            res["errors"].append(f"Bot settings: {str(e)[:60]}")
+
+                elapsed = round(time.time() - t0, 1)
+                res["duration"] = str(elapsed)
+                res["success"] = res["failed"] == 0
+                res["title"] = "Restore Complete" if res["success"] else "Restore Completed with Errors"
+
+                sync_str = " SYNC" if role_sync else ""
+                await backup_cog.storage.audit(guild.id, "restore_dashboard", 0, backup_id, f"C:{res['created']} S:{res['skipped']} F:{res['failed']} +R:{res['roles_added']} -R:{res['roles_removed']} M:{res['members_processed']}{sync_str} [{','.join(components)}]")
+                logger.info(f"Live Monitor: Dashboard restore {backup_id} for {guild.id} — C:{res['created']} S:{res['skipped']} F:{res['failed']} ({elapsed}s)")
+
+        except Exception as e:
+            res["errors"].append(f"Unexpected error: {str(e)[:100]}")
+            logger.error(f"Live Monitor: Dashboard restore failed: {e}")
+
+        self._last_restore_result = res
     
     async def _collect_tickets_data(self) -> Dict[str, Any]:
         tickets_data = {"guilds": []}
@@ -1751,9 +2154,12 @@ echo json_encode([
                 "events": {"events": data.get("events", [])},
                 "filesystem": data.get("file_system", {}),
                 "hook_creator": data.get("hook_creator", {}),
+                "backup_restore": data.get("backup_restore", {}),
+                "shard_info": data.get("shard_info", {}),
             }
             
             await self._process_ticket_deletions()
+            await self._process_backup_actions()
             packages["tickets"] = await self._collect_tickets_data()
             
             base_url = self.config['website_url']
@@ -4114,18 +4520,17 @@ echo json_encode([
 
         .lm-user-pill {
             min-width: 0;
-            display: flex;
+            display: inline-flex;
             align-items: center;
-            padding: 6px 10px;
-            border-radius: 12px;
-            border: 1px solid rgba(148, 163, 184, 0.6);
-            background:
-                radial-gradient(circle at 0 0, rgba(56,189,248,0.22), transparent 60%),
-                radial-gradient(circle at 100% 100%, rgba(59,130,246,0.16), transparent 55%),
-                rgba(15,23,42,0.96);
-            box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
-            font-size: 11px;
+            padding: 4px 6px 4px 14px;
+            border-radius: 999px;
+            border: 1px solid rgba(148, 163, 184, 0.2);
+            background: rgba(148, 163, 184, 0.08);
+            font-size: 12px;
+            font-weight: 600;
+            line-height: 1;
             color: var(--text-secondary);
+            transition: all 0.2s ease;
         }
 
         .lm-user-pill-inner {
@@ -4141,15 +4546,18 @@ echo json_encode([
         }
 
         .lm-user-logout-button {
-            margin-left: 10px;
+            margin-left: 8px;
             border-radius: 999px;
-            border: 1px solid rgba(148, 163, 184, 0.6);
-            background: rgba(15,23,42,0.95);
+            border: 1px solid rgba(148, 163, 184, 0.15);
+            background: rgba(148, 163, 184, 0.08);
             color: var(--text-secondary);
             font-size: 11px;
+            font-weight: 600;
+            line-height: 1;
             padding: 4px 10px;
             cursor: pointer;
             white-space: nowrap;
+            transition: all 0.2s ease;
         }
 
         .lm-user-logout-button:hover {
@@ -4190,12 +4598,15 @@ echo json_encode([
 
         .header-info-button {
             border-radius: 999px;
-            border: 1px solid var(--border);
-            background: rgba(15, 23, 42, 0.9);
+            border: 1px solid rgba(148, 163, 184, 0.2);
+            background: rgba(148, 163, 184, 0.1);
             color: var(--text-secondary);
-            font-size: 11px;
-            padding: 4px 10px;
+            font-size: 12px;
+            font-weight: 600;
+            line-height: 1;
+            padding: 6px 14px;
             cursor: pointer;
+            transition: all 0.2s ease;
         }
 
         .header-info-button:hover {
@@ -7073,6 +7484,142 @@ echo json_encode([
             background-size: 40px 40px;
         }
         
+
+
+        .dash-hero-stat {
+            background: rgba(255,255,255,.06);
+            border: 1px solid rgba(255,255,255,.1);
+            border-radius: 12px;
+            padding: 14px 20px;
+            text-align: center;
+            min-width: 100px;
+            backdrop-filter: blur(8px);
+            transition: border-color .3s, transform .2s;
+        }
+        .dash-hero-stat:hover {
+            border-color: rgba(255,255,255,.2);
+            transform: translateY(-1px);
+        }
+        .dash-hero-stat-value {
+            font-size: 26px;
+            font-weight: 800;
+            color: #f1f5f9;
+            line-height: 1.1;
+            letter-spacing: -0.5px;
+        }
+        .dash-hero-stat-label {
+            font-size: 11px;
+            color: rgba(148,163,184,.8);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-top: 4px;
+            font-weight: 500;
+        }
+        @media (max-width: 900px) {
+            .dash-hero-stat { min-width: 70px; padding: 10px 14px; }
+            .dash-hero-stat-value { font-size: 20px; }
+        }
+
+        .lm-restore-overlay {
+            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,.6); backdrop-filter: blur(4px);
+            z-index: 10000; display: none; align-items: center; justify-content: center;
+            animation: lmFadeIn .2s ease;
+        }
+        .lm-restore-overlay.active { display: flex; }
+        @keyframes lmFadeIn { from { opacity: 0; } to { opacity: 1; } }
+        .lm-restore-modal {
+            background: #0f172a; border: 1px solid rgba(148,163,184,.2);
+            border-radius: 16px; width: 560px; max-width: 95vw; max-height: 85vh;
+            overflow-y: auto; box-shadow: 0 20px 60px rgba(0,0,0,.5);
+            animation: lmSlideUp .25s ease;
+        }
+        @keyframes lmSlideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+        .lm-restore-modal-header {
+            padding: 20px 24px; border-bottom: 1px solid rgba(148,163,184,.12);
+            display: flex; align-items: center; justify-content: space-between;
+        }
+        .lm-restore-modal-body { padding: 20px 24px; }
+        .lm-restore-modal-footer {
+            padding: 16px 24px; border-top: 1px solid rgba(148,163,184,.12);
+            display: flex; justify-content: flex-end; gap: 10px;
+        }
+        .lm-restore-comp {
+            display: flex; align-items: center; gap: 10px;
+            padding: 10px 14px; border-radius: 8px;
+            background: rgba(15,23,42,.5); border: 1px solid rgba(148,163,184,.12);
+            cursor: pointer; transition: all .2s; user-select: none;
+        }
+        .lm-restore-comp:hover { background: rgba(15,23,42,.8); border-color: rgba(148,163,184,.25); }
+        .lm-restore-comp.active { border-color: #818cf8; background: rgba(99,102,241,.08); }
+        .lm-restore-comp .lm-rc-check {
+            width: 20px; height: 20px; border-radius: 6px;
+            border: 2px solid rgba(148,163,184,.3); display: flex;
+            align-items: center; justify-content: center; transition: all .2s; flex-shrink: 0;
+        }
+        .lm-restore-comp.active .lm-rc-check {
+            background: #818cf8; border-color: #818cf8;
+        }
+        .lm-restore-toggle {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 12px 14px; border-radius: 10px;
+            background: rgba(15,23,42,.5); border: 1px solid rgba(148,163,184,.12);
+            cursor: pointer; transition: all .2s; user-select: none;
+        }
+        .lm-restore-toggle:hover { border-color: rgba(148,163,184,.25); }
+        .lm-restore-toggle.danger { border-color: rgba(239,68,68,.3); }
+        .lm-restore-toggle.danger.active { border-color: #ef4444; background: rgba(239,68,68,.06); }
+        .lm-restore-log {
+            background: #020617; border: 1px solid rgba(148,163,184,.1);
+            border-radius: 10px; padding: 14px; font-family: monospace;
+            font-size: 12px; color: #94a3b8; max-height: 250px; overflow-y: auto;
+            line-height: 1.6; white-space: pre-wrap;
+        }
+
+        .lm-perm-hidden { display: none !important; }
+
+        .lm-info-tip {
+            display: inline-flex;
+            align-items: center;
+            cursor: help;
+            position: relative;
+        }
+        .lm-info-tip:hover::after {
+            content: attr(data-tip);
+            position: absolute;
+            bottom: calc(100% + 8px);
+            left: 50%;
+            transform: translateX(-50%);
+            background: #1e293b;
+            border: 1px solid rgba(148,163,184,.25);
+            color: #cbd5e1;
+            font-size: 11px;
+            line-height: 1.4;
+            padding: 8px 12px;
+            border-radius: 8px;
+            width: 240px;
+            white-space: normal;
+            z-index: 100;
+            box-shadow: 0 8px 24px rgba(0,0,0,.4);
+            pointer-events: none;
+        }
+        .lm-info-tip:hover::before {
+            content: '';
+            position: absolute;
+            bottom: calc(100% + 2px);
+            left: 50%;
+            transform: translateX(-50%);
+            border: 6px solid transparent;
+            border-top-color: rgba(148,163,184,.25);
+            z-index: 101;
+            pointer-events: none;
+        }
+        @media (max-width: 900px) {
+            .backup-main-grid {
+                grid-template-columns: 1fr !important;
+            }
+        }
+
         .dash-hero-content {
             position: relative;
             z-index: 1;
@@ -8861,8 +9408,13 @@ echo json_encode([
         .main-header-status {
             display: flex;
             align-items: center;
-            gap: 10px;
+            gap: 6px;
             flex-wrap: wrap;
+            background: rgba(15, 23, 42, 0.55);
+            border: 1px solid rgba(148, 163, 184, 0.12);
+            border-radius: 16px;
+            padding: 4px 5px;
+            backdrop-filter: blur(8px);
         }
         
         /* ═══════════════════════════════════════════════════════════════════════
@@ -8872,18 +9424,20 @@ echo json_encode([
         .connection-status-indicator {
             display: inline-flex;
             align-items: center;
-            gap: 8px;
+            gap: 7px;
             padding: 6px 14px;
             border-radius: 999px;
             font-size: 12px;
             font-weight: 600;
+            line-height: 1;
             transition: all 0.3s ease;
             cursor: default;
+            border: 1px solid transparent;
         }
         
         .connection-dot {
-            width: 10px;
-            height: 10px;
+            width: 8px;
+            height: 8px;
             border-radius: 50%;
             transition: all 0.3s ease;
             flex-shrink: 0;
@@ -8958,7 +9512,8 @@ echo json_encode([
             border: 1px solid rgba(16, 185, 129, 0.3);
             border-radius: 999px;
             font-size: 12px;
-            font-weight: 500;
+            font-weight: 600;
+            line-height: 1;
             color: #6ee7b7;
         }
         
@@ -8978,12 +9533,13 @@ echo json_encode([
             display: inline-flex;
             align-items: center;
             gap: 6px;
-            padding: 6px 12px;
+            padding: 6px 14px;
             background: rgba(148, 163, 184, 0.1);
             border: 1px solid rgba(148, 163, 184, 0.2);
-            border-radius: 8px;
+            border-radius: 999px;
             font-size: 12px;
-            font-weight: 500;
+            font-weight: 600;
+            line-height: 1;
             color: #94a3b8;
             cursor: pointer;
             transition: all 0.2s ease;
@@ -12204,6 +12760,17 @@ echo json_encode([
                         </svg>
                         Extension Marketplace <span style="font-size:10px;background:linear-gradient(135deg,#3b82f6,#8b5cf6);padding:2px 6px;border-radius:4px;margin-left:6px;">BETA</span></button>
 
+                    <button class="lm-sidebar-item" data-tab="backups">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:8px;display:inline-block;vertical-align:middle;">
+                            <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/>
+                        </svg>
+                        Backup &amp; Restore</button>
+                    <button class="lm-sidebar-item" data-tab="shards">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:8px;display:inline-block;vertical-align:middle;">
+                            <rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/>
+                        </svg>
+                        Shard Manager</button>
+
                     <!-- DASHBOARD_PLUGINS_SIDEBAR_PLACEHOLDER -->
 
                     <div class="lm-sidebar-group-label">Admin</div>
@@ -14649,6 +15216,404 @@ if (typeof window !== 'undefined') {
                     </div>
                 </div>
 
+                <div id="tab-backups" class="tab-content">
+                    <div class="dash-hero" style="margin-bottom:24px;">
+                        <div class="dash-hero-bg">
+                            <div class="dash-hero-orb" style="background:radial-gradient(circle,rgba(16,185,129,.35),transparent 70%);top:-30%;left:-10%;width:400px;height:400px;"></div>
+                            <div class="dash-hero-orb" style="background:radial-gradient(circle,rgba(59,130,246,.25),transparent 70%);bottom:-40%;right:-5%;width:350px;height:350px;"></div>
+                            <div class="dash-hero-grid"></div>
+                        </div>
+                        <div class="dash-hero-content">
+                            <div class="dash-hero-left">
+                                <div class="dash-hero-badge" style="background:rgba(16,185,129,.15);border:1px solid rgba(16,185,129,.3);color:#34d399;">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+                                    Backup System
+                                </div>
+                                <h1 class="dash-hero-title">Backup &amp; Restore</h1>
+                                <p class="dash-hero-subtitle">Guild snapshot management across all servers</p>
+                            </div>
+                            <div class="dash-hero-right" style="display:flex;gap:10px;">
+                                <div class="dash-hero-stat">
+                                    <div class="dash-hero-stat-value" id="backup-total-count">--</div>
+                                    <div class="dash-hero-stat-label">Total Backups</div>
+                                </div>
+                                <div class="dash-hero-stat">
+                                    <div class="dash-hero-stat-value" id="backup-guild-count">--</div>
+                                    <div class="dash-hero-stat-label">Guilds Tracked</div>
+                                </div>
+                                <div class="dash-hero-stat">
+                                    <div class="dash-hero-stat-value" id="backup-total-size">--</div>
+                                    <div class="dash-hero-stat-label">Storage Used</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Guild Selector + Config -->
+                    <div style="display:grid;grid-template-columns:340px 1fr;gap:16px;margin-bottom:24px;" class="backup-main-grid">
+                        <div class="card" style="padding:20px;display:flex;flex-direction:column;">
+                            <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;">
+                                <div style="width:36px;height:36px;border-radius:10px;background:rgba(99,102,241,.15);display:flex;align-items:center;justify-content:center;">
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#818cf8" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                                </div>
+                                <div>
+                                    <div style="font-size:14px;font-weight:600;color:#e2e8f0;">Select Guild</div>
+                                    <div style="font-size:11px;color:#64748b;">Choose a server to manage</div>
+                                </div>
+                            </div>
+                            <div style="position:relative;margin-bottom:12px;">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#64748b" stroke-width="2" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);pointer-events:none;"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                                <input type="text" id="backup-guild-search" placeholder="Search guilds..." oninput="filterBackupGuilds(this.value)" style="width:100%;box-sizing:border-box;padding:8px 10px 8px 32px;background:rgba(15,23,42,.6);border:1px solid rgba(148,163,184,.2);border-radius:8px;color:#e2e8f0;font-size:13px;outline:none;transition:border-color .2s;" onfocus="this.style.borderColor='#818cf8'" onblur="this.style.borderColor='rgba(148,163,184,.2)'" />
+                            </div>
+                            <div id="backup-guild-selector" style="flex:1;overflow-y:auto;max-height:320px;display:flex;flex-direction:column;gap:4px;">
+                                <div style="font-size:12px;color:#64748b;text-align:center;padding:30px 10px;">Loading guilds...</div>
+                            </div>
+                        </div>
+
+                        <!-- Right side: Guild Config + Storage -->
+                        <div style="display:flex;flex-direction:column;gap:16px;">
+                            <!-- Config Panel -->
+                            <div class="card" style="padding:20px;">
+                                <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;">
+                                    <div style="width:36px;height:36px;border-radius:10px;background:rgba(16,185,129,.15);display:flex;align-items:center;justify-content:center;">
+                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+                                    </div>
+                                    <div style="flex:1;">
+                                        <div style="font-size:14px;font-weight:600;color:#e2e8f0;">Configuration</div>
+                                        <div style="font-size:11px;color:#64748b;" id="backup-config-subtitle">Global backup settings</div>
+                                    </div>
+                                    <button class="button button-secondary button-compact" onclick="refreshBackupsTab()" style="display:inline-flex;align-items:center;gap:6px;">
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/></svg>
+                                        Refresh
+                                    </button>
+                                </div>
+                                <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+                                    <div style="background:rgba(15,23,42,.5);border:1px solid rgba(148,163,184,.15);border-radius:10px;padding:14px;position:relative;">
+                                        <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+                                            <div style="font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:.5px;">Max Per Guild</div>
+                                            <div class="lm-info-tip" data-tip="The maximum number of backups stored per guild. Once this limit is reached, the oldest non-pinned backup is automatically removed when a new one is created.">
+                                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#64748b" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                                            </div>
+                                        </div>
+                                        <div style="font-size:22px;font-weight:700;color:#10b981;" id="backup-max-per-guild">--</div>
+                                    </div>
+                                    <div style="background:rgba(15,23,42,.5);border:1px solid rgba(148,163,184,.15);border-radius:10px;padding:14px;">
+                                        <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+                                            <div style="font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:.5px;">Cooldown</div>
+                                            <div class="lm-info-tip" data-tip="Minimum wait time (in seconds) between manual backup creations for the same guild. Prevents spam and excessive storage use. Does not apply to auto-backups.">
+                                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#64748b" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                                            </div>
+                                        </div>
+                                        <div style="font-size:22px;font-weight:700;color:#3b82f6;" id="backup-cooldown">--</div>
+                                    </div>
+                                    <div style="background:rgba(15,23,42,.5);border:1px solid rgba(148,163,184,.15);border-radius:10px;padding:14px;">
+                                        <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+                                            <div style="font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:.5px;">Auto Backup</div>
+                                            <div class="lm-info-tip" data-tip="Automatic scheduled backup interval in hours. When enabled, the bot will create automatic snapshots of each guild at this interval. Set to 0 or Off to disable. Auto-backups are labeled with [AUTO] in the backup list.">
+                                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#64748b" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                                            </div>
+                                        </div>
+                                        <div style="font-size:22px;font-weight:700;" id="backup-auto-interval">--</div>
+                                    </div>
+                                    <div style="background:rgba(15,23,42,.5);border:1px solid rgba(148,163,184,.15);border-radius:10px;padding:14px;">
+                                        <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+                                            <div style="font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:.5px;">Retention</div>
+                                            <div class="lm-info-tip" data-tip="Number of days to keep old backups before automatic cleanup. Non-pinned backups older than this are permanently deleted. Set to 0 or Off to keep backups indefinitely. Pinned backups are never auto-deleted.">
+                                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#64748b" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                                            </div>
+                                        </div>
+                                        <div style="font-size:22px;font-weight:700;" id="backup-retention">--</div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Storage + Pinned Overview -->
+                            <div class="card" style="padding:20px;">
+                                <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;">
+                                    <div style="width:36px;height:36px;border-radius:10px;background:rgba(168,85,247,.15);display:flex;align-items:center;justify-content:center;">
+                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#a855f7" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.219-8.56"/><circle cx="12" cy="12" r="3"/></svg>
+                                    </div>
+                                    <div>
+                                        <div style="font-size:14px;font-weight:600;color:#e2e8f0;">Storage &amp; Pinned Overview</div>
+                                        <div style="font-size:11px;color:#64748b;">Backup storage utilization &amp; pinned snapshots</div>
+                                    </div>
+                                </div>
+                                <div id="backup-storage-bar" style="margin-bottom:14px;">
+                                    <div style="display:flex;justify-content:space-between;margin-bottom:6px;">
+                                        <span style="font-size:12px;color:#94a3b8;">Pinned Backups</span>
+                                        <span style="font-size:12px;font-weight:600;color:#a855f7;" id="backup-pinned-count">--</span>
+                                    </div>
+                                    <div style="width:100%;height:8px;background:rgba(148,163,184,.15);border-radius:4px;overflow:hidden;">
+                                        <div id="backup-pinned-bar" style="height:100%;background:linear-gradient(90deg,#a855f7,#6366f1);border-radius:4px;width:0%;transition:width .5s ease;"></div>
+                                    </div>
+                                </div>
+                                <div style="position:relative;margin-bottom:10px;">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#64748b" stroke-width="2" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);pointer-events:none;"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                                    <input type="text" id="backup-storage-search" placeholder="Search pinned..." oninput="filterBackupStorage(this.value)" style="width:100%;box-sizing:border-box;padding:7px 10px 7px 32px;background:rgba(15,23,42,.6);border:1px solid rgba(148,163,184,.2);border-radius:8px;color:#e2e8f0;font-size:12px;outline:none;" onfocus="this.style.borderColor='#a855f7'" onblur="this.style.borderColor='rgba(148,163,184,.2)'" />
+                                </div>
+                                <div id="backup-guild-list-container" style="max-height:180px;overflow-y:auto;">
+                                    <div style="font-size:12px;color:#64748b;text-align:center;padding:20px;">Loading backup data...</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+
+                    <!-- Per-Guild Config Editor -->
+                    <div id="backup-guild-config-panel" class="card" style="padding:20px;margin-bottom:24px;display:none;">
+                        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+                            <div style="display:flex;align-items:center;gap:12px;">
+                                <div style="width:40px;height:40px;border-radius:10px;background:rgba(16,185,129,.15);display:flex;align-items:center;justify-content:center;">
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+                                </div>
+                                <div>
+                                    <div style="font-size:15px;font-weight:600;color:#e2e8f0;">Guild Schedule — <span id="guild-cfg-name" style="color:#10b981;">--</span></div>
+                                    <div style="font-size:12px;color:#94a3b8;">Configure auto-backup &amp; retention for this guild</div>
+                                </div>
+                            </div>
+                            <button class="button button-primary button-compact lm-perm-gate" data-perm="action_edit_backup_config" onclick="saveGuildConfig()" style="display:inline-flex;align-items:center;gap:6px;">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/></svg>
+                                Save Changes
+                            </button>
+                        </div>
+                        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;">
+                            <div style="background:rgba(15,23,42,.5);border:1px solid rgba(148,163,184,.15);border-radius:10px;padding:14px;">
+                                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+                                    <div style="font-size:12px;color:#94a3b8;font-weight:600;">Auto Backup</div>
+                                    <div class="toggle-pill" id="guild-auto-toggle-pill" onclick="this.classList.toggle('on')">
+                                        <span class="toggle-pill-knob"></span>
+                                    </div>
+                                </div>
+                                <div style="font-size:11px;color:#64748b;">Enable automatic scheduled backups for this guild.</div>
+                            </div>
+                            <div style="background:rgba(15,23,42,.5);border:1px solid rgba(148,163,184,.15);border-radius:10px;padding:14px;">
+                                <div style="font-size:12px;color:#94a3b8;font-weight:600;margin-bottom:8px;">Interval (hours)</div>
+                                <input type="number" id="guild-auto-interval" min="1" max="720" value="24" style="width:100%;box-sizing:border-box;padding:8px 10px;background:rgba(15,23,42,.8);border:1px solid rgba(148,163,184,.2);border-radius:6px;color:#e2e8f0;font-size:14px;font-weight:600;outline:none;" />
+                                <div style="font-size:11px;color:#64748b;margin-top:4px;">How often to auto-backup.</div>
+                            </div>
+                            <div style="background:rgba(15,23,42,.5);border:1px solid rgba(148,163,184,.15);border-radius:10px;padding:14px;">
+                                <div style="font-size:12px;color:#94a3b8;font-weight:600;margin-bottom:8px;">Retention (days)</div>
+                                <input type="number" id="guild-retention-days" min="0" max="365" value="0" style="width:100%;box-sizing:border-box;padding:8px 10px;background:rgba(15,23,42,.8);border:1px solid rgba(148,163,184,.2);border-radius:6px;color:#e2e8f0;font-size:14px;font-weight:600;outline:none;" />
+                                <div style="font-size:11px;color:#64748b;margin-top:4px;">0 = keep forever.</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Guild Backup Viewer (lazy loaded) -->
+                    <div id="backup-guild-viewer" class="card" style="padding:20px;margin-bottom:24px;display:none;">
+                        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+                            <div style="display:flex;align-items:center;gap:12px;">
+                                <div style="width:40px;height:40px;border-radius:10px;background:rgba(251,191,36,.15);display:flex;align-items:center;justify-content:center;">
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fbbf24" stroke-width="2"><path d="M12 3h7a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5"/><path d="M16 3v4"/><path d="M8 3v4"/><path d="M3 11h18"/></svg>
+                                </div>
+                                <div>
+                                    <div style="font-size:15px;font-weight:600;color:#e2e8f0;">Guild Backups — <span id="backup-viewer-guild-name" style="color:#fbbf24;">None</span></div>
+                                    <div style="font-size:12px;color:#94a3b8;" id="backup-viewer-subtitle">Select a guild to view its backups</div>
+                                </div>
+                            </div>
+                            <div style="display:flex;gap:8px;">
+                                <button class="button button-secondary button-compact lm-perm-gate" data-perm="action_create_backup" onclick="dashboardCreateBackup()" id="backup-create-btn" style="display:inline-flex;align-items:center;gap:6px;border-color:rgba(16,185,129,.3);color:#10b981;">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                                    Create Backup
+                                </button>
+                                <button class="button button-secondary button-compact lm-perm-gate" data-perm="action_delete_backup" onclick="dashboardDeleteBackup()" id="backup-delete-btn" style="display:none;align-items:center;gap:6px;border-color:rgba(239,68,68,.3);color:#ef4444;">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                                    Delete Selected
+                                </button>
+                                <button class="button button-secondary button-compact lm-perm-gate" data-perm="action_restore_backup" onclick="openRestoreModal()" id="backup-restore-btn" style="display:none;align-items:center;gap:6px;border-color:rgba(251,191,36,.3);color:#fbbf24;">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+                                    Restore Selected
+                                </button>
+                                <button class="button button-secondary button-compact" onclick="closeGuildViewer()" style="display:inline-flex;align-items:center;gap:6px;">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                                    Close
+                                </button>
+                            </div>
+                        </div>
+                        <div id="backup-viewer-list" style="max-height:400px;overflow-y:auto;">
+                            <div style="font-size:13px;color:#64748b;text-align:center;padding:40px;">Select a guild from the sidebar to load its backups.</div>
+                        </div>
+                    </div>
+
+                    <!-- Recent Backups -->
+                    <div class="card" style="padding:20px;">
+                        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+                            <div style="display:flex;align-items:center;gap:12px;">
+                                <div style="width:40px;height:40px;border-radius:10px;background:rgba(59,130,246,.15);display:flex;align-items:center;justify-content:center;">
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+                                </div>
+                                <div>
+                                    <div style="font-size:15px;font-weight:600;color:#e2e8f0;">Recent Backups</div>
+                                    <div style="font-size:12px;color:#94a3b8;">Latest 25 snapshots across all guilds</div>
+                                </div>
+                            </div>
+                            <div style="display:flex;align-items:center;gap:10px;">
+                                <div style="position:relative;">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#64748b" stroke-width="2" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);pointer-events:none;"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                                    <input type="text" id="backup-recent-search" placeholder="Search backups..." oninput="filterRecentBackups(this.value)" style="padding:7px 10px 7px 32px;background:rgba(15,23,42,.6);border:1px solid rgba(148,163,184,.2);border-radius:8px;color:#e2e8f0;font-size:12px;outline:none;width:200px;" onfocus="this.style.borderColor='#3b82f6'" onblur="this.style.borderColor='rgba(148,163,184,.2)'" />
+                                </div>
+                            </div>
+                        </div>
+                        <div id="backup-recent-list" style="max-height:450px;overflow-y:auto;">
+                            <div style="font-size:13px;color:#64748b;text-align:center;padding:40px;">No backup data available yet. Data will appear once the bot sends backup information.</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="tab-shards" class="tab-content">
+                    <div class="dash-hero" style="margin-bottom:24px;">
+                        <div class="dash-hero-bg">
+                            <div class="dash-hero-orb" style="background:radial-gradient(circle,rgba(99,102,241,.35),transparent 70%);top:-30%;left:-10%;width:400px;height:400px;"></div>
+                            <div class="dash-hero-orb" style="background:radial-gradient(circle,rgba(236,72,153,.25),transparent 70%);bottom:-40%;right:-5%;width:350px;height:350px;"></div>
+                            <div class="dash-hero-grid"></div>
+                        </div>
+                        <div class="dash-hero-content">
+                            <div class="dash-hero-left">
+                                <div class="dash-hero-badge" style="background:rgba(99,102,241,.15);border:1px solid rgba(99,102,241,.3);color:#818cf8;">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
+                                    Infrastructure
+                                </div>
+                                <h1 class="dash-hero-title">Shard Manager</h1>
+                                <p class="dash-hero-subtitle">Real-time shard monitoring, IPC clusters &amp; health diagnostics</p>
+                            </div>
+                            <div class="dash-hero-right" style="display:flex;gap:10px;">
+                                <div class="dash-hero-stat">
+                                    <div class="dash-hero-stat-value" id="shard-total-count">--</div>
+                                    <div class="dash-hero-stat-label">Total Shards</div>
+                                </div>
+                                <div class="dash-hero-stat">
+                                    <div class="dash-hero-stat-value" id="shard-healthy-count" style="color:#10b981;">--</div>
+                                    <div class="dash-hero-stat-label">Healthy</div>
+                                </div>
+                                <div class="dash-hero-stat">
+                                    <div class="dash-hero-stat-value" id="shard-warning-count" style="color:#fbbf24;">--</div>
+                                    <div class="dash-hero-stat-label">Warning</div>
+                                </div>
+                                <div class="dash-hero-stat">
+                                    <div class="dash-hero-stat-value" id="shard-avg-latency">--</div>
+                                    <div class="dash-hero-stat-label">Avg Latency</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:24px;" class="shard-info-grid">
+                        <div class="card" style="padding:20px;">
+                            <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
+                                <div style="width:36px;height:36px;border-radius:10px;background:rgba(99,102,241,.15);display:flex;align-items:center;justify-content:center;">
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#818cf8" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+                                </div>
+                                <div style="font-size:14px;font-weight:600;color:#e2e8f0;">IPC Status</div>
+                            </div>
+                            <div id="shard-ipc-status" style="font-size:13px;color:#94a3b8;">
+                                <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(148,163,184,.1);">
+                                    <span>Mode</span><span style="color:#818cf8;font-weight:600;" id="shard-ipc-mode">--</span>
+                                </div>
+                                <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(148,163,184,.1);">
+                                    <span>Cluster</span><span style="color:#e2e8f0;font-weight:600;" id="shard-cluster-name">--</span>
+                                </div>
+                                <div style="display:flex;justify-content:space-between;padding:6px 0;">
+                                    <span>Connected Clients</span><span style="color:#10b981;font-weight:600;" id="shard-ipc-clients">--</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="card" style="padding:20px;">
+                            <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
+                                <div style="width:36px;height:36px;border-radius:10px;background:rgba(16,185,129,.15);display:flex;align-items:center;justify-content:center;">
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                                </div>
+                                <div style="font-size:14px;font-weight:600;color:#e2e8f0;">Health Summary</div>
+                            </div>
+                            <div id="shard-health-summary" style="font-size:13px;color:#94a3b8;">
+                                <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(148,163,184,.1);">
+                                    <span>🟢 Healthy</span><span style="color:#10b981;font-weight:600;" id="shard-healthy-detail">--</span>
+                                </div>
+                                <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(148,163,184,.1);">
+                                    <span>🟡 Warning</span><span style="color:#fbbf24;font-weight:600;" id="shard-warning-detail">--</span>
+                                </div>
+                                <div style="display:flex;justify-content:space-between;padding:6px 0;">
+                                    <span>🔴 Critical</span><span style="color:#ef4444;font-weight:600;" id="shard-critical-detail">--</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="card" style="padding:20px;">
+                            <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
+                                <div style="width:36px;height:36px;border-radius:10px;background:rgba(251,191,36,.15);display:flex;align-items:center;justify-content:center;">
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fbbf24" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                                </div>
+                                <div style="font-size:14px;font-weight:600;color:#e2e8f0;">Global Totals</div>
+                            </div>
+                            <div id="shard-global-totals" style="font-size:13px;color:#94a3b8;">
+                                <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(148,163,184,.1);">
+                                    <span>Guilds</span><span style="color:#fbbf24;font-weight:600;" id="shard-total-guilds">--</span>
+                                </div>
+                                <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(148,163,184,.1);">
+                                    <span>Users</span><span style="color:#e2e8f0;font-weight:600;" id="shard-total-users">--</span>
+                                </div>
+                                <div style="display:flex;justify-content:space-between;padding:6px 0;">
+                                    <span>Uptime</span><span style="color:#10b981;font-weight:600;" id="shard-uptime">--</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Shard Overview Bar -->
+                    <div class="card" style="padding:20px;margin-bottom:24px;">
+                        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+                            <div style="display:flex;align-items:center;gap:12px;">
+                                <div style="width:36px;height:36px;border-radius:10px;background:rgba(236,72,153,.15);display:flex;align-items:center;justify-content:center;">
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ec4899" stroke-width="2"><path d="M18 20V10"/><path d="M12 20V4"/><path d="M6 20v-6"/></svg>
+                                </div>
+                                <div>
+                                    <div style="font-size:14px;font-weight:600;color:#e2e8f0;">Shard Health Map</div>
+                                    <div style="font-size:11px;color:#64748b;">Visual overview of all shard statuses</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div id="shard-health-bar" style="display:flex;gap:4px;flex-wrap:wrap;min-height:32px;">
+                            <div style="font-size:12px;color:#64748b;padding:8px;">Waiting for shard data...</div>
+                        </div>
+                    </div>
+
+                    <!-- Shard Details Grid -->
+                    <div class="card" style="padding:20px;margin-bottom:24px;">
+                        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+                            <div style="display:flex;align-items:center;gap:12px;">
+                                <div style="width:40px;height:40px;border-radius:10px;background:rgba(59,130,246,.15);display:flex;align-items:center;justify-content:center;">
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
+                                </div>
+                                <div>
+                                    <div style="font-size:15px;font-weight:600;color:#e2e8f0;">Shard Details</div>
+                                    <div style="font-size:12px;color:#94a3b8;">Per-shard metrics, latency &amp; connection stats</div>
+                                </div>
+                            </div>
+                            <button class="button button-secondary button-compact" onclick="refreshShardsTab()" style="display:inline-flex;align-items:center;gap:6px;">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/></svg>
+                                Refresh
+                            </button>
+                        </div>
+                        <div id="shard-details-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;">
+                            <div style="font-size:13px;color:#64748b;text-align:center;padding:40px;grid-column:1/-1;">No shard data available yet. Data will appear once the bot sends shard information.</div>
+                        </div>
+                    </div>
+
+                    <!-- Cluster Map -->
+                    <div class="card" style="padding:20px;">
+                        <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;">
+                            <div style="width:40px;height:40px;border-radius:10px;background:rgba(236,72,153,.15);display:flex;align-items:center;justify-content:center;">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ec4899" stroke-width="2"><path d="M18 20V10"/><path d="M12 20V4"/><path d="M6 20v-6"/></svg>
+                            </div>
+                            <div>
+                                <div style="font-size:15px;font-weight:600;color:#e2e8f0;">Cluster Map</div>
+                                <div style="font-size:12px;color:#94a3b8;">IPC connected clusters overview</div>
+                            </div>
+                        </div>
+                        <div id="shard-cluster-map" style="min-height:100px;">
+                            <div style="font-size:13px;color:#64748b;text-align:center;padding:30px;">No cluster data available. Clusters will appear when IPC is active.</div>
+                        </div>
+                    </div>
+                </div>
+
                 <div id="tab-credits" class="tab-content">
                     <!-- Credits Hero Header -->
                     <div class="dash-hero credits-hero">
@@ -14872,6 +15837,12 @@ if (typeof window !== 'undefined') {
                     <button class="lm-nav-palette-item" data-tab="system">
                         <span>System</span><span class="lm-badge">Core</span>
                     </button>
+                    <button class="lm-nav-palette-item" data-tab="backups">
+                        <span>Backup &amp; Restore</span><span class="lm-badge">Tools</span>
+                    </button>
+                    <button class="lm-nav-palette-item" data-tab="shards">
+                        <span>Shard Manager</span><span class="lm-badge">Tools</span>
+                    </button>
                     <button class="lm-nav-palette-item" data-tab="roles">
                         <span>Roles &amp; Access</span><span class="lm-badge">Admin</span>
                     </button>
@@ -14923,6 +15894,19 @@ if (typeof window !== 'undefined') {
             </button>
 
             <!-- DASHBOARD_PLUGINS_DRAWER_PLACEHOLDER -->
+
+            <button class="lm-drawer-item" data-tab="backups">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:8px;display:inline-block;vertical-align:middle;">
+                    <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/>
+                </svg>
+                Backup &amp; Restore
+            </button>
+            <button class="lm-drawer-item" data-tab="shards">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:8px;display:inline-block;vertical-align:middle;">
+                    <rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/>
+                </svg>
+                Shard Manager
+            </button>
 
             <div class="lm-drawer-group-label">Admin</div>
             <button class="lm-drawer-item" data-tab="roles">Roles &amp; Access</button>
@@ -14976,6 +15960,53 @@ if (typeof window !== 'undefined') {
             <div id="modal-body"></div>
         </div>
     </div>
+
+
+        <div id="restore-overlay" class="lm-restore-overlay" onclick="if(event.target===this)closeRestoreModal()">
+            <div class="lm-restore-modal">
+                <div class="lm-restore-modal-header">
+                    <div>
+                        <div style="font-size:16px;font-weight:700;color:#e2e8f0;">Restore Backup</div>
+                        <div style="font-size:12px;color:#64748b;margin-top:2px;" id="restore-modal-subtitle">Configure restore options</div>
+                    </div>
+                    <button onclick="closeRestoreModal()" style="background:none;border:none;color:#94a3b8;cursor:pointer;font-size:20px;padding:4px;">&times;</button>
+                </div>
+                <div class="lm-restore-modal-body">
+                    <div style="margin-bottom:16px;">
+                        <div style="font-size:13px;font-weight:600;color:#e2e8f0;margin-bottom:8px;">Select Components to Restore</div>
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;" id="restore-comp-grid">
+                            <div class="lm-restore-comp active" data-comp="roles" onclick="toggleRestoreComp(this)"><div class="lm-rc-check"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></div><div><div style="font-size:13px;color:#e2e8f0;font-weight:500;">Roles</div><div style="font-size:10px;color:#64748b;">Server roles &amp; permissions</div></div></div>
+                            <div class="lm-restore-comp active" data-comp="channels" onclick="toggleRestoreComp(this)"><div class="lm-rc-check"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></div><div><div style="font-size:13px;color:#e2e8f0;font-weight:500;">Channels</div><div style="font-size:10px;color:#64748b;">Text &amp; voice channels</div></div></div>
+                            <div class="lm-restore-comp active" data-comp="categories" onclick="toggleRestoreComp(this)"><div class="lm-rc-check"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></div><div><div style="font-size:13px;color:#e2e8f0;font-weight:500;">Categories</div><div style="font-size:10px;color:#64748b;">Channel categories</div></div></div>
+                            <div class="lm-restore-comp" data-comp="emojis" onclick="toggleRestoreComp(this)"><div class="lm-rc-check"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></div><div><div style="font-size:13px;color:#e2e8f0;font-weight:500;">Emojis</div><div style="font-size:10px;color:#64748b;">Custom server emojis</div></div></div>
+                            <div class="lm-restore-comp" data-comp="server_settings" onclick="toggleRestoreComp(this)"><div class="lm-rc-check"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></div><div><div style="font-size:13px;color:#e2e8f0;font-weight:500;">Server Settings</div><div style="font-size:10px;color:#64748b;">Name, icon, verification</div></div></div>
+                            <div class="lm-restore-comp active" data-comp="bot_settings" onclick="toggleRestoreComp(this)"><div class="lm-rc-check"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></div><div><div style="font-size:13px;color:#e2e8f0;font-weight:500;">Bot Settings</div><div style="font-size:10px;color:#64748b;">Prefix &amp; bot config</div></div></div>
+                            <div class="lm-restore-comp active" data-comp="member_roles" onclick="toggleRestoreComp(this)"><div class="lm-rc-check"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></div><div><div style="font-size:13px;color:#e2e8f0;font-weight:500;">Member Roles</div><div style="font-size:10px;color:#64748b;">Restore role assignments</div></div></div>
+                            <div class="lm-restore-comp" data-comp="stickers" onclick="toggleRestoreComp(this)"><div class="lm-rc-check"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></div><div><div style="font-size:13px;color:#e2e8f0;font-weight:500;">Stickers</div><div style="font-size:10px;color:#64748b;">Custom stickers</div></div></div>
+                        </div>
+                    </div>
+                    <div style="margin-bottom:16px;">
+                        <div style="font-size:13px;font-weight:600;color:#e2e8f0;margin-bottom:8px;">Sync Mode</div>
+                        <div class="lm-restore-toggle danger" id="restore-role-sync-toggle" onclick="toggleRoleSync(this)">
+                            <div style="display:flex;align-items:center;gap:10px;">
+                                <div style="width:36px;height:36px;border-radius:8px;background:rgba(239,68,68,.1);display:flex;align-items:center;justify-content:center;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="18" y1="8" x2="23" y2="13"/><line x1="23" y1="8" x2="18" y2="13"/></svg></div>
+                                <div><div style="font-size:13px;font-weight:600;color:#e2e8f0;">Role Sync</div><div style="font-size:11px;color:#ef4444;" id="restore-sync-desc">Disabled (Safe mode — add only, never removes)</div></div>
+                            </div>
+                            <div id="restore-sync-pill" style="width:40px;height:22px;border-radius:11px;background:rgba(148,163,184,.2);position:relative;transition:background .2s;flex-shrink:0;"><div style="width:18px;height:18px;border-radius:50%;background:#94a3b8;position:absolute;top:2px;left:2px;transition:all .2s;"></div></div>
+                        </div>
+                    </div>
+                    <div id="restore-log-container" style="display:none;margin-bottom:16px;">
+                        <div style="font-size:13px;font-weight:600;color:#e2e8f0;margin-bottom:8px;">Restore Log</div>
+                        <div class="lm-restore-log" id="restore-log-content">Waiting for restore to start...</div>
+                    </div>
+                    <div style="background:rgba(251,191,36,.06);border:1px solid rgba(251,191,36,.2);border-radius:10px;padding:12px 14px;font-size:12px;color:#fbbf24;" id="restore-warning-box"><strong>Warning:</strong> Restoring may overwrite existing channels, roles, and settings. This action cannot be undone.</div>
+                </div>
+                <div class="lm-restore-modal-footer" id="restore-modal-footer">
+                    <button class="button button-secondary" onclick="closeRestoreModal()">Cancel</button>
+                    <button class="button button-primary" id="restore-confirm-btn" onclick="confirmRestore()" style="background:linear-gradient(135deg,#f59e0b,#d97706);">Queue Restore</button>
+                </div>
+            </div>
+        </div>
 
         <div id="privacy-modal" class="modal">
             <div class="modal-content">
@@ -15531,7 +16562,7 @@ if (typeof window !== 'undefined') {
                 commands: 'view_commands',
                 plugins: 'view_plugins',
                 hooks: 'view_hooks',
-                'hook-creator': 'view_hooks',
+                'hook-creator': 'view_hook_creator',
                 filesystem: 'view_filesystem',
                 files: 'view_files',
                 chat: 'view_chat',
@@ -15544,12 +16575,24 @@ if (typeof window !== 'undefined') {
                 database: 'view_database',
                 marketplace: 'view_marketplace',
                 tickets: 'view_tickets',
+                backups: 'view_backups',
+                shards: 'view_shards',
                 credits: null,
                 /* DASHBOARD_PLUGINS_TAB_MAP_PLACEHOLDER */
             };
             const key = map[tabName];
             if (!key) return true;
             return !!LM_PERMS[key];
+        }
+
+
+        function applyPermGating() {
+            document.querySelectorAll('.lm-perm-gate').forEach(el => {
+                const perm = el.dataset.perm;
+                if (perm && typeof LM_PERMS !== 'undefined' && !LM_PERMS[perm]) {
+                    el.classList.add('lm-perm-hidden');
+                }
+            });
         }
 
         function applyPermissionsToUI() {
@@ -15562,7 +16605,7 @@ if (typeof window !== 'undefined') {
                 commands: 'view_commands',
                 plugins: 'view_plugins',
                 hooks: 'view_hooks',
-                'hook-creator': 'view_hooks',
+                'hook-creator': 'view_hook_creator',
                 filesystem: 'view_filesystem',
                 files: 'view_files',
                 chat: 'view_chat',
@@ -15570,6 +16613,8 @@ if (typeof window !== 'undefined') {
                 system: 'view_system',
                 invite: 'view_bot_invite',    // Fixed: was view_system
                 tickets: 'view_tickets',
+                backups: 'view_backups',
+                shards: 'view_shards',
                 roles: 'view_roles',          // Fixed: was view_security
                 security: 'view_security',
                 guilds: 'view_guilds',
@@ -19188,6 +20233,8 @@ if (typeof window !== 'undefined') {
                 { key: 'view_marketplace', label: 'Extension Marketplace' },
                 { key: 'view_bot_invite', label: 'Bot Invite Helper' },
                 { key: 'view_roles', label: 'Roles & Access' },
+                { key: 'view_backups', label: 'Backup & Restore' },
+                { key: 'view_shards', label: 'Shard Manager' },
                 /* DASHBOARD_PLUGINS_VIEW_PERMS_PLACEHOLDER */
             ];
 
@@ -19273,6 +20320,17 @@ if (typeof window !== 'undefined') {
                 { key: 'action_db_read', label: 'Read Database Records' },
                 { key: 'action_db_update', label: 'Update Database Records' },
                 { key: 'action_db_delete', label: 'Delete Database Records' },
+                
+                // Backup & Restore Actions
+                { key: 'action_view_backups', label: 'View Backup Details' },
+                { key: 'action_create_backup', label: 'Create Backup (via Dashboard)' },
+                { key: 'action_delete_backup', label: 'Delete Backup (via Dashboard)' },
+                { key: 'action_restore_backup', label: 'Restore Backup (via Dashboard)' },
+                { key: 'action_edit_backup_config', label: 'Edit Backup Config (per Guild)' },
+                
+                // Shard Manager Actions
+                { key: 'action_view_shard_details', label: 'View Shard Details' },
+                { key: 'action_reset_shard_metrics', label: 'Reset Shard Metrics' },
                 /* DASHBOARD_PLUGINS_ACTION_PERMS_PLACEHOLDER */
             ];
 
@@ -20928,6 +21986,649 @@ if (typeof window !== 'undefined') {
             attemptRead(true);
         }
 
+        function updateBackupsTab(d) {
+            if (!d || !d.total && d.total !== 0) return;
+            const el = id => document.getElementById(id);
+            if (el('backup-total-count')) el('backup-total-count').textContent = d.total || 0;
+            if (el('backup-guild-count')) el('backup-guild-count').textContent = d.guilds || 0;
+            if (el('backup-total-size')) el('backup-total-size').textContent = formatBytes(d.size || 0);
+            if (el('backup-max-per-guild')) el('backup-max-per-guild').textContent = d.max_per_guild || '--';
+            if (el('backup-cooldown')) el('backup-cooldown').textContent = (d.cooldown || 0) + 's';
+            if (el('backup-pinned-count')) el('backup-pinned-count').textContent = d.pinned || 0;
+
+            const autoInt = d.auto_interval || 0;
+            const autoEl = el('backup-auto-interval');
+            if (autoEl) {
+                autoEl.textContent = autoInt > 0 ? autoInt + 'h' : 'Off';
+                autoEl.style.color = autoInt > 0 ? '#10b981' : '#94a3b8';
+            }
+            const retDays = d.retention_days || 0;
+            const retEl = el('backup-retention');
+            if (retEl) {
+                retEl.textContent = retDays > 0 ? retDays + 'd' : 'Off';
+                retEl.style.color = retDays > 0 ? '#fbbf24' : '#94a3b8';
+            }
+
+            const pinnedBar = el('backup-pinned-bar');
+            if (pinnedBar && d.total > 0) {
+                pinnedBar.style.width = Math.min(100, (d.pinned / d.total) * 100) + '%';
+            }
+
+            window._backupGuildList = d.guild_list || [];
+            window._backupRecentList = d.recent_backups || [];
+            window._backupRestoreResults = d.restore_results || null;
+            renderGuildSelector(window._backupGuildList);
+            renderStorageList(window._backupGuildList);
+            renderRecentBackups(window._backupRecentList);
+
+            if (window._backupRestoreResults && window._waitingForRestore) {
+                window._waitingForRestore = false;
+                showRestoreResults(window._backupRestoreResults);
+            }
+
+            var actionResult = d.backup_action_result || null;
+            if (actionResult) {
+                var msg = actionResult.message || (actionResult.success ? 'Action completed' : 'Action failed');
+                showNotification(msg, actionResult.success ? 'success' : 'error');
+                if (window._selectedBackupGuild) loadGuildBackups(window._selectedBackupGuild);
+            }
+        }
+
+        function renderGuildSelector(guilds) {
+            const container = document.getElementById('backup-guild-selector');
+            if (!container) return;
+            const search = (document.getElementById('backup-guild-search')?.value || '').toLowerCase();
+            const filtered = guilds.filter(g => g.guild_name.toLowerCase().includes(search));
+            if (filtered.length === 0) {
+                container.innerHTML = '<div style="font-size:12px;color:#64748b;text-align:center;padding:20px;">No guilds found</div>';
+                return;
+            }
+            container.innerHTML = filtered.map(g => {
+                const isActive = window._selectedBackupGuild === g.guild_id;
+                const border = isActive ? 'border-color:#818cf8;background:rgba(99,102,241,.08);' : '';
+                const schedBadge = g.schedule_enabled ? '<span style="font-size:9px;background:rgba(16,185,129,.2);color:#10b981;padding:1px 5px;border-radius:3px;margin-left:4px;">AUTO</span>' : '';
+                return `<div onclick="selectBackupGuild('${g.guild_id}')" style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-radius:8px;background:rgba(15,23,42,.4);border:1px solid rgba(148,163,184,.12);cursor:pointer;transition:all .2s;${border}" onmouseover="if(!this.dataset.active)this.style.background='rgba(15,23,42,.6)'" onmouseout="if(!this.dataset.active)this.style.background='rgba(15,23,42,.4)'" ${isActive ? 'data-active="1"' : ''}>
+                    <div style="display:flex;align-items:center;gap:8px;min-width:0;flex:1;">
+                        <div style="width:8px;height:8px;border-radius:50%;background:${isActive ? '#818cf8' : '#475569'};flex-shrink:0;"></div>
+                        <span style="font-size:13px;color:#e2e8f0;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${g.guild_name}${schedBadge}</span>
+                    </div>
+                    <div style="display:flex;gap:8px;align-items:center;flex-shrink:0;margin-left:8px;">
+                        <span style="font-size:11px;color:#94a3b8;">${g.backup_count}</span>
+                        ${g.pinned_count > 0 ? '<span style="font-size:10px;color:#fbbf24;">📌' + g.pinned_count + '</span>' : ''}
+                    </div>
+                </div>`;
+            }).join('');
+        }
+
+        window.filterBackupGuilds = function(val) {
+            renderGuildSelector(window._backupGuildList || []);
+        };
+
+        window._selectedBackupGuild = null;
+        window._selectedBackupId = null;
+        window._waitingForRestore = false;
+        window._restoreComplete = false;
+
+        window.selectBackupGuild = function(guildId) {
+            window._selectedBackupGuild = guildId;
+            window._selectedBackupId = null;
+            window._expandedBackupId = null;
+            document.getElementById('backup-restore-btn').style.display = 'none';
+            document.getElementById('backup-delete-btn').style.display = 'none';
+            renderGuildSelector(window._backupGuildList || []);
+            const viewer = document.getElementById('backup-guild-viewer');
+            if (viewer) viewer.style.display = 'block';
+            const guild = (window._backupGuildList || []).find(g => g.guild_id === guildId);
+            const nameEl = document.getElementById('backup-viewer-guild-name');
+            if (nameEl) nameEl.textContent = guild ? guild.guild_name : guildId;
+            const subtitleEl = document.getElementById('backup-viewer-subtitle');
+            if (subtitleEl) subtitleEl.textContent = guild ? `${guild.backup_count} backups · ${formatBytes(guild.total_size)}` : '';
+            updateGuildConfigPanel(guild);
+            loadGuildBackups(guildId);
+        };
+
+        function updateGuildConfigPanel(guild) {
+            const panel = document.getElementById('backup-guild-config-panel');
+            if (!panel || !guild) { if(panel) panel.style.display='none'; return; }
+            panel.style.display = 'block';
+            const el = id => document.getElementById(id);
+            if (el('guild-cfg-name')) el('guild-cfg-name').textContent = guild.guild_name;
+            const autoToggle = el('guild-auto-toggle-pill');
+            if (autoToggle) {
+                const on = guild.schedule_enabled;
+                autoToggle.className = 'toggle-pill' + (on ? ' on' : '');
+            }
+            if (el('guild-auto-interval')) el('guild-auto-interval').value = guild.schedule_interval || 24;
+            if (el('guild-retention-days')) el('guild-retention-days').value = guild.retention_days || 0;
+        }
+
+        window.saveGuildConfig = function() {
+            if (!window._selectedBackupGuild) return;
+            if (!LM_PERMS?.action_edit_backup_config) { showNotification('No permission to edit backup config', 'error'); return; }
+            const el = id => document.getElementById(id);
+            const autoOn = el('guild-auto-toggle-pill')?.classList.contains('on') || false;
+            const interval = parseInt(el('guild-auto-interval')?.value) || 24;
+            const retention = parseInt(el('guild-retention-days')?.value) || 0;
+            fetch('./send_command.php', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                credentials: 'same-origin',
+                body: JSON.stringify({
+                    command: 'backup_update_config',
+                    params: {
+                        action: 'update_config',
+                        guild_id: window._selectedBackupGuild,
+                        schedule_enabled: autoOn,
+                        interval_hours: interval,
+                        retention_days: retention
+                    }
+                })
+            }).then(r => {
+                if (!r.ok) throw new Error('Server returned ' + r.status);
+                return r.json();
+            }).then(() => {
+                showNotification('Config saved for guild. Will apply on next bot cycle.', 'success');
+            }).catch(e => showNotification('Failed: ' + e.message, 'error'));
+        };
+
+        function loadGuildBackups(guildId) {
+            const list = document.getElementById('backup-viewer-list');
+            if (!list) return;
+            const allRecent = window._backupRecentList || [];
+            const guildBackups = allRecent.filter(b => b.guild_id === guildId);
+            if (guildBackups.length === 0) {
+                list.innerHTML = '<div style="font-size:13px;color:#64748b;text-align:center;padding:40px;">No backup data available for this guild in the recent cache (max 25 across all guilds).</div>';
+                document.getElementById('backup-restore-btn')?.style && (document.getElementById('backup-restore-btn').style.display = 'none');
+                document.getElementById('backup-delete-btn')?.style && (document.getElementById('backup-delete-btn').style.display = 'none');
+                return;
+            }
+            list.innerHTML = guildBackups.map(b => {
+                const dt = new Date(b.timestamp);
+                const timeStr = dt.toLocaleString();
+                const pin = b.pinned ? '<span style="color:#fbbf24;margin-left:6px;">📌</span>' : '';
+                const autoLabel = b.auto_backup ? '<span style="font-size:10px;background:rgba(59,130,246,.2);color:#60a5fa;padding:1px 6px;border-radius:4px;margin-left:6px;">AUTO</span>' : '';
+                const isSelected = window._selectedBackupId === b.id;
+                const selBorder = isSelected ? 'border-color:#fbbf24;background:rgba(251,191,36,.06);' : '';
+                const isExpanded = window._expandedBackupId === b.id;
+                const pinIcon = b.pinned
+                    ? '<svg width="12" height="12" viewBox="0 0 24 24" fill="#fbbf24" stroke="#fbbf24" stroke-width="2"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>'
+                    : '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#64748b" stroke-width="2"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>';
+                const detailPanel = isExpanded ? `
+                    <div style="padding:12px 14px 6px;border-top:1px solid rgba(148,163,184,.1);margin-top:8px;">
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 24px;font-size:12px;">
+                            <div><span style="color:#64748b;">Backup ID:</span> <code style="color:#818cf8;background:rgba(99,102,241,.1);padding:1px 5px;border-radius:3px;font-size:11px;">${b.id}</code></div>
+                            <div><span style="color:#64748b;">Version:</span> <span style="color:#e2e8f0;">${b.version || '?'}</span></div>
+                            <div><span style="color:#64748b;">Roles:</span> <span style="color:#e2e8f0;">${b.roles_count || 0}</span></div>
+                            <div><span style="color:#64748b;">Categories:</span> <span style="color:#e2e8f0;">${b.categories_count || 0}</span></div>
+                            <div><span style="color:#64748b;">Text Channels:</span> <span style="color:#e2e8f0;">${b.text_channels_count || 0}</span></div>
+                            <div><span style="color:#64748b;">Voice Channels:</span> <span style="color:#e2e8f0;">${b.voice_channels_count || 0}</span></div>
+                            <div><span style="color:#64748b;">Forum Channels:</span> <span style="color:#e2e8f0;">${b.forum_channels_count || 0}</span></div>
+                            <div><span style="color:#64748b;">Stage Channels:</span> <span style="color:#e2e8f0;">${b.stage_channels_count || 0}</span></div>
+                            <div><span style="color:#64748b;">Emojis:</span> <span style="color:#e2e8f0;">${b.emojis_count || 0}</span></div>
+                            <div><span style="color:#64748b;">Stickers:</span> <span style="color:#e2e8f0;">${b.stickers_count || 0}</span></div>
+                            <div><span style="color:#64748b;">Member Roles:</span> <span style="color:#e2e8f0;">${b.member_roles_count || 0}</span></div>
+                            <div><span style="color:#64748b;">Members:</span> <span style="color:#e2e8f0;">${b.member_count || 0}</span></div>
+                            <div><span style="color:#64748b;">Size:</span> <span style="color:#e2e8f0;">${formatBytes(b.size_bytes || 0)}</span></div>
+                            <div><span style="color:#64748b;">Checksum:</span> <code style="color:#94a3b8;font-size:10px;">${b.checksum || '?'}</code></div>
+                            <div><span style="color:#64748b;">Author:</span> <span style="color:#e2e8f0;">${b.author_id || 'System'}</span></div>
+                            <div><span style="color:#64748b;">Pinned:</span> <span style="color:#e2e8f0;">${b.pinned ? 'Yes' : 'No'}</span></div>
+                        </div>
+                        ${b.notes ? '<div style="margin-top:8px;font-size:12px;color:#94a3b8;"><span style="color:#64748b;">Notes:</span> ' + b.notes + '</div>' : ''}
+                    </div>` : '';
+                return `<div style="border-radius:8px;background:rgba(15,23,42,.4);margin-bottom:6px;border:1px solid rgba(148,163,184,.1);transition:all .2s;${selBorder}">
+                    <div onclick="selectBackupEntry('${b.id}')" style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;cursor:pointer;" onmouseover="this.parentElement.style.background='rgba(15,23,42,.6)'" onmouseout="this.parentElement.style.background='${isSelected ? 'rgba(251,191,36,.06)' : 'rgba(15,23,42,.4)'}'">
+                        <div style="display:flex;align-items:center;gap:10px;flex:1;min-width:0;">
+                            <div style="width:32px;height:32px;border-radius:8px;background:${isSelected ? 'rgba(251,191,36,.15)' : 'rgba(16,185,129,.1)'};display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+                                ${isSelected ? '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fbbf24" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>' : '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/></svg>'}
+                            </div>
+                            <div style="min-width:0;flex:1;">
+                                <div style="font-size:13px;font-weight:600;color:#e2e8f0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${b.label || b.id}${pin}${autoLabel}</div>
+                                <div style="font-size:11px;color:#64748b;margin-top:2px;">${timeStr}</div>
+                            </div>
+                        </div>
+                        <div style="display:flex;gap:8px;align-items:center;flex-shrink:0;margin-left:12px;">
+                            <div style="text-align:right;margin-right:4px;">
+                                <div style="font-size:12px;color:#94a3b8;">${b.roles_count || 0} roles · ${(b.text_channels_count || 0) + (b.voice_channels_count || 0)} ch</div>
+                                <div style="font-size:11px;color:#64748b;">${formatBytes(b.size_bytes || 0)}</div>
+                            </div>
+                            <div onclick="event.stopPropagation();toggleBackupPin('${b.id}')" title="${b.pinned ? 'Unpin' : 'Pin'}" style="cursor:pointer;padding:4px;border-radius:4px;transition:background .2s;" onmouseover="this.style.background='rgba(148,163,184,.15)'" onmouseout="this.style.background='transparent'">${pinIcon}</div>
+                            <div onclick="event.stopPropagation();toggleBackupDetails('${b.id}')" title="View Details" style="cursor:pointer;padding:4px;border-radius:4px;transition:background .2s;" onmouseover="this.style.background='rgba(148,163,184,.15)'" onmouseout="this.style.background='transparent'">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="${isExpanded ? '#818cf8' : '#64748b'}" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                            </div>
+                        </div>
+                    </div>${detailPanel}
+                </div>`;
+            }).join('');
+        }
+
+        window._expandedBackupId = null;
+
+        window.selectBackupEntry = function(backupId) {
+            window._selectedBackupId = (window._selectedBackupId === backupId) ? null : backupId;
+            const restoreBtn = document.getElementById('backup-restore-btn');
+            const deleteBtn = document.getElementById('backup-delete-btn');
+            if (restoreBtn) restoreBtn.style.display = window._selectedBackupId ? 'inline-flex' : 'none';
+            if (deleteBtn) deleteBtn.style.display = window._selectedBackupId ? 'inline-flex' : 'none';
+            if (window._selectedBackupGuild) loadGuildBackups(window._selectedBackupGuild);
+        };
+
+        window.toggleBackupDetails = function(backupId) {
+            window._expandedBackupId = (window._expandedBackupId === backupId) ? null : backupId;
+            if (window._selectedBackupGuild) loadGuildBackups(window._selectedBackupGuild);
+        };
+
+        window.toggleBackupPin = function(backupId) {
+            if (!window._selectedBackupGuild) return;
+            if (!LM_PERMS?.action_edit_backup_config) { showNotification('No permission', 'error'); return; }
+            fetch('./send_command.php', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                credentials: 'same-origin',
+                body: JSON.stringify({
+                    command: 'backup_toggle_pin',
+                    params: { action: 'toggle_pin', guild_id: window._selectedBackupGuild, backup_id: backupId }
+                })
+            }).then(r => {
+                if (!r.ok) throw new Error('Server returned ' + r.status);
+                return r.json();
+            }).then(() => showNotification('Pin toggled — will update on next refresh', 'success'))
+            .catch(e => showNotification('Failed: ' + e.message, 'error'));
+        };
+
+        window.dashboardCreateBackup = function() {
+            if (!window._selectedBackupGuild) { showNotification('Select a guild first', 'error'); return; }
+            if (!LM_PERMS?.action_create_backup) { showNotification('No permission to create backups', 'error'); return; }
+            var label = prompt('Backup label (optional):') || '';
+            var btn = document.getElementById('backup-create-btn');
+            if (btn) { btn.disabled = true; btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="spin"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg> Creating...'; }
+            window._waitingForBackupAction = true;
+            fetch('./send_command.php', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                credentials: 'same-origin',
+                body: JSON.stringify({
+                    command: 'backup_create',
+                    params: { action: 'create', guild_id: window._selectedBackupGuild, label: label || null }
+                })
+            }).then(r => {
+                if (!r.ok) throw new Error('Server returned ' + r.status);
+                return r.json();
+            }).then(() => {
+                showNotification('Backup creation queued — the bot will create it shortly.', 'success');
+                if (btn) { btn.disabled = false; btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Create Backup'; }
+            }).catch(e => {
+                showNotification('Failed: ' + e.message, 'error');
+                if (btn) { btn.disabled = false; btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Create Backup'; }
+            });
+        };
+
+        window.dashboardDeleteBackup = function() {
+            if (!window._selectedBackupId || !window._selectedBackupGuild) { showNotification('Select a backup first', 'error'); return; }
+            if (!LM_PERMS?.action_delete_backup) { showNotification('No permission to delete backups', 'error'); return; }
+            var entry = (window._backupRecentList || []).find(b => b.id === window._selectedBackupId);
+            if (entry && entry.pinned) { showNotification('Cannot delete a pinned backup. Unpin it first.', 'error'); return; }
+            var confirmMsg = 'Delete backup ' + window._selectedBackupId + (entry ? ' (' + (entry.label || '') + ')' : '') + '?\\n\\nThis cannot be undone.';
+            if (!confirm(confirmMsg)) return;
+            fetch('./send_command.php', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                credentials: 'same-origin',
+                body: JSON.stringify({
+                    command: 'backup_delete',
+                    params: { action: 'delete', guild_id: window._selectedBackupGuild, backup_id: window._selectedBackupId }
+                })
+            }).then(r => {
+                if (!r.ok) throw new Error('Server returned ' + r.status);
+                return r.json();
+            }).then(() => {
+                showNotification('Delete queued — backup will be removed on next bot cycle.', 'success');
+                window._selectedBackupId = null;
+                document.getElementById('backup-restore-btn').style.display = 'none';
+                document.getElementById('backup-delete-btn').style.display = 'none';
+            }).catch(e => showNotification('Failed: ' + e.message, 'error'));
+        };
+
+        window.openRestoreModal = function() {
+            if (!window._selectedBackupId || !window._selectedBackupGuild) return;
+            if (!LM_PERMS?.action_restore_backup) { showNotification('No permission to restore backups', 'error'); return; }
+            window._restoreComplete = false;
+            const guild = (window._backupGuildList || []).find(g => g.guild_id === window._selectedBackupGuild);
+            const guildName = guild ? guild.guild_name : window._selectedBackupGuild;
+            document.getElementById('restore-modal-subtitle').textContent = `${guildName} — Backup ${window._selectedBackupId}`;
+            document.getElementById('restore-log-container').style.display = 'none';
+            var btn = document.getElementById('restore-confirm-btn');
+            btn.disabled = false;
+            btn.textContent = 'Queue Restore';
+            btn.style.background = 'linear-gradient(135deg,#f59e0b,#d97706)';
+            document.getElementById('restore-warning-box').style.display = 'block';
+            document.querySelectorAll('.lm-restore-comp').forEach(c => {
+                const comp = c.dataset.comp;
+                const defaults = ['roles','channels','categories','bot_settings','member_roles'];
+                if (defaults.includes(comp)) { c.classList.add('active'); } else { c.classList.remove('active'); }
+            });
+            const syncToggle = document.getElementById('restore-role-sync-toggle');
+            if (syncToggle) { syncToggle.classList.remove('active'); }
+            document.getElementById('restore-sync-desc').textContent = 'Disabled (Safe mode — add roles only, never removes)';
+            const pill = document.getElementById('restore-sync-pill');
+            if (pill) { pill.style.background = 'rgba(148,163,184,.2)'; pill.children[0].style.left = '2px'; pill.children[0].style.background = '#94a3b8'; }
+            document.getElementById('restore-overlay').classList.add('active');
+        };
+
+        window.closeRestoreModal = function() {
+            document.getElementById('restore-overlay').classList.remove('active');
+        };
+
+        window.toggleRestoreComp = function(el) {
+            el.classList.toggle('active');
+        };
+
+        window.toggleRoleSync = function(el) {
+            el.classList.toggle('active');
+            const on = el.classList.contains('active');
+            document.getElementById('restore-sync-desc').textContent = on
+                ? 'ENABLED — Will ADD and REMOVE roles to match backup exactly'
+                : 'Disabled (Safe mode — add roles only, never removes)';
+            document.getElementById('restore-sync-desc').style.color = on ? '#ef4444' : '#ef4444';
+            const pill = document.getElementById('restore-sync-pill');
+            if (pill) {
+                pill.style.background = on ? '#ef4444' : 'rgba(148,163,184,.2)';
+                pill.children[0].style.left = on ? '20px' : '2px';
+                pill.children[0].style.background = on ? '#fff' : '#94a3b8';
+            }
+        };
+
+        window.confirmRestore = function() {
+            if (window._restoreComplete) { window.closeRestoreModal(); return; }
+            if (!window._selectedBackupId || !window._selectedBackupGuild) return;
+            var components = [];
+            document.querySelectorAll('.lm-restore-comp.active').forEach(function(c) { components.push(c.dataset.comp); });
+            if (components.length === 0) { showNotification('Select at least one component', 'error'); return; }
+            var roleSync = document.getElementById('restore-role-sync-toggle')?.classList.contains('active') || false;
+            document.getElementById('restore-confirm-btn').disabled = true;
+            document.getElementById('restore-confirm-btn').innerHTML = 'Queuing...';
+            document.getElementById('restore-log-container').style.display = 'block';
+            _rlog('[...] Sending restore request to bot...', true);
+            document.getElementById('restore-warning-box').style.display = 'none';
+            window._waitingForRestore = true;
+            fetch('./send_command.php', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                credentials: 'same-origin',
+                body: JSON.stringify({
+                    command: 'backup_restore',
+                    params: {
+                        action: 'restore',
+                        guild_id: window._selectedBackupGuild,
+                        backup_id: window._selectedBackupId,
+                        components: components,
+                        role_sync: roleSync
+                    }
+                })
+            }).then(function(r) {
+                if (!r.ok) throw new Error('Server returned ' + r.status);
+                return r.json();
+            }).then(function() {
+                _rlog('[OK] Restore queued successfully!');
+                _rlog('Components: ' + components.join(', '));
+                _rlog('Role Sync: ' + (roleSync ? 'ENABLED (full sync)' : 'Disabled (safe)'));
+                _rlog('[...] Waiting for bot to process...');
+                document.getElementById('restore-confirm-btn').innerHTML = 'Queued';
+                showNotification('Restore request queued. Bot will process shortly.', 'success');
+            }).catch(function(e) {
+                _rlog('[ERR] Failed: ' + e.message);
+                document.getElementById('restore-confirm-btn').disabled = false;
+                document.getElementById('restore-confirm-btn').textContent = 'Retry';
+                showNotification('Failed to queue restore', 'error');
+            });
+        };
+
+        function _rlog(line, clear) {
+            var el = document.getElementById('restore-log-content');
+            if (!el) return;
+            if (clear) { el.textContent = line; }
+            else { el.textContent = el.textContent + String.fromCharCode(10) + line; }
+            el.scrollTop = el.scrollHeight;
+        }
+
+        function showRestoreResults(results) {
+            var el = document.getElementById('restore-log-content');
+            if (!el) return;
+            var NL = String.fromCharCode(10);
+            var L = [];
+            L.push('=== Restore Results ===');
+            L.push((results.success ? '[OK] ' : '[WARN] ') + (results.title || 'Restore Complete'));
+            L.push('');
+            L.push('Created:       ' + (results.created || 0));
+            L.push('Skipped:       ' + (results.skipped || 0) + ' (already exist)');
+            L.push('Failed:        ' + (results.failed || 0));
+            if (results.members_processed !== undefined) {
+                L.push('');
+                L.push('Members:       ' + (results.members_processed || 0));
+                L.push('Roles added:   ' + (results.roles_added || 0));
+                if (results.roles_removed !== undefined) L.push('Roles removed: ' + (results.roles_removed || 0));
+            }
+            L.push('');
+            L.push('Duration:      ' + (results.duration || '?') + 's');
+            if (results.errors && results.errors.length > 0) {
+                L.push('');
+                L.push('Issues:');
+                results.errors.slice(0, 10).forEach(function(e) { L.push('  - ' + e); });
+                if (results.errors.length > 10) L.push('  ... +' + (results.errors.length - 10) + ' more');
+            }
+            el.textContent = L.join(NL);
+            document.getElementById('restore-log-container').style.display = 'block';
+            window._restoreComplete = true;
+            var btn = document.getElementById('restore-confirm-btn');
+            btn.disabled = false;
+            btn.innerHTML = (results.success ? '&#10003; ' : '&#9888; ') + (results.success ? 'Done — Close' : 'Completed with errors — Close');
+            btn.style.background = results.success ? 'linear-gradient(135deg,#10b981,#059669)' : 'linear-gradient(135deg,#ef4444,#dc2626)';
+        }
+
+        window.closeGuildViewer = function() {
+            window._selectedBackupGuild = null;
+            window._selectedBackupId = null;
+            const viewer = document.getElementById('backup-guild-viewer');
+            if (viewer) viewer.style.display = 'none';
+            const configPanel = document.getElementById('backup-guild-config-panel');
+            if (configPanel) configPanel.style.display = 'none';
+            renderGuildSelector(window._backupGuildList || []);
+        };
+
+        function renderStorageList(guilds) {
+            const container = document.getElementById('backup-guild-list-container');
+            if (!container) return;
+            const search = (document.getElementById('backup-storage-search')?.value || '').toLowerCase();
+            const filtered = search ? guilds.filter(g => g.guild_name.toLowerCase().includes(search)) : guilds;
+            if (filtered.length === 0) {
+                container.innerHTML = '<div style="font-size:12px;color:#64748b;text-align:center;padding:20px;">' + (search ? 'No matches' : 'No guild backups') + '</div>';
+                return;
+            }
+            container.innerHTML = filtered.map(g => `
+                <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;border-radius:8px;background:rgba(15,23,42,.4);margin-bottom:4px;border:1px solid rgba(148,163,184,.08);">
+                    <div style="display:flex;align-items:center;gap:8px;">
+                        <div style="width:8px;height:8px;border-radius:50%;background:#a855f7;"></div>
+                        <span style="font-size:12px;color:#e2e8f0;">${g.guild_name}</span>
+                        ${g.pinned_count > 0 ? '<span style="font-size:10px;color:#fbbf24;">📌' + g.pinned_count + '</span>' : ''}
+                    </div>
+                    <div style="display:flex;gap:10px;align-items:center;">
+                        <span style="font-size:11px;color:#94a3b8;">${g.backup_count}</span>
+                        <span style="font-size:11px;color:#64748b;">${formatBytes(g.total_size)}</span>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        window.filterBackupStorage = function(val) {
+            renderStorageList(window._backupGuildList || []);
+        };
+
+        function renderRecentBackups(backups) {
+            const list = document.getElementById('backup-recent-list');
+            if (!list) return;
+            const search = (document.getElementById('backup-recent-search')?.value || '').toLowerCase();
+            const filtered = backups.filter(b => {
+                if (!search) return true;
+                return (b.label || '').toLowerCase().includes(search) || (b.guild_name || '').toLowerCase().includes(search) || (b.id || '').toLowerCase().includes(search);
+            });
+            if (filtered.length === 0) {
+                list.innerHTML = '<div style="font-size:13px;color:#64748b;text-align:center;padding:40px;">' + (search ? 'No backups matching search.' : 'No backup data available yet.') + '</div>';
+                return;
+            }
+            list.innerHTML = filtered.map(b => {
+                const dt = new Date(b.timestamp);
+                const timeStr = dt.toLocaleString();
+                const pin = b.pinned ? '<span style="color:#fbbf24;margin-left:6px;">📌</span>' : '';
+                const autoLabel = b.auto_backup ? '<span style="font-size:10px;background:rgba(59,130,246,.2);color:#60a5fa;padding:1px 6px;border-radius:4px;margin-left:6px;">AUTO</span>' : '';
+                return `<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-radius:8px;background:rgba(15,23,42,.4);margin-bottom:6px;border:1px solid rgba(148,163,184,.1);transition:background .2s;" onmouseover="this.style.background='rgba(15,23,42,.6)'" onmouseout="this.style.background='rgba(15,23,42,.4)'">
+                    <div style="display:flex;align-items:center;gap:10px;flex:1;min-width:0;">
+                        <div style="width:32px;height:32px;border-radius:8px;background:rgba(16,185,129,.1);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/></svg>
+                        </div>
+                        <div style="min-width:0;flex:1;">
+                            <div style="font-size:13px;font-weight:600;color:#e2e8f0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${b.label || b.id}${pin}${autoLabel}</div>
+                            <div style="font-size:11px;color:#64748b;margin-top:2px;">${b.guild_name} · ${timeStr}</div>
+                        </div>
+                    </div>
+                    <div style="display:flex;gap:16px;align-items:center;flex-shrink:0;margin-left:12px;">
+                        <div style="text-align:right;">
+                            <div style="font-size:12px;color:#94a3b8;">${b.roles_count || 0} roles · ${(b.text_channels_count || 0) + (b.voice_channels_count || 0)} ch</div>
+                            <div style="font-size:11px;color:#64748b;">${formatBytes(b.size_bytes || 0)}</div>
+                        </div>
+                        <code style="font-size:10px;color:#818cf8;background:rgba(99,102,241,.1);padding:2px 6px;border-radius:4px;">${b.id}</code>
+                    </div>
+                </div>`;
+            }).join('');
+        }
+
+        window.filterRecentBackups = function(val) {
+            renderRecentBackups(window._backupRecentList || []);
+        };
+
+        window.refreshBackupsTab = function() {
+            if (currentData && currentData.backup_restore) {
+                updateBackupsTab(currentData.backup_restore);
+                showNotification('Backup data refreshed', 'success');
+            }
+        };
+
+        function updateShardsTab(d) {
+            if (!d) return;
+            const el = id => document.getElementById(id);
+            const mon = d.monitor || {};
+            const mgr = d.manager || {};
+
+            if (el('shard-total-count')) el('shard-total-count').textContent = mon.total_shards || mgr.clusters?.length || '--';
+            if (el('shard-healthy-count')) el('shard-healthy-count').textContent = mon.healthy ?? '--';
+            if (el('shard-warning-count')) el('shard-warning-count').textContent = mon.warning ?? '0';
+            if (el('shard-avg-latency')) el('shard-avg-latency').textContent = mon.avg_latency ? mon.avg_latency + 'ms' : '--';
+
+            if (el('shard-ipc-mode')) el('shard-ipc-mode').textContent = mgr.ipc_mode || 'N/A';
+            if (el('shard-cluster-name')) el('shard-cluster-name').textContent = mgr.cluster_name || 'N/A';
+            if (el('shard-ipc-clients')) el('shard-ipc-clients').textContent = mgr.ipc_clients ?? '--';
+            if (el('shard-healthy-detail')) el('shard-healthy-detail').textContent = mon.healthy ?? '0';
+            if (el('shard-warning-detail')) el('shard-warning-detail').textContent = mon.warning ?? '0';
+            if (el('shard-critical-detail')) el('shard-critical-detail').textContent = mon.critical ?? '0';
+
+            if (el('shard-total-guilds')) el('shard-total-guilds').textContent = (mgr.total_guilds || 0).toLocaleString();
+            if (el('shard-total-users')) el('shard-total-users').textContent = (mgr.total_users || 0).toLocaleString();
+
+            const localCluster = (mgr.clusters || []).find(c => c.is_local);
+            if (el('shard-uptime') && localCluster && localCluster.uptime) {
+                const s = Math.floor(localCluster.uptime);
+                const h = Math.floor(s / 3600);
+                const m = Math.floor((s % 3600) / 60);
+                el('shard-uptime').textContent = h > 0 ? h + 'h ' + m + 'm' : m + 'm';
+            }
+
+            const healthBar = el('shard-health-bar');
+            if (healthBar && mon.shards && mon.shards.length > 0) {
+                healthBar.innerHTML = mon.shards.map(s => {
+                    const col = s.status === '🟢' ? '#10b981' : s.status === '🟡' ? '#fbbf24' : '#ef4444';
+                    const bg = s.status === '🟢' ? 'rgba(16,185,129,.15)' : s.status === '🟡' ? 'rgba(251,191,36,.15)' : 'rgba(239,68,68,.15)';
+                    return `<div title="Shard ${s.shard_id}: ${s.latency_current}ms - ${s.health_reason}" style="flex:1;min-width:28px;height:32px;background:${bg};border:1px solid ${col}40;border-radius:6px;display:flex;align-items:center;justify-content:center;cursor:default;transition:transform .2s;" onmouseover="this.style.transform='scale(1.1)'" onmouseout="this.style.transform='scale(1)'">
+                        <span style="font-size:10px;font-weight:700;color:${col};">${s.shard_id}</span>
+                    </div>`;
+                }).join('');
+            }
+
+            const grid = el('shard-details-grid');
+            if (grid && mon.shards && mon.shards.length > 0) {
+                grid.innerHTML = mon.shards.map(s => {
+                    const statusColor = s.status === '🟢' ? '#10b981' : s.status === '🟡' ? '#fbbf24' : '#ef4444';
+                    const statusBg = s.status === '🟢' ? 'rgba(16,185,129,.1)' : s.status === '🟡' ? 'rgba(251,191,36,.1)' : 'rgba(239,68,68,.1)';
+                    const latencyColor = s.latency_current < 100 ? '#10b981' : s.latency_current < 300 ? '#fbbf24' : '#ef4444';
+                    const latencyBarW = Math.min(100, (s.latency_current / 500) * 100);
+                    return `
+                        <div style="background:rgba(15,23,42,.5);border:1px solid rgba(148,163,184,.15);border-radius:12px;padding:16px;transition:border-color .2s;" onmouseover="this.style.borderColor='${statusColor}'" onmouseout="this.style.borderColor='rgba(148,163,184,.15)'">
+                            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+                                <div style="display:flex;align-items:center;gap:8px;">
+                                    <div style="width:10px;height:10px;border-radius:50%;background:${statusColor};box-shadow:0 0 6px ${statusColor};"></div>
+                                    <span style="font-size:15px;font-weight:700;color:#e2e8f0;">Shard ${s.shard_id}</span>
+                                </div>
+                                <span style="font-size:11px;padding:3px 8px;border-radius:6px;background:${statusBg};color:${statusColor};font-weight:600;">${s.uptime_pct}%</span>
+                            </div>
+                            <div style="margin-bottom:10px;">
+                                <div style="display:flex;justify-content:space-between;font-size:11px;color:#94a3b8;margin-bottom:4px;">
+                                    <span>Latency</span><span style="color:${latencyColor};font-weight:600;">${s.latency_current}ms</span>
+                                </div>
+                                <div style="width:100%;height:4px;background:rgba(148,163,184,.15);border-radius:2px;overflow:hidden;">
+                                    <div style="height:100%;background:${latencyColor};border-radius:2px;width:${latencyBarW}%;transition:width .3s;"></div>
+                                </div>
+                                <div style="display:flex;justify-content:space-between;font-size:10px;color:#64748b;margin-top:2px;">
+                                    <span>min ${s.latency_min}ms</span><span>avg ${s.latency_avg}ms</span><span>max ${s.latency_max}ms</span>
+                                </div>
+                            </div>
+                            <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:12px;">
+                                <div style="display:flex;justify-content:space-between;color:#94a3b8;"><span>Guilds</span><span style="color:#e2e8f0;font-weight:600;">${s.guilds}</span></div>
+                                <div style="display:flex;justify-content:space-between;color:#94a3b8;"><span>Messages</span><span style="color:#e2e8f0;font-weight:600;">${(s.messages || 0).toLocaleString()}</span></div>
+                                <div style="display:flex;justify-content:space-between;color:#94a3b8;"><span>Commands</span><span style="color:#e2e8f0;font-weight:600;">${s.commands || 0}</span></div>
+                                <div style="display:flex;justify-content:space-between;color:#94a3b8;"><span>Errors</span><span style="color:${s.errors > 0 ? '#ef4444' : '#94a3b8'};font-weight:600;">${s.errors || 0}</span></div>
+                                <div style="display:flex;justify-content:space-between;color:#94a3b8;"><span>Connects</span><span style="color:#e2e8f0;font-weight:600;">${s.connects || 0}</span></div>
+                                <div style="display:flex;justify-content:space-between;color:#94a3b8;"><span>Disconnects</span><span style="color:${s.disconnects > 0 ? '#fbbf24' : '#94a3b8'};font-weight:600;">${s.disconnects || 0}</span></div>
+                            </div>
+                            <div style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(148,163,184,.1);font-size:11px;color:#64748b;">
+                                ${s.health_reason}
+                            </div>
+                        </div>`;
+                }).join('');
+            }
+
+            const clusterMap = el('shard-cluster-map');
+            if (clusterMap && mgr.clusters && mgr.clusters.length > 0) {
+                clusterMap.innerHTML = `
+                    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px;">
+                        ${mgr.clusters.map(c => {
+                            const isLocal = c.is_local;
+                            const borderColor = isLocal ? '#818cf8' : '#10b981';
+                            const bg = isLocal ? 'rgba(99,102,241,.08)' : 'rgba(16,185,129,.08)';
+                            return `
+                                <div style="background:${bg};border:1px solid ${borderColor}40;border-radius:12px;padding:16px;">
+                                    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+                                        <div style="width:10px;height:10px;border-radius:50%;background:${borderColor};box-shadow:0 0 6px ${borderColor};"></div>
+                                        <span style="font-size:14px;font-weight:700;color:#e2e8f0;">${c.name}</span>
+                                        ${isLocal ? '<span style="font-size:10px;background:rgba(99,102,241,.2);color:#818cf8;padding:2px 6px;border-radius:4px;">LOCAL</span>' : ''}
+                                    </div>
+                                    <div style="font-size:12px;color:#94a3b8;display:grid;gap:4px;">
+                                        <div style="display:flex;justify-content:space-between;"><span>Guilds</span><span style="color:#e2e8f0;font-weight:600;">${(c.guild_count || 0).toLocaleString()}</span></div>
+                                        <div style="display:flex;justify-content:space-between;"><span>Users</span><span style="color:#e2e8f0;font-weight:600;">${(c.user_count || 0).toLocaleString()}</span></div>
+                                        <div style="display:flex;justify-content:space-between;"><span>Shards</span><span style="color:#e2e8f0;font-weight:600;">${c.shard_count || '?'}</span></div>
+                                        <div style="display:flex;justify-content:space-between;"><span>Mode</span><span style="color:#818cf8;font-weight:600;">${c.mode || '?'}</span></div>
+                                    </div>
+                                </div>`;
+                        }).join('')}
+                    </div>`;
+            } else if (clusterMap && !mgr.clusters) {
+                clusterMap.innerHTML = '<div style="font-size:13px;color:#64748b;text-align:center;padding:30px;">Shard Manager not active. Enable ENABLE_SHARD_MANAGER in .env to use clustering.</div>';
+            }
+        }
+
+        window.refreshShardsTab = function() {
+            if (currentData && currentData.shard_info) {
+                updateShardsTab(currentData.shard_info);
+                showNotification('Shard data refreshed', 'success');
+            }
+        };
+
         function updateOverview(data, previous) {
             const health = data.health || {};
             const system = data.system || {};
@@ -21121,7 +22822,7 @@ if (typeof window !== 'undefined') {
                     isFirstLoad = false;
                 }
                 
-                const packages = ['core', 'commands', 'plugins', 'hooks', 'extensions', 'system_details', 'events', 'filesystem', 'hook_creator'];
+                const packages = ['core', 'commands', 'plugins', 'hooks', 'extensions', 'system_details', 'events', 'filesystem', 'hook_creator', 'backup_restore', 'shard_info'];
                 const loadPromises = packages.map((pkg, index) => 
                     new Promise(resolve => {
                         setTimeout(() => {
@@ -21151,7 +22852,9 @@ if (typeof window !== 'undefined') {
                     "framework": results[5]?.framework || {},
                     "events": results[6]?.events || [],
                     "file_system": results[7] || {},
-                    "hook_creator": results[8] || {}
+                    "hook_creator": results[8] || {},
+                    "backup_restore": results[9] || {},
+                    "shard_info": results[10] || {}
                 };
                 
                 if (!results[0]) {
@@ -21269,6 +22972,14 @@ if (typeof window !== 'undefined') {
                 }
                 
                 renderSystemDetails(data);
+                
+                if (data.backup_restore) {
+                    updateBackupsTab(data.backup_restore);
+                }
+                applyPermGating();
+                if (data.shard_info) {
+                    updateShardsTab(data.shard_info);
+                }
                 
                 setTimeout(() => {
                     if (searchState.commands && document.getElementById('cmd-search')) {
@@ -21415,7 +23126,7 @@ if (typeof window !== 'undefined') {
             
             if (isStale && ageMs) {
                 const ageSec = Math.round(ageMs / 1000);
-                indicator.textContent = `⚠️ Data ${ageSec}s old`;
+                indicator.textContent = `[!] Data ${ageSec}s old`;
                 indicator.style.background = ageSec > 30 ? '#dc2626' : '#f59e0b';
                 indicator.style.color = '#fff';
                 indicator.style.display = 'block';
@@ -23353,6 +25064,9 @@ function lm_default_permissions_for_tier(string $tier): array {
                 'view_security' => true,        // Security & Logs tab
                 'view_roles' => true,           // Roles & Access tab
                 'view_bot_invite' => true,      // Bot Invite Helper tab
+                'view_hook_creator' => true,    // Hook Creator tab
+                'view_backups' => true,         // Backup & Restore tab
+                'view_shards' => true,          // Shard Manager tab
                 
                 // ACTION PERMISSIONS - Dashboard Actions (5)
                 'action_clear_cache' => true,
@@ -23436,6 +25150,17 @@ function lm_default_permissions_for_tier(string $tier): array {
                 'action_db_update' => true,
                 'action_db_delete' => true,
                 
+                // ACTION PERMISSIONS - Backup & Restore Actions (3)
+                'action_view_backups' => true,
+                'action_create_backup' => true,
+                'action_delete_backup' => true,
+                'action_restore_backup' => true,
+                'action_edit_backup_config' => true,
+                
+                // ACTION PERMISSIONS - Shard Manager Actions (2)
+                'action_view_shard_details' => true,
+                'action_reset_shard_metrics' => true,
+                
                 // DASHBOARD PLUGIN PERMISSIONS (dynamically added)
                 /* DASHBOARD_PLUGINS_OWNER_PERMISSIONS_PLACEHOLDER */
             ];
@@ -23461,6 +25186,9 @@ function lm_default_permissions_for_tier(string $tier): array {
                 'view_security' => false,       // Security & Logs - SENSITIVE
                 'view_roles' => false,          // Roles & Access - SENSITIVE
                 'view_bot_invite' => true,      // Bot Invite Helper tab
+                'view_hook_creator' => true,    // Hook Creator tab
+                'view_backups' => true,         // Backup & Restore tab
+                'view_shards' => true,          // Shard Manager tab
                 
                 // ALL ACTION PERMISSIONS - FALSE by default (customize per role)
                 'action_clear_cache' => false,
@@ -23517,6 +25245,13 @@ function lm_default_permissions_for_tier(string $tier): array {
                 'action_db_read' => false,
                 'action_db_update' => false,
                 'action_db_delete' => false,
+                'action_view_backups' => false,
+                'action_create_backup' => false,
+                'action_delete_backup' => false,
+                'action_restore_backup' => false,
+                'action_edit_backup_config' => false,
+                'action_view_shard_details' => false,
+                'action_reset_shard_metrics' => false,
             ];
     }
 }
@@ -26898,7 +28633,7 @@ try {
     }}
 
     $package = $_GET['package'] ?? 'unknown';
-    $validPackages = ['core', 'commands', 'plugins', 'hooks', 'extensions', 'system_details', 'events', 'filesystem', 'fileops', 'assets', 'tickets', 'hook_creator', 'status', 'plugin_response', 'plugin_requests_clear'];
+    $validPackages = ['core', 'commands', 'plugins', 'hooks', 'extensions', 'system_details', 'events', 'filesystem', 'fileops', 'assets', 'tickets', 'hook_creator', 'status', 'plugin_response', 'plugin_requests_clear', 'backup_restore', 'shard_info', 'backup_action', 'backup_actions_clear'];
 
     if (!in_array($package, $validPackages)) {{
         http_response_code(400);
@@ -26978,6 +28713,27 @@ try {
     }}
     
     // Handle clearing processed plugin requests
+    if ($package === 'backup_action') {{
+        $queueFile = __DIR__ . '/monitor_data_backup_actions.json';
+        $existing = [];
+        if (file_exists($queueFile)) {{
+            $existing = json_decode(file_get_contents($queueFile), true) ?: [];
+        }}
+        $existing[] = array_merge($data, ['queued_at' => date('c')]);
+        file_put_contents($queueFile, json_encode($existing));
+        echo json_encode(['status' => 'queued']);
+        exit;
+    }}
+
+    if ($package === 'backup_actions_clear') {{
+        $queueFile = __DIR__ . '/monitor_data_backup_actions.json';
+        file_put_contents($queueFile, '[]', LOCK_EX);
+        @chmod($queueFile, 0666);
+        http_response_code(200);
+        echo json_encode(['success' => true, 'message' => 'Backup action queue cleared']);
+        exit;
+    }}
+
     if ($package === 'plugin_requests_clear') {{
         $processedIds = $decoded->ids ?? [];
         $queueFile = __DIR__ . '/monitor_data_plugin_requests.json';
@@ -27179,6 +28935,18 @@ function lm_command_allowed_for_permissions(string $command, array $perms): bool
         case 'load_downloaded_extension':
             return !empty($perms['action_load_marketplace_extension']);
         
+        // Backup Actions
+        case 'backup_update_config':
+            return !empty($perms['action_edit_backup_config']);
+        case 'backup_restore':
+            return !empty($perms['action_restore_backup']);
+        case 'backup_create':
+            return !empty($perms['action_create_backup']);
+        case 'backup_delete':
+            return !empty($perms['action_delete_backup']);
+        case 'backup_toggle_pin':
+            return !empty($perms['action_edit_backup_config']);
+        
         default:
             return true;
     }
@@ -27197,6 +28965,30 @@ if (!$allowed) {
     ]);
     http_response_code(403);
     echo json_encode(['error' => 'Not allowed for your role']);
+    exit;
+}
+
+// Backup commands get routed to the backup actions queue file
+$backupCommands = ['backup_update_config', 'backup_restore', 'backup_create', 'backup_delete', 'backup_toggle_pin'];
+if (in_array($command, $backupCommands)) {
+    $queueFile = __DIR__ . '/monitor_data_backup_actions.json';
+    $existing = [];
+    if (file_exists($queueFile)) {
+        $existing = json_decode(file_get_contents($queueFile), true) ?: [];
+    }
+    $existing[] = array_merge($params, ['queued_at' => date('c'), '_source' => 'dashboard', '_user' => $user['display_name'] ?? 'unknown']);
+    if (@file_put_contents($queueFile, json_encode($existing, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE), LOCK_EX) === false) {
+        http_response_code(500);
+        echo json_encode(['error' => 'Could not write backup queue']);
+        exit;
+    }
+    @chmod($queueFile, 0666);
+    lm_log_audit('BACKUP_ACTION_QUEUED', 'DASHBOARD', $command, [
+        'role_name' => $roleName,
+        'user_id'   => $user['discord_user_id'] ?? null,
+        'params'    => $params,
+    ]);
+    echo json_encode(['success' => true, 'message' => 'Backup action queued']);
     exit;
 }
 
