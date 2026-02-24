@@ -22,7 +22,12 @@
 </p>
 
 <p align="center">
-  **✨ NEW FEATURE (v1.7.1.0): Advanced Shard System & Backup/Restore**
+  **✨ NEW FEATURE (v1.7.2.0): Bot Status Rotator**
+  <br>Fully configurable bot status rotation with multiple statuses, custom intervals, and dynamic variables, all manageable from the web dashboard.
+</p>
+
+<p align="center">
+  **✨ PREVIOUS (v1.7.1.0): Advanced Shard System & Backup/Restore**
   <br>Real-time shard health monitoring with interactive dashboards, IPC-based cross-shard communication, and full guild backup/restore with interactive dashboards — all togglable via .env!
 </p>
 
@@ -777,6 +782,7 @@ Actions:
 
 ### Command System
 
+✅ **Bot Status Rotator** - Configurable status rotation with multiple statuses and dynamic variables  
 ✅ **Hybrid Commands** - Both prefix and slash command support  
 ✅ **@Mention Prefix** - Invoke commands with @BotName syntax (configurable per-guild)  
 ✅ **Permission Framework** - Multi-tier role-based access control  
@@ -816,6 +822,7 @@ Actions:
 
 ### Monitoring & Analytics
 
+✅ **Bot Status Rotator** - Configurable status rotation with dynamic variables from the dashboard  
 ✅ **Command Usage Stats** - Track popular commands  
 ✅ **Error Tracking** - Comprehensive error logging  
 ✅ **Uptime Monitoring** - Real-time bot statistics  
@@ -4922,6 +4929,7 @@ IMPORTANT NOTE: If you are using this framework, please be aware that you are so
 **Made with 💜 by TheHolyOneZ**
 
 [GitHub Repository](https://github.com/TheHolyOneZ/discord-bot-framework) | [Website](https://zsync.eu/zdbf/) | Discord = gg/sgZnXca5ts
+
 
 
 ---

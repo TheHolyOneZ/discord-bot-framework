@@ -1382,10 +1382,11 @@ echo json_encode([
                 core_settings = {
                     "auto_reload": bool(self.bot.config.get("auto_reload", False)),
                     "extensions_auto_load": bool(self.bot.config.get("extensions.auto_load", True)),
+                    "bot_status": self.bot.config.get("status", {}),
                 }
                 fw_section = self.bot.config.get("framework", {}) or {}
                 framework_info = {
-                    "version": "1.7.1.0",
+                    "version": "1.7.2.0",
                     "recommended_python": fw_section.get("recommended_python", "3.12.7"),
                     "python_runtime": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
                     "docs_url": "https://zsync.eu/zdbf",
@@ -2386,6 +2387,46 @@ echo json_encode([
                 if slash_limiter_cog and hasattr(slash_limiter_cog, "DEBUG_MODE"):
                     slash_limiter_cog.DEBUG_MODE = enabled
                     self._log_event("slash_limiter_debug_updated", {"enabled": enabled})
+            
+            elif cmd_type == "set_bot_status":
+                statuses = params.get("statuses", [])
+                interval = params.get("interval", 30)
+                try:
+                    if hasattr(self.bot, "config") and self.bot.config is not None:
+                        # Stop the task before making changes
+                        if hasattr(self.bot, 'status_update_task') and self.bot.status_update_task.is_running():
+                            self.bot.status_update_task.cancel()
+
+                        current_status = self.bot.config.get("status", {})
+                        current_status["statuses"] = statuses
+                        
+                        # Enforce 15s minimum interval for safety
+                        safe_interval = max(15, int(interval))
+                        current_status["interval"] = safe_interval
+                        
+                        await self.bot.config.set("status", current_status)
+                        logger.info(f"Live Monitor: Updated bot status rotation configuration. Interval set to {safe_interval}s.")
+                        self._log_event("bot_status_updated", {"interval": safe_interval, "statuses_count": len(statuses)})
+
+                        # Apply the new interval and restart the task
+                        if hasattr(self.bot, 'status_update_task'):
+                            self.bot.status_update_task.change_interval(seconds=safe_interval)
+                            self.bot.status_update_task.start()
+                            logger.info("Restarted status_update_task with new interval.")
+
+                except Exception as e:
+                    logger.error(f"Live Monitor: Failed to update bot status: {e}")
+
+            elif cmd_type == "set_log_status_updates":
+                enabled = bool(params.get("enabled"))
+                try:
+                    if hasattr(self.bot, "config") and self.bot.config is not None:
+                        current_status = self.bot.config.get("status", {})
+                        current_status["log_status_updates"] = enabled
+                        await self.bot.config.set("status", current_status)
+                        self._log_event("log_status_updates_toggled", {"enabled": enabled})
+                except Exception as e:
+                    logger.error(f"Live Monitor: Failed to toggle status update logging: {e}")
             
             elif cmd_type == "set_auto_reload":
                 enabled = bool(params.get("enabled"))
@@ -19686,11 +19727,99 @@ if (typeof window !== 'undefined') {
             setTimeout(loadData, 1500);
         };
 
+        window.toggleStatusLogging = function(checkbox) {
+            sendCommand('set_log_status_updates', { enabled: checkbox.checked });
+        };
+
         window.toggleExtensionsAutoLoad = () => {
             const current = currentData?.core_settings?.extensions_auto_load ? true : false;
             const next = !current;
             sendCommand('set_extensions_auto_load', { enabled: next });
             showNotification(`Extensions auto-load on startup ${next ? 'enabled' : 'disabled'}`, 'info');
+            setTimeout(loadData, 1500);
+        };
+
+        window.isEditingBotStatus = false;
+        window.botStatusEditTimeout = null;
+        
+        window.markEditingBotStatus = () => {
+            window.isEditingBotStatus = true;
+            if (window.botStatusEditTimeout) {
+                clearTimeout(window.botStatusEditTimeout);
+            }
+            // 20 minutes timeout
+            window.botStatusEditTimeout = setTimeout(() => {
+                window.isEditingBotStatus = false;
+                loadData();
+            }, 20 * 60 * 1000);
+        };
+
+        window.currentBotStatuses = [];
+        
+        window.renderBotStatusEditor = () => {
+            const container = document.getElementById('bot-status-list-container');
+            if (!container) return;
+            
+            if (window.currentBotStatuses.length === 0) {
+                container.innerHTML = '<div style="color: #94a3b8; font-size: 13px; font-style: italic; padding: 10px 0;">No statuses configured. Click Add Status to create one.</div>';
+                return;
+            }
+            
+            container.innerHTML = window.currentBotStatuses.map((status, index) => {
+                const presenceOptions = ['online', 'dnd', 'idle', 'invisible'].map(p => 
+                    `<option value="${p}" ${status.presence === p ? 'selected' : ''}>${p.charAt(0).toUpperCase() + p.slice(1)}</option>`
+                ).join('');
+                
+                const typeOptions = ['playing', 'watching', 'listening', 'competing', 'streaming', 'custom'].map(t => 
+                    `<option value="${t}" ${status.type === t ? 'selected' : ''}>${t.charAt(0).toUpperCase() + t.slice(1)}</option>`
+                ).join('');
+                
+                return `
+                <div class="sys-status-row" style="display: flex; gap: 8px; margin-bottom: 8px; align-items: center; background: rgba(0,0,0,0.15); padding: 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.05);">
+                    <div style="display:flex; flex-direction:column; gap:6px; flex: 1;">
+                        <div style="display:flex; gap:8px;">
+                            <select class="sys-input" onfocus="window.markEditingBotStatus()" onchange="window.currentBotStatuses[${index}].presence = this.value; window.markEditingBotStatus()" style="width: 120px; padding: 6px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.1); background: rgba(0,0,0,0.3); color: #fff;">
+                                ${presenceOptions}
+                            </select>
+                            <select class="sys-input" onfocus="window.markEditingBotStatus()" onchange="window.currentBotStatuses[${index}].type = this.value; window.markEditingBotStatus()" style="width: 120px; padding: 6px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.1); background: rgba(0,0,0,0.3); color: #fff;">
+                                ${typeOptions}
+                            </select>
+                        </div>
+                        <input type="text" value="${status.text || ''}" onfocus="window.markEditingBotStatus()" oninput="window.markEditingBotStatus()" onchange="window.currentBotStatuses[${index}].text = this.value; window.markEditingBotStatus()" placeholder="Status text e.g. {guilds} servers" style="width: 100%; padding: 6px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.1); background: rgba(0,0,0,0.3); color: #fff; box-sizing: border-box;">
+                    </div>
+                    <button class="sys-btn sys-btn-danger" style="padding: 6px 10px; height: fit-content;" onclick="window.markEditingBotStatus(); window.removeBotStatus(${index})" title="Remove">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                    </button>
+                </div>
+                `;
+            }).join('');
+        };
+        
+        window.addBotStatus = () => {
+            window.markEditingBotStatus();
+            window.currentBotStatuses.push({ presence: 'online', type: 'watching', text: '' });
+            window.renderBotStatusEditor();
+        };
+        
+        window.removeBotStatus = (index) => {
+            window.markEditingBotStatus();
+            window.currentBotStatuses.splice(index, 1);
+            window.renderBotStatusEditor();
+        };
+
+        window.saveBotStatus = () => {
+            const intervalEl = document.getElementById('bot-status-interval');
+            if(!intervalEl) return;
+            
+            const interval = parseInt(intervalEl.value, 10) || 30;
+            const statuses = window.currentBotStatuses.filter(s => s.text && s.text.trim() !== '');
+            
+            sendCommand('set_bot_status', { interval, statuses });
+            showNotification('Bot status rotation updated', 'success');
+            
+            window.isEditingBotStatus = false;
+            if (window.botStatusEditTimeout) clearTimeout(window.botStatusEditTimeout);
+            
             setTimeout(loadData, 1500);
         };
 
@@ -19799,6 +19928,7 @@ if (typeof window !== 'undefined') {
         }
 
         function renderSystemDetails(data) {
+            if (window.isEditingBotStatus) return;
             const container = document.getElementById('system-details');
             
             // Helper for status colors
@@ -19939,6 +20069,60 @@ if (typeof window !== 'undefined') {
                 );
             }
             
+            // Bot Status Configuration Card
+            if (data.core_settings && data.core_settings.bot_status) {
+                const bs = data.core_settings.bot_status;
+                const bsInterval = bs.interval || 300;
+                let statusesList = bs.statuses || [];
+                if (statusesList.length === 0 && bs.text) statusesList = [bs];
+                
+                window.currentBotStatuses = statusesList.map(s => ({
+                    presence: s.presence || 'online',
+                    type: s.type || 'watching',
+                    text: s.text || ''
+                }));
+                
+                const variablesHelp = '<div style="margin-bottom: 12px; font-size: 12px; color: #94a3b8; background: rgba(0,0,0,0.2); padding: 8px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.05);">' +
+                    '<strong style="color: #fff;">Available Variables:</strong> <code style="color: #a855f7;">{guilds}</code>, <code style="color: #a855f7;">{users}</code>, <code style="color: #a855f7;">{commands}</code>' +
+                    '</div>';
+                
+                const logToggle = '<div class="sys-toggle-item" style="display: flex; align-items: center; justify-content: flex-start; padding: 8px 0; margin-top: 10px;">' +
+                    '<label class="sys-toggle-switch" style="display: flex; align-items: center;">' +
+                        '<input type="checkbox" ' + (bs.log_status_updates === true ? 'checked' : '') + ' onchange="toggleStatusLogging(this)">' +
+                        '<span class="sys-toggle-slider"></span>' +
+                    '</label>' +
+                    '<span class="sys-toggle-label" style="margin-left: 12px; font-size: 12px; margin-top: 1px;">Log Status Updates</span>' +
+                '</div>';
+                    
+                cards += buildCard(
+                    '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',
+                    'Bot Status Configuration',
+                    '#ec4899',
+                    `
+                    <style>
+                        .no-spinner::-webkit-outer-spin-button,
+                        .no-spinner::-webkit-inner-spin-button {
+                            -webkit-appearance: none;
+                            margin: 0;
+                        }
+                        .no-spinner {
+                            -moz-appearance: textfield;
+                        }
+                    </style>
+                ` +
+                    variablesHelp +
+                    '<div class="sys-prop" style="margin-bottom: 4px;"><span class="sys-prop-label">Rotation Interval (seconds)</span></div>' +
+                    '<input type="number" id="bot-status-interval" class="no-spinner" value="' + bsInterval + '" onfocus="window.markEditingBotStatus()" oninput="window.markEditingBotStatus()" style="width: 100%; margin-bottom: 16px; padding: 6px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.1); background: rgba(0,0,0,0.2); color: #fff; box-sizing: border-box;">' +
+                    logToggle +
+                    '<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 8px; margin-top: 16px;">' +
+                        '<span class="sys-prop-label">Status Rotation List</span>' +
+                        '<button class="sys-btn" style="padding: 4px 8px; font-size: 11px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); color: #fff;" onclick="window.addBotStatus()">+ Add Status</button>' +
+                    '</div>' +
+                    '<div id="bot-status-list-container" style="max-height: 250px; overflow-y: auto; margin-bottom: 12px; padding-right: 4px;"></div>',
+                    buildBtn('Save Status Config', 'saveBotStatus()', 'primary')
+                );
+            }
+            
             // Atomic FS Card (spans full width)
             let atomicCard = '';
             if (data.atomic_fs) {
@@ -19988,6 +20172,9 @@ if (typeof window !== 'undefined') {
             }
             
             container.innerHTML = '<div class="sys-grid">' + cards + '</div>' + atomicCard;
+            if (typeof window.renderBotStatusEditor === 'function' && document.getElementById('bot-status-list-container')) {
+                window.renderBotStatusEditor();
+            }
             
             // Attach lock control handlers
             container.querySelectorAll('.af-invalidate-lock').forEach(btn => {
