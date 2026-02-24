@@ -432,36 +432,72 @@ class BotFrameWork(commands.AutoShardedBot):
     
     @tasks.loop(minutes=5)
     async def status_update_task(self):
-        status_config = self.config.get("status", {})
-        status_text = status_config.get("text", "{guilds} servers")
-        status_type = status_config.get("type", "watching")
-        
-        text = status_text.format(
-            guilds=len(self.guilds),
-            users=len(self.users),
-            commands=len(self.commands)
-        )
-        
-        activity_map = {
-            "playing": discord.ActivityType.playing,
-            "watching": discord.ActivityType.watching,
-            "listening": discord.ActivityType.listening,
-            "competing": discord.ActivityType.competing
-        }
-        
-        activity_type = activity_map.get(status_type.lower(), discord.ActivityType.watching)
-        activity = discord.Activity(type=activity_type, name=text)
-        await self.change_presence(activity=activity)
+        try:
+            with open("config.json", 'r', encoding='utf-8') as f:
+                import json
+                full_config = json.load(f)
+            status_config = full_config.get("status", {})
+
+            statuses = status_config.get("statuses", [])
+            if statuses and isinstance(statuses, list) and len(statuses) > 0:
+                if not hasattr(self, '_status_index'):
+                    self._status_index = 0
+                if self._status_index >= len(statuses):
+                    self._status_index = 0
+
+                current_status = statuses[self._status_index]
+                status_text = current_status.get("text", "{guilds} servers")
+                status_type = current_status.get("type", "watching")
+                status_presence = current_status.get("presence", "online")
+
+                if status_config.get("log_status_updates", False):
+                    logger.info(f"Rotating status to index {self._status_index}: {status_type} '{status_text}' (Presence: {status_presence})")
+
+                self._status_index += 1
+            else:
+                status_text = status_config.get("text", "{guilds} servers")
+                status_type = status_config.get("type", "watching")
+                status_presence = status_config.get("presence", "online")
+
+            text = status_text.format(
+                guilds=len(self.guilds),
+                users=len(self.users),
+                commands=len(self.commands)
+            )
+
+            activity_map = {
+                "playing": discord.ActivityType.playing,
+                "watching": discord.ActivityType.watching,
+                "listening": discord.ActivityType.listening,
+                "competing": discord.ActivityType.competing,
+                "streaming": discord.ActivityType.streaming
+            }
+
+            if status_type.lower() == "custom":
+                activity = discord.CustomActivity(name=text)
+            else:
+                activity_type = activity_map.get(status_type.lower(), discord.ActivityType.watching)
+                activity = discord.Activity(type=activity_type, name=text)
+
+            presence_map = {
+                "online": discord.Status.online,
+                "dnd": discord.Status.dnd,
+                "idle": discord.Status.idle,
+                "invisible": discord.Status.invisible
+            }
+            presence_status = presence_map.get(status_presence.lower(), discord.Status.online)
+
+            await self.change_presence(activity=activity, status=presence_status)
+        except Exception as e:
+            logger.error(f"Error in status_update_task: {e}", exc_info=True)
     
     @status_update_task.before_loop
     async def before_status_update(self):
         await self.wait_until_ready()
     
     async def get_prefix(self, message: discord.Message):
-        # Determine the base prefix (guild-specific or global)
         if not message.guild:
             base_prefix = self.config.get("prefix", "!")
-            # For DMs, use global config setting
             allow_mention = self.config.get("allow_mention_prefix", True)
         else:
             cached_prefix = await self.prefix_cache.get(message.guild.id)
@@ -472,18 +508,13 @@ class BotFrameWork(commands.AutoShardedBot):
                 base_prefix = custom_prefix if custom_prefix else self.config.get("prefix", "!")
                 await self.prefix_cache.set(message.guild.id, base_prefix)
             
-            # Check per-guild mention prefix setting (falls back to global config)
             allow_mention = await self.db.get_guild_mention_prefix_enabled(message.guild.id)
             if allow_mention is None:
-                # No guild setting, use global config
                 allow_mention = self.config.get("allow_mention_prefix", True)
         
-        # Add mention prefix support if enabled
         if allow_mention:
-            # Return both mention and regular prefix
             return commands.when_mentioned_or(base_prefix)(self, message)
         else:
-            # Return only the regular prefix
             return base_prefix
     
     async def sync_commands(self, force: bool = False):
@@ -527,7 +558,6 @@ class BotFrameWork(commands.AutoShardedBot):
         if hasattr(self, 'db_maintenance_task'):
             self.db_maintenance_task.cancel()
         
-        # Gracefully unload shard manager IPC before closing
         shard_manager_cog = self.get_cog("ShardManager")
         if shard_manager_cog:
             try:
@@ -852,14 +882,11 @@ async def help_command(ctx):
     if isinstance(prefix, list):
         prefix = prefix[0]
     
-    # Build prefix info string - check per-guild setting
     if ctx.guild:
         allow_mention = await bot.db.get_guild_mention_prefix_enabled(ctx.guild.id)
         if allow_mention is None:
-            # No guild setting, use global config
             allow_mention = bot.config.get("allow_mention_prefix", True)
     else:
-        # DM, use global config
         allow_mention = bot.config.get("allow_mention_prefix", True)
     
     if allow_mention:
@@ -2441,14 +2468,11 @@ class BackButton(discord.ui.Button):
         
         total_categories = len(categories)
         
-        # Build prefix info string - check per-guild setting
         if interaction.guild:
             allow_mention = await interaction.client.db.get_guild_mention_prefix_enabled(interaction.guild.id)
             if allow_mention is None:
-                # No guild setting, use global config
                 allow_mention = interaction.client.config.get("allow_mention_prefix", True)
         else:
-            # DM, use global config
             allow_mention = interaction.client.config.get("allow_mention_prefix", True)
         
         if allow_mention:
