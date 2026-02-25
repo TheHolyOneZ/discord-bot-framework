@@ -1,21 +1,14 @@
-# What's New in Version 1.7.2.0
+## [Patch] - 2026-02-25
 
-This update introduces a comprehensive **Bot Status Configuration** system, fully integrated into the Live Monitor web dashboard. This feature allows for dynamic, multi-status rotation with customizable variables, providing a more engaging and informative presence for your bot on Discord.
+### Fixed
 
----
+#### `cogs/EventHooksCreater.py` — Async I/O fix
+- `_save_analytics()` was a synchronous function called from an async background task (`analytics_task`, runs every 5 minutes). Using `open()` + `json.dump()` in a sync function inside an async context blocks the entire event loop until the write finishes — meaning the bot cannot process any messages, commands, or Discord heartbeats during that time.
+- `_save_created_hooks()` had the same problem and is called in over a dozen places across async event handlers and command callbacks.
+- **Fix:** Both functions converted to `async def` using `aiofiles`. All 13 call sites updated to `await self._save_created_hooks()`. `analytics_task` updated to `await self._save_analytics()`.
+- Behaviour is identical — hooks and analytics are still saved to the same JSON files at the same times. Only the I/O is now non-blocking.
 
-## Bot Status Configuration — Now in the Dashboard
-
-The new **Bot Status Configuration** card, located in the **System tab** of the Live Monitor dashboard, provides complete control over your bot's presence.
-
-### Key Features
-
-- **Multi-Status Rotator:** Create a list of different statuses for your bot to cycle through. Each status can have its own text, type (playing, watching, listening), and presence (online, idle, dnd).
-- **Customizable Interval:** Set the rotation interval in seconds to control how frequently the bot's status updates.
-- **Dynamic Variables:** Use variables like `{guilds}`, `{users}`, and `{commands}` in your status text, which will be automatically replaced with real-time data.
-- **Live Editing:** Add, edit, and delete statuses directly from the dashboard. Changes are saved and applied instantly without needing to restart the bot.
-- **Log Toggling:** A new toggle allows you to enable or disable logging for status updates, helping you monitor the rotator's activity in your bot's console.
-- **Intuitive UI:** The interface provides clear input fields for status type, text, and presence, making it easy to configure complex rotations.
-
-This new system replaces the previous static status configuration, offering a much more flexible and powerful way to manage your bot's presence.
-
+#### `cogs/GeminiService.py` — Path traversal fix
+- The `/ask_zdbf` command's `file` and `extension` actions sanitized user-supplied file paths using `file.lstrip("./\\").replace("..", "")`. This was incorrect: `lstrip` strips individual characters from the left edge, not a literal prefix. A path like `cogs/../config.json` would survive the sanitization and resolve to `cogs/config.json`, potentially exposing files outside the intended scope.
+- **Fix:** Replaced the string manipulation with `Path.resolve()` + `Path.relative_to()`. The resolved absolute path is checked to be inside the allowed directory (bot root for `file` action, `extensions/` for `extension` action) before the file is opened. If the path escapes the boundary, the command returns a clear access denied message.
+- Behaviour for valid paths is identical. Paths that previously slipped through are now blocked.
