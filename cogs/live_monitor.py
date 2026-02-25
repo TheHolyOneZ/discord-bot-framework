@@ -16291,7 +16291,8 @@ if (typeof window !== 'undefined') {
                 disableButton('button[onclick*="generate_framework_diagnostics"]', 'action_generate_diagnostics', 'control_core');
                 disableButton('button[onclick*="af_invalidate_cache_entry"]', 'action_invalidate_cache', 'control_core');
                 disableButton('button[onclick*="af_force_release_lock"]', 'action_force_release_lock', 'control_core');
-                
+                disableButton('button[onclick*="saveBotStatus"]', 'action_control_bot_status_config', 'control_core');
+
                 // Force button in file locks section
                 document.querySelectorAll('.af-release-lock').forEach(btn => {
                     const allowed = hasPermission('action_force_release_lock', 'control_core');
@@ -19728,6 +19729,11 @@ if (typeof window !== 'undefined') {
         };
 
         window.toggleStatusLogging = function(checkbox) {
+            if (!hasPermission('action_control_bot_status_config')) {
+                showNotification('You do not have permission to change bot status settings', 'error');
+                checkbox.checked = !checkbox.checked;
+                return;
+            }
             sendCommand('set_log_status_updates', { enabled: checkbox.checked });
         };
 
@@ -19759,35 +19765,36 @@ if (typeof window !== 'undefined') {
         window.renderBotStatusEditor = () => {
             const container = document.getElementById('bot-status-list-container');
             if (!container) return;
-            
+            const canEdit = hasPermission('action_control_bot_status_config');
+
             if (window.currentBotStatuses.length === 0) {
                 container.innerHTML = '<div style="color: #94a3b8; font-size: 13px; font-style: italic; padding: 10px 0;">No statuses configured. Click Add Status to create one.</div>';
                 return;
             }
-            
+
             container.innerHTML = window.currentBotStatuses.map((status, index) => {
-                const presenceOptions = ['online', 'dnd', 'idle', 'invisible'].map(p => 
+                const presenceOptions = ['online', 'dnd', 'idle', 'invisible'].map(p =>
                     `<option value="${p}" ${status.presence === p ? 'selected' : ''}>${p.charAt(0).toUpperCase() + p.slice(1)}</option>`
                 ).join('');
-                
-                const typeOptions = ['playing', 'watching', 'listening', 'competing', 'streaming', 'custom'].map(t => 
+
+                const typeOptions = ['playing', 'watching', 'listening', 'competing', 'streaming', 'custom'].map(t =>
                     `<option value="${t}" ${status.type === t ? 'selected' : ''}>${t.charAt(0).toUpperCase() + t.slice(1)}</option>`
                 ).join('');
-                
+
                 return `
                 <div class="sys-status-row" style="display: flex; gap: 8px; margin-bottom: 8px; align-items: center; background: rgba(0,0,0,0.15); padding: 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.05);">
                     <div style="display:flex; flex-direction:column; gap:6px; flex: 1;">
                         <div style="display:flex; gap:8px;">
-                            <select class="sys-input" onfocus="window.markEditingBotStatus()" onchange="window.currentBotStatuses[${index}].presence = this.value; window.markEditingBotStatus()" style="width: 120px; padding: 6px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.1); background: rgba(0,0,0,0.3); color: #fff;">
+                            <select class="sys-input" ${canEdit ? `onfocus="window.markEditingBotStatus()" onchange="window.currentBotStatuses[${index}].presence = this.value; window.markEditingBotStatus()"` : 'disabled'} style="width: 120px; padding: 6px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.1); background: rgba(0,0,0,0.3); color: #fff; ${canEdit ? '' : 'opacity:0.5;cursor:not-allowed;'}">
                                 ${presenceOptions}
                             </select>
-                            <select class="sys-input" onfocus="window.markEditingBotStatus()" onchange="window.currentBotStatuses[${index}].type = this.value; window.markEditingBotStatus()" style="width: 120px; padding: 6px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.1); background: rgba(0,0,0,0.3); color: #fff;">
+                            <select class="sys-input" ${canEdit ? `onfocus="window.markEditingBotStatus()" onchange="window.currentBotStatuses[${index}].type = this.value; window.markEditingBotStatus()"` : 'disabled'} style="width: 120px; padding: 6px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.1); background: rgba(0,0,0,0.3); color: #fff; ${canEdit ? '' : 'opacity:0.5;cursor:not-allowed;'}">
                                 ${typeOptions}
                             </select>
                         </div>
-                        <input type="text" value="${status.text || ''}" onfocus="window.markEditingBotStatus()" oninput="window.markEditingBotStatus()" onchange="window.currentBotStatuses[${index}].text = this.value; window.markEditingBotStatus()" placeholder="Status text e.g. {guilds} servers" style="width: 100%; padding: 6px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.1); background: rgba(0,0,0,0.3); color: #fff; box-sizing: border-box;">
+                        <input type="text" value="${status.text || ''}" ${canEdit ? `onfocus="window.markEditingBotStatus()" oninput="window.markEditingBotStatus()" onchange="window.currentBotStatuses[${index}].text = this.value; window.markEditingBotStatus()"` : 'disabled'} placeholder="Status text e.g. {guilds} servers" style="width: 100%; padding: 6px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.1); background: rgba(0,0,0,0.3); color: #fff; box-sizing: border-box; ${canEdit ? '' : 'opacity:0.5;cursor:not-allowed;'}">
                     </div>
-                    <button class="sys-btn sys-btn-danger" style="padding: 6px 10px; height: fit-content;" onclick="window.markEditingBotStatus(); window.removeBotStatus(${index})" title="Remove">
+                    <button class="sys-btn sys-btn-danger" style="padding: 6px 10px; height: fit-content; ${canEdit ? '' : 'opacity:0.5;cursor:not-allowed;'}" ${canEdit ? `onclick="window.markEditingBotStatus(); window.removeBotStatus(${index})"` : 'disabled'} title="Remove">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
                     </button>
                 </div>
@@ -19796,18 +19803,30 @@ if (typeof window !== 'undefined') {
         };
         
         window.addBotStatus = () => {
+            if (!hasPermission('action_control_bot_status_config')) {
+                showNotification('You do not have permission to modify bot status', 'error');
+                return;
+            }
             window.markEditingBotStatus();
             window.currentBotStatuses.push({ presence: 'online', type: 'watching', text: '' });
             window.renderBotStatusEditor();
         };
         
         window.removeBotStatus = (index) => {
+            if (!hasPermission('action_control_bot_status_config')) {
+                showNotification('You do not have permission to modify bot status', 'error');
+                return;
+            }
             window.markEditingBotStatus();
             window.currentBotStatuses.splice(index, 1);
             window.renderBotStatusEditor();
         };
 
         window.saveBotStatus = () => {
+            if (!hasPermission('action_control_bot_status_config')) {
+                showNotification('You do not have permission to save bot status configuration', 'error');
+                return;
+            }
             const intervalEl = document.getElementById('bot-status-interval');
             if(!intervalEl) return;
             
@@ -20082,13 +20101,15 @@ if (typeof window !== 'undefined') {
                     text: s.text || ''
                 }));
                 
+                const canEdit = hasPermission('action_control_bot_status_config');
+
                 const variablesHelp = '<div style="margin-bottom: 12px; font-size: 12px; color: #94a3b8; background: rgba(0,0,0,0.2); padding: 8px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.05);">' +
                     '<strong style="color: #fff;">Available Variables:</strong> <code style="color: #a855f7;">{guilds}</code>, <code style="color: #a855f7;">{users}</code>, <code style="color: #a855f7;">{commands}</code>' +
                     '</div>';
-                
+
                 const logToggle = '<div class="sys-toggle-item" style="display: flex; align-items: center; justify-content: flex-start; padding: 8px 0; margin-top: 10px;">' +
                     '<label class="sys-toggle-switch" style="display: flex; align-items: center;">' +
-                        '<input type="checkbox" ' + (bs.log_status_updates === true ? 'checked' : '') + ' onchange="toggleStatusLogging(this)">' +
+                        '<input type="checkbox" ' + (bs.log_status_updates === true ? 'checked' : '') + (canEdit ? ' onchange="toggleStatusLogging(this)"' : ' disabled style="opacity:0.5;cursor:not-allowed;"') + '>' +
                         '<span class="sys-toggle-slider"></span>' +
                     '</label>' +
                     '<span class="sys-toggle-label" style="margin-left: 12px; font-size: 12px; margin-top: 1px;">Log Status Updates</span>' +
@@ -20112,17 +20133,17 @@ if (typeof window !== 'undefined') {
                 ` +
                     variablesHelp +
                     '<div class="sys-prop" style="margin-bottom: 4px;"><span class="sys-prop-label">Rotation Interval (seconds)</span></div>' +
-                    '<input type="number" id="bot-status-interval" class="no-spinner" value="' + bsInterval + '" onfocus="window.markEditingBotStatus()" oninput="window.markEditingBotStatus()" style="width: 100%; margin-bottom: 16px; padding: 6px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.1); background: rgba(0,0,0,0.2); color: #fff; box-sizing: border-box;">' +
+                    '<input type="number" id="bot-status-interval" class="no-spinner" value="' + bsInterval + '" ' + (canEdit ? 'onfocus="window.markEditingBotStatus()" oninput="window.markEditingBotStatus()"' : 'disabled') + ' style="width: 100%; margin-bottom: 16px; padding: 6px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.1); background: rgba(0,0,0,0.2); color: #fff; box-sizing: border-box; ' + (canEdit ? '' : 'opacity:0.5;cursor:not-allowed;') + '">' +
                     logToggle +
                     '<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 8px; margin-top: 16px;">' +
                         '<span class="sys-prop-label">Status Rotation List</span>' +
-                        '<button class="sys-btn" style="padding: 4px 8px; font-size: 11px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); color: #fff;" onclick="window.addBotStatus()">+ Add Status</button>' +
+                        '<button class="sys-btn" style="padding: 4px 8px; font-size: 11px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); color: #fff;' + (canEdit ? '' : 'opacity:0.5;cursor:not-allowed;') + '" ' + (canEdit ? 'onclick="window.addBotStatus()"' : 'disabled') + '>+ Add Status</button>' +
                     '</div>' +
                     '<div id="bot-status-list-container" style="max-height: 250px; overflow-y: auto; margin-bottom: 12px; padding-right: 4px;"></div>',
-                    buildBtn('Save Status Config', 'saveBotStatus()', 'primary')
+                    (canEdit ? buildBtn('Save Status Config', 'saveBotStatus()', 'primary') : '<button class="sys-btn sys-btn-primary" disabled style="opacity:0.5;cursor:not-allowed;" title="Requires action_control_bot_status_config permission">Save Status Config</button>')
                 );
             }
-            
+
             // Atomic FS Card (spans full width)
             let atomicCard = '';
             if (data.atomic_fs) {
@@ -20518,6 +20539,7 @@ if (typeof window !== 'undefined') {
                 // Shard Manager Actions
                 { key: 'action_view_shard_details', label: 'View Shard Details' },
                 { key: 'action_reset_shard_metrics', label: 'Reset Shard Metrics' },
+                { key: 'action_control_bot_status_config', label: 'Control Bot Status Config' },
                 /* DASHBOARD_PLUGINS_ACTION_PERMS_PLACEHOLDER */
             ];
 
@@ -25286,11 +25308,12 @@ function lm_default_permissions_for_tier(string $tier): array {
                 'action_edit_file' => true,
                 'action_save_file' => true,
                 
-                // ACTION PERMISSIONS - System Actions (4)
+                // ACTION PERMISSIONS - System Actions (5)
                 'action_shutdown_bot' => true,
                 'action_generate_diagnostics' => true,
                 'action_invalidate_cache' => true,
                 'action_force_release_lock' => true,
+                'action_control_bot_status_config' => true,
                 
                 // ACTION PERMISSIONS - Chat Actions (1)
                 'action_send_message' => true,
@@ -25405,6 +25428,7 @@ function lm_default_permissions_for_tier(string $tier): array {
                 'action_generate_diagnostics' => false,
                 'action_invalidate_cache' => false,
                 'action_force_release_lock' => false,
+                'action_control_bot_status_config' => false,
                 'action_send_message' => false,
                 'action_request_chat_data' => false,
                 'action_view_ticket' => false,
@@ -29103,7 +29127,10 @@ function lm_command_allowed_for_permissions(string $command, array $perms): bool
             return !empty($perms['action_invalidate_cache']);
         case 'af_force_release_lock':
             return !empty($perms['action_force_release_lock']);
-        
+        case 'set_bot_status':
+        case 'set_log_status_updates':
+            return !empty($perms['action_control_bot_status_config']);
+
         // Chat Actions
         case 'send_chat_message':
             return !empty($perms['action_send_message']);
