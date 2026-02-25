@@ -41,6 +41,7 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 import os
+from pathlib import Path
 import google.generativeai as genai
 from dotenv import load_dotenv
 from atomic_file_system import AtomicFileHandler, SafeDatabaseManager
@@ -430,22 +431,31 @@ class GeminiService(commands.Cog):
                 if not file:
                     return await interaction.followup.send(f"You must provide a filename for the `{action}` action.", ephemeral=True)
                 
-                base_path = "extensions/" if action == "extension" else ""
-                
+                bot_dir = Path(os.getcwd()).resolve()
+                allowed_base = (bot_dir / "extensions").resolve() if action == "extension" else bot_dir
 
-                safe_filename = file.lstrip("./\\").replace("..", "")
-                file_path = os.path.join(base_path, safe_filename)
-                
-                if not os.path.exists(file_path):
-                    return await interaction.followup.send(f"File not found: `{file_path}`", ephemeral=True)
+                try:
+                    file_path = (bot_dir / file).resolve()
+                except Exception:
+                    return await interaction.followup.send("❌ Invalid file path.", ephemeral=True)
+
+                try:
+                    file_path.relative_to(allowed_base)
+                except ValueError:
+                    return await interaction.followup.send(
+                        "❌ Access denied: that path is outside the allowed directory.", ephemeral=True
+                    )
+
+                if not file_path.exists():
+                    return await interaction.followup.send(f"File not found: `{file}`", ephemeral=True)
 
                 try:
                     async with aiofiles.open(file_path, "r", encoding="utf-8") as f:
                         file_content = await f.read()
-                    context = f"Here is the content of the file `{file_path}`:\n\n```python\n{file_content}\n```"
-                    final_query = query or f"Explain the purpose of the file `{file_path}`."
+                    context = f"Here is the content of the file `{file_path.relative_to(bot_dir)}`:\n\n```python\n{file_content}\n```"
+                    final_query = query or f"Explain the purpose of the file `{file}`."
                 except Exception as e:
-                    return await interaction.followup.send(f"Error reading file `{file_path}`: {e}", ephemeral=True)
+                    return await interaction.followup.send(f"Error reading file `{file}`: {e}", ephemeral=True)
 
             elif action == "readme":
                 if not query:

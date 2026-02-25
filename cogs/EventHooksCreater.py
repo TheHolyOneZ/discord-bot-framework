@@ -9,6 +9,7 @@ import asyncio
 import re
 from collections import defaultdict
 import aiohttp
+import aiofiles
 import random
 import secrets
 
@@ -113,16 +114,17 @@ class EventHooksCreater(commands.Cog):
                 return {}
         return {}
     
-    def _save_analytics(self):
+    async def _save_analytics(self):
         try:
-            with open(self.analytics_file, 'w') as f:
-                json.dump(self._analytics, f, indent=2)
+            content = json.dumps(self._analytics, indent=2)
+            async with aiofiles.open(self.analytics_file, 'w', encoding='utf-8') as f:
+                await f.write(content)
         except Exception as e:
             logger.error(f"Failed to save analytics: {e}")
-    
+
     @tasks.loop(minutes=5)
     async def analytics_task(self):
-        self._save_analytics()
+        await self._save_analytics()
     
     def _track_execution(self, hook_id: str, success: bool = True, context: Dict = None):
         if hook_id not in self._analytics:
@@ -759,16 +761,17 @@ class EventHooksCreater(commands.Cog):
                 logger.error(f"EventHooksCreater: Failed to load hooks: {e}")
         return []
     
-    def _save_created_hooks(self):
+    async def _save_created_hooks(self):
         try:
             # Create a copy without handler functions (not JSON serializable)
             serializable_hooks = []
             for hook in self.created_hooks:
                 hook_copy = {k: v for k, v in hook.items() if not k.startswith('_')}
                 serializable_hooks.append(hook_copy)
-            
-            with open(self.config_file, 'w') as f:
-                json.dump(serializable_hooks, f, indent=4)
+
+            content = json.dumps(serializable_hooks, indent=4)
+            async with aiofiles.open(self.config_file, 'w', encoding='utf-8') as f:
+                await f.write(content)
         except Exception as e:
             logger.error(f"EventHooksCreater: Failed to save hooks: {e}")
     
@@ -833,13 +836,13 @@ class EventHooksCreater(commands.Cog):
                     
                     self._track_execution(hook["hook_id"], success=True, context={"user_id": member.id, "guild_id": member.guild.id})
                     hook["execution_count"] = hook.get("execution_count", 0) + 1
-                    self._save_created_hooks()
+                    await self._save_created_hooks()
                     
                 except Exception as e:
                     hook["error_count"] = hook.get("error_count", 0) + 1
                     logger.error(f"Mega welcome error: {e}")
                     self._track_execution(hook["hook_id"], success=False)
-                    self._save_created_hooks()
+                    await self._save_created_hooks()
             
             self.bot.add_listener(mega_welcome_handler, "on_member_join")
             hook["_handler"] = mega_welcome_handler
@@ -875,13 +878,13 @@ class EventHooksCreater(commands.Cog):
                     
                     self._track_execution(hook["hook_id"], success=True, context={"user_id": member.id, "guild_id": member.guild.id})
                     hook["execution_count"] = hook.get("execution_count", 0) + 1
-                    self._save_created_hooks()
+                    await self._save_created_hooks()
                     
                 except Exception as e:
                     hook["error_count"] = hook.get("error_count", 0) + 1
                     logger.error(f"Goodbye system error: {e}")
                     self._track_execution(hook["hook_id"], success=False)
-                    self._save_created_hooks()
+                    await self._save_created_hooks()
             
             self.bot.add_listener(goodbye_handler, "on_member_remove")
             hook["_handler"] = goodbye_handler
@@ -932,14 +935,14 @@ class EventHooksCreater(commands.Cog):
                     if not success:
                         hook["error_count"] = hook.get("error_count", 0) + 1
                     self._track_execution(hook["hook_id"], success=success, context={"user_id": message.author.id, "guild_id": message.guild.id if message.guild else 0})
-                    self._save_created_hooks()
+                    await self._save_created_hooks()
                     
                 except Exception as e:
                     hook["execution_count"] = hook.get("execution_count", 0) + 1
                     hook["error_count"] = hook.get("error_count", 0) + 1
                     logger.error(f"[WEBHOOK_BRIDGE] Error: {e}", exc_info=True)
                     self._track_execution(hook["hook_id"], success=False)
-                    self._save_created_hooks()
+                    await self._save_created_hooks()
             
             self.bot.add_listener(webhook_bridge_handler, "on_message")
             hook["_handler"] = webhook_bridge_handler
@@ -1003,13 +1006,13 @@ class EventHooksCreater(commands.Cog):
                     
                     self._track_execution(hook["hook_id"], success=True, context={"user_id": message.author.id, "guild_id": message.guild.id if message.guild else 0})
                     hook["execution_count"] = hook.get("execution_count", 0) + 1
-                    self._save_created_hooks()
+                    await self._save_created_hooks()
                     
                 except Exception as e:
                     hook["error_count"] = hook.get("error_count", 0) + 1
                     logger.error(f"Message filter error: {e}")
                     self._track_execution(hook["hook_id"], success=False)
-                    self._save_created_hooks()
+                    await self._save_created_hooks()
             
             self.bot.add_listener(message_filter_handler, "on_message")
             hook["_handler"] = message_filter_handler
@@ -1049,13 +1052,13 @@ class EventHooksCreater(commands.Cog):
                     
                     self._track_execution(hook["hook_id"], success=True, context={"user_id": member.id, "guild_id": guild.id})
                     hook["execution_count"] = hook.get("execution_count", 0) + 1
-                    self._save_created_hooks()
+                    await self._save_created_hooks()
                     
                 except Exception as e:
                     hook["error_count"] = hook.get("error_count", 0) + 1
                     logger.error(f"Reaction role error: {e}")
                     self._track_execution(hook["hook_id"], success=False)
-                    self._save_created_hooks()
+                    await self._save_created_hooks()
             
             async def reaction_role_remove_handler(payload):
                 if not hook["params"].get("remove_role_on_unreact", True):
@@ -1148,7 +1151,7 @@ class EventHooksCreater(commands.Cog):
         }
         
         self.created_hooks.append(hook)
-        self._save_created_hooks()
+        asyncio.ensure_future(self._save_created_hooks())
         self._register_hook(hook)
         
         logger.info(f"EventHooksCreater: Created hook {hook_id} ({template['name']}) for guild {guild_id}")
@@ -1162,8 +1165,8 @@ class EventHooksCreater(commands.Cog):
         
         self._unregister_hook(hook)
         self.created_hooks.remove(hook)
-        self._save_created_hooks()
-        
+        asyncio.ensure_future(self._save_created_hooks())
+
         logger.info(f"EventHooksCreater: Deleted hook {hook_id}")
         
         return {"success": True}
@@ -1180,8 +1183,8 @@ class EventHooksCreater(commands.Cog):
             self._register_hook(hook)
             hook["enabled"] = True
         
-        self._save_created_hooks()
-        
+        asyncio.ensure_future(self._save_created_hooks())
+
         logger.info(f"EventHooksCreater: Toggled hook {hook_id} to {hook['enabled']}")
         
         return {"success": True, "enabled": hook["enabled"]}
