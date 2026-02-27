@@ -18,7 +18,7 @@
                 "text": "Cool Right?"
             }
         ],
-        "interval": 30,
+        "interval": 20,
         "log_status_updates": false
     },
     "database": {
