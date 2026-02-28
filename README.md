@@ -22,13 +22,13 @@
 </p>
 
 <p align="center">
-  **✨ NEW FEATURE (v1.7.2.0): Bot Status Rotator**
-  <br>Fully configurable bot status rotation with multiple statuses, custom intervals, and dynamic variables, all manageable from the web dashboard.
+  **✨ NEW (v1.8.0.0): Framework Diagnostics & GeminiService overhaul + Backup completeness**
+  <br>Framework Diagnostics gains persistent alert channel, rolling error-rate window, rolling lag average, `/fw_history`, `/fw_errors`, and more. GeminiService gets real rate-limiting, TTL cache, owner-only file security, and configurable Gemini model. Backup/Restore now fully restores forum channels, stage channels, emojis, stickers, and server settings — with images embedded as base64 at capture time (CDN URLs are no longer relied upon).
 </p>
 
 <p align="center">
-  **✨ PREVIOUS (v1.7.1.0): Advanced Shard System & Backup/Restore**
-  <br>Real-time shard health monitoring with interactive dashboards, IPC-based cross-shard communication, and full guild backup/restore with interactive dashboards — all togglable via .env!
+  **✨ PREVIOUS (v1.7.2.0): Bot Status Rotator**
+  <br>Fully configurable bot status rotation with multiple statuses, custom intervals, and dynamic variables, all manageable from the web dashboard.
 </p>
 
 <p align="center">
@@ -238,23 +238,26 @@ No PHP hosting required • Instant setup • All features included
   - Enable/disable conflict checking
 
 
-**Framework Diagnostics** (`cogs/framework_diagnostics.py`)
+**Framework Diagnostics** (`cogs/framework_diagnostics.py`) — v1.8.0.0
 - Real-time system health monitoring with three-tier status (healthy/degraded/critical)
 - CPU, memory, threads, open files, and connections tracking
-- Command/error rate metrics with automatic calculation
-- Event loop lag monitoring (checks every second)
-- Uptime and latency monitoring
-- Extension load time analysis
-- Automatic diagnostics generation every 5 minutes
-- Alert system with configurable channel (`!fw_alert_channel`)
-- Automatic alerts for:
-  - Critical health status (≥10% error rate)
-  - Degraded health status (≥5% error rate)
-  - Event loop blocking/lag
-  - Consecutive write failures (≥3 failures)
+- **Rolling 1-hour error rate** — computed from a delta of the last 12 × 5-minute snapshots (not lifetime totals); shows `(rolling 1h)` or `(lifetime)` depending on available data
+- **Rolling average loop lag** — averages the last 10 readings to eliminate single-tick jitter; annotated as `(avg 10s)` in the embed
+- **Configurable loop lag threshold** via `FW_LOOP_LAG_THRESHOLD_MS` env var (default: 500 ms)
+- **`bot.metrics` is optional** — all accesses use `getattr` fallbacks; cog loads and runs even if `bot.metrics` is absent
+- Uptime and latency monitoring; extension load time analysis
+- **Persistent alert channel** — saved to `./data/framework_diagnostics_config.json` and restored on restart (no longer needs re-setting after every reboot)
+- Automatic diagnostics run every 5 minutes; alerts sent for critical/degraded health, loop lag, and consecutive write failures
+- **Health check history** — last 48 entries (4 hours) kept in memory and persisted to `./data/framework_health_history.json`
+- **Error history** — last 20 command errors stored in a deque with timestamp and command name
+- **New commands (v1.8.0.0):**
+  - `/fw_history [entries]` — shows last N (1–20) health snapshots with timestamp, status, error rate, loop lag
+  - `/fw_errors` — shows the last 20 command errors recorded in the current session
 - Comprehensive diagnostics saved to JSON files:
-  - `framework_diagnostics.json` - Full system report
-  - `framework_health.json` - Real-time health metrics
+  - `framework_diagnostics.json` — Full system report
+  - `framework_health.json` — Real-time health metrics
+  - `framework_diagnostics_config.json` — Persistent config (alert channel)
+  - `framework_health_history.json` — Persistent health history
 
 **Slash Command Limiter** (`cogs/slash_command_limiter.py`)
 - **Intelligent Discord 100-command limit management with automatic conversion**
@@ -313,25 +316,26 @@ No PHP hosting required • Instant setup • All features included
   - Automatic updates when commands are converted
   - Real-time command count tracking
 
-**🤖 AI Assistant (`cogs/GeminiService.py`)**
-- **Powered by Google Gemini Pro:**
-  - This cog integrates the advanced capabilities of the Google Gemini to serve as an intelligent AI assistant for the Zoryx Discord Bot Framework. It provides natural language understanding and generation, making complex bot operations and data accessible through simple queries.
+**🤖 AI Assistant (`cogs/GeminiService.py`)** — v1.8.0.0
+- **Powered by Google Gemini** (model configurable via `GEMINI_MODEL` env var, default: `gemini-2.5-flash-lite`)
 - **Deep Contextual Awareness:**
-  - The AI assistant's power lies in its ability to dynamically pull real-time data and context from various core framework components, enabling it to provide highly accurate and relevant answers.
-  - **Seamless Integration with Framework Cogs:**
-    - **`PluginRegistry`:** Fetches live data on all installed extensions, their metadata, dependencies, and potential conflicts to answer questions about your bot's plugins.
-    - **`FrameworkDiagnostics`:** Accesses current health reports, performance metrics (CPU, memory, event loop lag), and error rates to provide on-demand diagnostic summaries.
-    - **`SlashCommandLimiter`:** Understands the bot's slash command usage, including which commands have been converted to prefix commands due to Discord's API limits, and why.
-    - **`EventHooks` & `EventHooksCreater`:** Provides insights into the internal event system, registered hooks, execution history, and user-created automations, helping you understand how the bot responds to events.
-  - **Direct File & Database Introspection:**
-    - **File Content Analysis:** Can read and summarize the content of any specified file within the bot's directory (with robust security checks to prevent path traversal), allowing the AI to explain code, configurations, or logs.
-    - **Database Schema Querying:** Interacts with the bot's SQLite databases to answer natural language questions about table schemas, data structure, and even specific data points (e.g., "How many users have configured custom prefixes?").
-    - **`README.md` Smart Search:** Utilizes advanced search capabilities to find and synthesize information directly from the bot's `README.md` file, making documentation queries instant and efficient.
-- **Key Features for Enhanced Bot Management:**
-  - **Natural Language Interaction:** Users can ask complex questions in plain English, eliminating the need to memorize specific commands or data structures.
-  - **Interactive Help Menu:** A paginated, button-driven help menu guides users through the `/ask_zdbf` command's extensive capabilities, ensuring ease of discovery and use.
-  - **Robust Error Handling & Timeout Prevention:** Implements immediate deferral of Discord interactions and comprehensive error handling, ensuring a smooth user experience even during lengthy AI processing times.
-  - **Secure Operations:** All file and data access through the AI assistant is safeguarded by the framework's atomic file system and strict path validation, ensuring data integrity and preventing unauthorized access.
+  - Dynamically pulls real-time data from `PluginRegistry`, `FrameworkDiagnostics`, `SlashCommandLimiter`, `EventHooks`, and `EventHooksCreater`
+  - File content analysis (owner-only, path-traversal-safe), database schema querying, `README.md` smart search
+- **Security (v1.8.0.0):**
+  - `file` action is now **bot owner only** — previously any Discord user could read `.env`, `config.json`, and any file in the bot directory
+  - `permission` action accurately describes the real access model (`file` + `permission` = owner only; all other actions = everyone)
+- **Rate Limiting (v1.8.0.0 — properly implemented):**
+  - **Per-user cooldown: 15 seconds** between calls — implemented as a manual `_user_cooldowns` dict checked before defer; `@commands.cooldown` was silently ignored for pure `@app_commands.command` handlers and has been replaced
+  - **Global concurrency limit: 3 simultaneous calls** — manual `_active_requests` counter with always-executing `finally` decrement
+  - Both limits fire before `interaction.response.defer()`, so the response is immediate and ephemeral
+- **Performance (v1.8.0.0):**
+  - **60-second TTL in-memory cache** for repeated identical queries on `diagnose`, `plugins`, `slash`, `hooks`, `automations`; cache hits noted in embed footer (`Served from cache (< 60s old)`)
+  - Context sent to Gemini capped at **8,000 characters** to prevent token-limit errors
+  - AI responses exceeding Discord's 4,096-character embed limit now show a visible truncation notice instead of cutting off silently
+- **Resilience (v1.8.0.0):**
+  - `PluginRegistry` and `FrameworkDiagnostics` are no longer imported at module level — GeminiService loads cleanly even if those cogs are absent
+- **Interactive Help Menu:** 12-page paginated button-driven guide (`/ask_zdbf action:help`)
+- **Actions:** `help`, `framework`, `plugins`, `diagnose`, `database`, `file`, `extension`, `permission`, `slash`, `hooks`, `automations`, `readme`
 
 **⚙️ Guild Settings (`cogs/guild_settings.py`)**
 - **Per-Guild Configuration Management:**
@@ -415,11 +419,12 @@ No PHP hosting required • Instant setup • All features included
   - `!ipcstatus` - IPC connection diagnostics
   - `!broadcastmsg <message>` - Broadcast to all clusters
 
-**💾 Backup & Restore (`cogs/backup_restore.py`) — v2.1.0**
+**💾 Backup & Restore (`cogs/backup_restore.py`) — v2.2.0 (v1.8.0.0)**
 - **Full Guild Configuration Snapshots** (Administrator / Bot Owner)
   - Captures roles, channels, categories, permissions, emojis, stickers, server settings, bot settings
   - **Member role assignments** — saves which members have which roles (requires Members Intent)
-  - Supports text, voice, forum, and stage channels with full permission overwrites
+  - Supports text, voice, **forum**, and **stage** channels with full permission overwrites
+  - **Images stored as base64 at capture time** (v1.8.0.0) — emoji images, sticker images, server icon, and server banner are downloaded and embedded as base64 in the backup JSON; CDN URLs alone are useless after content is deleted
   - Atomic file system integration for zero-corruption storage
 - **Interactive Dashboard (`/backup`)** with **5 tabs:**
   - 📊 Overview — Storage, latest backup, server stats, cooldown timer
@@ -428,11 +433,16 @@ No PHP hosting required • Instant setup • All features included
   - 📜 Audit Log — All backup operations tracked
   - 📈 Analytics — Trends, frequency, top creators
   - 🗑️ Quick Delete — Dropdown selector from dashboard with pin protection
-- **Selective Restore Engine:**
-  - Toggle components: roles, categories, channels, member roles, bot settings
+- **Selective Restore Engine (v1.8.0.0 — now covers everything backup captures):**
+  - Toggle components: roles, categories, channels, member roles, bot settings, **emojis**, **stickers**, **server settings**
+  - **Forum channels** — restored via `guild.create_forum()`, skips duplicates by name
+  - **Stage channels** — restored via `guild.create_stage_channel()`, skips duplicates by name
+  - **Emojis** — restored from embedded base64 via `guild.create_custom_emoji()`; managed emojis skipped
+  - **Stickers** — restored from embedded base64 via `guild.create_sticker()`; requires re-backup for entries from before v1.8.0.0
+  - **Server settings** — restores name, verification level, default notifications, explicit content filter, AFK channel/timeout, premium progress bar via `guild.edit()`
+  - **Server icon** — restored from embedded base64 via `guild.edit(icon=bytes)`
   - **Role Sync toggle** (off by default): full rewind adds missing + removes extra roles per member
-  - Creates only missing items, reapplies member role assignments
-  - Recreates permission overwrites with role ID mapping
+  - Creates only missing items, reapplies member role assignments, recreates permission overwrites
   - Real-time progress updates and detailed results
 - **Auto-Backup Scheduler** with per-guild intervals, pinning, notes, integrity verification
 - **13 Hybrid Commands:**
