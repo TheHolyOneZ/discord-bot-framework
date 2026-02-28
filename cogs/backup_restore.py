@@ -37,7 +37,7 @@
 #
 # ===================================================================================
 """
-# Backup & Restore System - v2.1.0 | Created by TheHolyOneZ
+# Backup & Restore System - v2.2.0 | Created by TheHolyOneZ
 import discord
 from discord.ext import commands, tasks
 from discord import app_commands
@@ -54,6 +54,8 @@ from typing import Dict, List, Optional, Any, Tuple, Set
 from pathlib import Path
 from collections import defaultdict
 import traceback
+import aiohttp
+import base64
 
 logger = logging.getLogger('discord')
 
@@ -148,6 +150,19 @@ def _tch(entry):
     return sum(entry.get(k, 0) for k in ("text_channels_count", "voice_channels_count", "forum_channels_count", "stage_channels_count"))
 
 
+async def _download_image_b64(url: str, timeout: int = 15) -> Optional[str]:
+    """Download an image from a URL and return it as a base64 string. Returns None on failure."""
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=timeout)) as resp:
+                if resp.status != 200:
+                    return None
+                data = await resp.read()
+                return base64.b64encode(data).decode("utf-8")
+    except Exception:
+        return None
+
+
 class BackupSnapshot:
 
     @staticmethod
@@ -176,6 +191,8 @@ class BackupSnapshot:
                 "name": guild.name,
                 "icon_url": str(guild.icon.url) if guild.icon else None,
                 "banner_url": str(guild.banner.url) if guild.banner else None,
+                "icon_b64": await _download_image_b64(str(guild.icon.url)) if guild.icon else None,
+                "banner_b64": await _download_image_b64(str(guild.banner.url)) if guild.banner else None,
                 "member_count": guild.member_count,
                 "owner_id": guild.owner_id,
                 "created_at": guild.created_at.isoformat(),
@@ -269,17 +286,25 @@ class BackupSnapshot:
 
         if "emojis" in components:
             for e in guild.emojis:
+                image_b64 = None
+                if not e.managed:
+                    image_b64 = await _download_image_b64(str(e.url))
                 snap["emojis"].append({
                     "id": e.id, "name": e.name, "animated": e.animated,
                     "url": str(e.url), "managed": e.managed,
+                    "image_b64": image_b64,
                 })
 
         if "stickers" in components:
             for s in getattr(guild, "stickers", None) or []:
+                sticker_url = str(s.url) if hasattr(s, 'url') else None
+                image_b64 = await _download_image_b64(sticker_url) if sticker_url else None
                 snap["stickers"].append({
                     "id": s.id, "name": s.name,
                     "description": getattr(s, "description", None),
                     "emoji": getattr(s, "emoji", None),
+                    "url": sticker_url,
+                    "image_b64": image_b64,
                 })
 
         if "member_roles" in components:
@@ -798,7 +823,10 @@ class SelectiveRestoreView(discord.ui.View):
             f"{ck('categories')} **Categories** \u2014 {self.entry.get('categories_count',0)} categories (with overwrites)\n"
             f"{ck('channels')} **Channels** \u2014 {_tch(self.entry)} channels (topic, slowmode, overwrites)\n"
             f"{ck('member_roles')} **Member Roles** \u2014 {mr} members (reapply saved role assignments)\n"
-            f"{ck('bot_settings')} **Bot Settings** \u2014 Prefix, mention config"
+            f"{ck('bot_settings')} **Bot Settings** \u2014 Prefix, mention config\n"
+            f"{ck('emojis')} **Emojis** \u2014 Custom server emojis\n"
+            f"{ck('stickers')} **Stickers** \u2014 Custom stickers\n"
+            f"{ck('server_settings')} **Server Settings** \u2014 Name, icon, verification, AFK, notifications"
         ), inline=False)
         sync_desc = (
             f"{sync_icon} **Role Sync** \u2014 {'**ENABLED** \U0001f534' if self.role_sync else 'Disabled (safe mode)'}\n"
@@ -859,7 +887,22 @@ class SelectiveRestoreView(discord.ui.View):
         self._tog("member_roles")
         await interaction.response.edit_message(embed=self._embed(), view=self)
 
-    @discord.ui.button(label="\u2705 Confirm Restore", style=discord.ButtonStyle.danger, row=1)
+    @discord.ui.button(label="Emojis", emoji="\U0001f600", style=discord.ButtonStyle.gray, row=1)
+    async def t_emojis(self, interaction, button):
+        self._tog("emojis")
+        await interaction.response.edit_message(embed=self._embed(), view=self)
+
+    @discord.ui.button(label="Stickers", emoji="\U0001f3a8", style=discord.ButtonStyle.gray, row=1)
+    async def t_stickers(self, interaction, button):
+        self._tog("stickers")
+        await interaction.response.edit_message(embed=self._embed(), view=self)
+
+    @discord.ui.button(label="Server Settings", emoji="\u2699\ufe0f", style=discord.ButtonStyle.gray, row=1)
+    async def t_server(self, interaction, button):
+        self._tog("server_settings")
+        await interaction.response.edit_message(embed=self._embed(), view=self)
+
+    @discord.ui.button(label="\u2705 Confirm Restore", style=discord.ButtonStyle.danger, row=3)
     async def confirm(self, interaction, button):
         if not self.sel:
             await interaction.response.send_message("\u274c Select at least one component.", ephemeral=True)
@@ -869,17 +912,17 @@ class SelectiveRestoreView(discord.ui.View):
         await interaction.response.edit_message(view=self)
         await self.cog._do_restore(interaction, self.guild, self.snap, self.entry, self.sel, self.role_sync)
 
-    @discord.ui.button(label="Role Sync", emoji="\U0001f500", style=discord.ButtonStyle.gray, row=1)
+    @discord.ui.button(label="Role Sync", emoji="\U0001f500", style=discord.ButtonStyle.gray, row=2)
     async def t_sync(self, interaction, button):
         self.role_sync = not self.role_sync
         await interaction.response.edit_message(embed=self._embed(), view=self)
 
     @discord.ui.button(label="Select All", emoji="\U0001f504", style=discord.ButtonStyle.blurple, row=2)
     async def sel_all(self, interaction, button):
-        self.sel = {"roles", "channels", "categories", "bot_settings", "member_roles"}
+        self.sel = {"roles", "channels", "categories", "bot_settings", "member_roles", "emojis", "stickers", "server_settings"}
         await interaction.response.edit_message(embed=self._embed(), view=self)
 
-    @discord.ui.button(label="Bot Settings", emoji="\u2699\ufe0f", style=discord.ButtonStyle.gray, row=2)
+    @discord.ui.button(label="Bot Settings", emoji="\u2699\ufe0f", style=discord.ButtonStyle.gray, row=1)
     async def t_bot(self, interaction, button):
         self._tog("bot_settings")
         await interaction.response.edit_message(embed=self._embed(), view=self)
@@ -1268,6 +1311,46 @@ class BackupRestore(commands.Cog):
                     except Exception as e:
                         res["failed"] += 1; res["errors"].append(f"Voice '{n}': {str(e)[:50]}")
 
+                # Forum channels
+                ex_forum = {c.name.lower(): c for c in _safe_channels(guild, "forum_channels")}
+                forum_chs = snap.get("forum_channels", [])
+                if forum_chs:
+                    status.append(f"💬 Restoring {len(forum_chs)} forum channels…")
+                    prog.description = "```\n"+"\n".join(status)+"\n```"
+                    try: await msg.edit(embed=prog)
+                    except Exception: pass
+                    for chd in forum_chs:
+                        n = chd["name"]
+                        if n.lower() in ex_forum:
+                            res["skipped"] += 1; continue
+                        try:
+                            cat = cat_map.get(chd.get("category_id"))
+                            ow = self._ow(chd.get("overwrites", []), guild, role_map)
+                            await guild.create_forum(name=n, topic=chd.get("topic"), slowmode_delay=chd.get("slowmode_delay", 0), nsfw=chd.get("nsfw", False), category=cat, overwrites=ow, reason=f"Backup restore: {entry['id']}")
+                            res["created"] += 1; await asyncio.sleep(1)
+                        except Exception as e:
+                            res["failed"] += 1; res["errors"].append(f"Forum '{n}': {str(e)[:50]}")
+
+                # Stage channels
+                ex_stage = {c.name.lower(): c for c in _safe_channels(guild, "stage_channels")}
+                stage_chs = snap.get("stage_channels", [])
+                if stage_chs:
+                    status.append(f"🎙️ Restoring {len(stage_chs)} stage channels…")
+                    prog.description = "```\n"+"\n".join(status)+"\n```"
+                    try: await msg.edit(embed=prog)
+                    except Exception: pass
+                    for chd in stage_chs:
+                        n = chd["name"]
+                        if n.lower() in ex_stage:
+                            res["skipped"] += 1; continue
+                        try:
+                            cat = cat_map.get(chd.get("category_id"))
+                            ow = self._ow(chd.get("overwrites", []), guild, role_map)
+                            await guild.create_stage_channel(name=n, topic=chd.get("topic"), category=cat, overwrites=ow, reason=f"Backup restore: {entry['id']}")
+                            res["created"] += 1; await asyncio.sleep(1)
+                        except Exception as e:
+                            res["failed"] += 1; res["errors"].append(f"Stage '{n}': {str(e)[:50]}")
+
             if "member_roles" in components:
                 member_data = snap.get("member_roles", [])
                 if member_data:
@@ -1375,6 +1458,96 @@ class BackupRestore(commands.Cog):
                             await self.bot.db.set_guild_mention_prefix_enabled(guild.id, bs["mention_prefix_enabled"])
                     except Exception as e:
                         res["errors"].append(f"Bot settings: {str(e)[:60]}")
+
+            if "emojis" in components:
+                status.append("😀 Restoring emojis…")
+                prog.description = "```\n"+"\n".join(status)+"\n```"
+                try: await msg.edit(embed=prog)
+                except Exception: pass
+                existing_emoji_names = {e.name.lower() for e in guild.emojis}
+                for ed in snap.get("emojis", []):
+                    if ed.get("managed"):
+                        res["skipped"] += 1; continue
+                    if ed["name"].lower() in existing_emoji_names:
+                        res["skipped"] += 1; continue
+                    image_b64 = ed.get("image_b64")
+                    if not image_b64:
+                        res["failed"] += 1; res["errors"].append(f"Emoji '{ed['name']}': no image data in backup (re-backup to capture images)"); continue
+                    try:
+                        img_bytes = base64.b64decode(image_b64)
+                        await guild.create_custom_emoji(name=ed["name"], image=img_bytes, reason=f"Backup restore: {entry['id']}")
+                        existing_emoji_names.add(ed["name"].lower())
+                        res["created"] += 1; await asyncio.sleep(1)
+                    except discord.Forbidden:
+                        res["failed"] += 1; res["errors"].append(f"Emoji '{ed['name']}': Missing permissions")
+                    except Exception as e:
+                        res["failed"] += 1; res["errors"].append(f"Emoji '{ed['name']}': {str(e)[:50]}")
+
+            if "stickers" in components:
+                status.append("🎨 Restoring stickers…")
+                prog.description = "```\n"+"\n".join(status)+"\n```"
+                try: await msg.edit(embed=prog)
+                except Exception: pass
+                existing_sticker_names = {s.name.lower() for s in getattr(guild, "stickers", []) or []}
+                for sd in snap.get("stickers", []):
+                    if sd["name"].lower() in existing_sticker_names:
+                        res["skipped"] += 1; continue
+                    image_b64 = sd.get("image_b64")
+                    if not image_b64:
+                        res["failed"] += 1; res["errors"].append(f"Sticker '{sd['name']}': no image data in backup (re-backup to capture images)"); continue
+                    try:
+                        img_bytes = base64.b64decode(image_b64)
+                        sf = discord.File(io.BytesIO(img_bytes), filename=f"{sd['name']}.png")
+                        emoji_str = sd.get("emoji") or "⭐"
+                        desc = sd.get("description") or ""
+                        await guild.create_sticker(name=sd["name"], description=desc[:100], emoji=emoji_str, file=sf, reason=f"Backup restore: {entry['id']}")
+                        existing_sticker_names.add(sd["name"].lower())
+                        res["created"] += 1; await asyncio.sleep(2)
+                    except discord.Forbidden:
+                        res["failed"] += 1; res["errors"].append(f"Sticker '{sd['name']}': Missing permissions")
+                    except Exception as e:
+                        res["failed"] += 1; res["errors"].append(f"Sticker '{sd['name']}': {str(e)[:50]}")
+
+            if "server_settings" in components:
+                status.append("⚙️ Restoring server settings…")
+                prog.description = "```\n"+"\n".join(status)+"\n```"
+                try: await msg.edit(embed=prog)
+                except Exception: pass
+                ss = snap.get("server_settings", {})
+                gi = snap.get("guild", {})
+                edit_kwargs = {}
+                try:
+                    if gi.get("name"):
+                        edit_kwargs["name"] = gi["name"]
+                    if ss.get("verification_level") is not None:
+                        edit_kwargs["verification_level"] = discord.VerificationLevel(ss["verification_level"])
+                    if ss.get("default_notifications") is not None:
+                        edit_kwargs["default_notifications"] = discord.NotificationLevel(ss["default_notifications"])
+                    if ss.get("explicit_content_filter") is not None:
+                        edit_kwargs["explicit_content_filter"] = discord.ContentFilter(ss["explicit_content_filter"])
+                    if ss.get("afk_timeout") is not None:
+                        edit_kwargs["afk_timeout"] = ss["afk_timeout"]
+                    if ss.get("afk_channel_id"):
+                        afk_ch = guild.get_channel(ss["afk_channel_id"])
+                        if afk_ch:
+                            edit_kwargs["afk_channel"] = afk_ch
+                    if ss.get("premium_progress_bar_enabled") is not None:
+                        edit_kwargs["premium_progress_bar_enabled"] = ss["premium_progress_bar_enabled"]
+                    if edit_kwargs:
+                        await guild.edit(**edit_kwargs, reason=f"Backup restore: {entry['id']}")
+                        res["created"] += 1
+                    # Icon restore
+                    icon_b64 = gi.get("icon_b64")
+                    if icon_b64:
+                        try:
+                            icon_bytes = base64.b64decode(icon_b64)
+                            await guild.edit(icon=icon_bytes, reason=f"Backup restore icon: {entry['id']}")
+                        except Exception as e:
+                            res["errors"].append(f"Icon restore: {str(e)[:60]}")
+                except discord.Forbidden:
+                    res["failed"] += 1; res["errors"].append("Server settings: Missing permissions (need Manage Guild)")
+                except Exception as e:
+                    res["failed"] += 1; res["errors"].append(f"Server settings: {str(e)[:60]}")
 
             elapsed = time.time() - t0
             sync_str = " SYNC" if role_sync else ""
@@ -1677,4 +1850,4 @@ async def setup(bot):
         logger.info("BackupRestore cog DISABLED via ENABLE_BACKUP_RESTORE")
         return
     await bot.add_cog(BackupRestore(bot))
-    logger.info("BackupRestore cog setup complete (v2.1.0)")
+    logger.info("BackupRestore cog setup complete (v3.0.0)")

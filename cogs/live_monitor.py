@@ -81,6 +81,7 @@ import discord
 from discord import app_commands
 import aiohttp
 import asyncio
+import base64
 import secrets
 import json
 import logging
@@ -1386,7 +1387,7 @@ echo json_encode([
                 }
                 fw_section = self.bot.config.get("framework", {}) or {}
                 framework_info = {
-                    "version": "1.7.2.0",
+                    "version": "1.8.0.0",
                     "recommended_python": fw_section.get("recommended_python", "3.12.7"),
                     "python_runtime": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
                     "docs_url": "https://zsync.eu/zdbf",
@@ -1843,7 +1844,7 @@ echo json_encode([
 
                         if act == "restore":
                             backup_id = action.get("backup_id")
-                            components = set(action.get("components", ["roles", "channels", "categories", "bot_settings", "member_roles"]))
+                            components = set(action.get("components", ["roles", "channels", "categories", "bot_settings", "member_roles", "emojis", "stickers", "server_settings"]))
                             role_sync = action.get("role_sync", False)
                             await self._execute_dashboard_restore(backup_cog, guild, backup_id, components, role_sync)
                             processed += 1
@@ -2003,6 +2004,36 @@ echo json_encode([
                             res["failed"] += 1
                             res["errors"].append(f"Voice '{n}': {str(e)[:50]}")
 
+                    # Forum channels
+                    ex_forum = {c.name.lower(): c for c in getattr(guild, "forum_channels", None) or []}
+                    for chd in snap.get("forum_channels", []):
+                        n = chd["name"]
+                        if n.lower() in ex_forum:
+                            res["skipped"] += 1; continue
+                        try:
+                            cat = cat_map.get(chd.get("category_id"))
+                            ow = backup_cog._ow(chd.get("overwrites", []), guild, role_map)
+                            await guild.create_forum(name=n, topic=chd.get("topic"), slowmode_delay=chd.get("slowmode_delay", 0), nsfw=chd.get("nsfw", False), category=cat, overwrites=ow, reason=f"Dashboard restore: {backup_id}")
+                            res["created"] += 1; await asyncio.sleep(1)
+                        except Exception as e:
+                            res["failed"] += 1
+                            res["errors"].append(f"Forum '{n}': {str(e)[:50]}")
+
+                    # Stage channels
+                    ex_stage = {c.name.lower(): c for c in getattr(guild, "stage_channels", None) or []}
+                    for chd in snap.get("stage_channels", []):
+                        n = chd["name"]
+                        if n.lower() in ex_stage:
+                            res["skipped"] += 1; continue
+                        try:
+                            cat = cat_map.get(chd.get("category_id"))
+                            ow = backup_cog._ow(chd.get("overwrites", []), guild, role_map)
+                            await guild.create_stage_channel(name=n, topic=chd.get("topic"), category=cat, overwrites=ow, reason=f"Dashboard restore: {backup_id}")
+                            res["created"] += 1; await asyncio.sleep(1)
+                        except Exception as e:
+                            res["failed"] += 1
+                            res["errors"].append(f"Stage '{n}': {str(e)[:50]}")
+
                 if "member_roles" in components:
                     member_data = snap.get("member_roles", [])
                     for md in member_data:
@@ -2048,6 +2079,85 @@ echo json_encode([
                                 await self.bot.db.set_guild_mention_prefix_enabled(guild.id, bs["mention_prefix_enabled"])
                         except Exception as e:
                             res["errors"].append(f"Bot settings: {str(e)[:60]}")
+
+                if "emojis" in components:
+                    existing_emoji_names = {e.name.lower() for e in guild.emojis}
+                    for ed in snap.get("emojis", []):
+                        if ed.get("managed"):
+                            res["skipped"] += 1; continue
+                        if ed["name"].lower() in existing_emoji_names:
+                            res["skipped"] += 1; continue
+                        image_b64 = ed.get("image_b64")
+                        if not image_b64:
+                            res["failed"] += 1; res["errors"].append(f"Emoji '{ed['name']}': no image data in backup (re-backup to capture images)"); continue
+                        try:
+                            img_bytes = base64.b64decode(image_b64)
+                            await guild.create_custom_emoji(name=ed["name"], image=img_bytes, reason=f"Dashboard restore: {backup_id}")
+                            existing_emoji_names.add(ed["name"].lower())
+                            res["created"] += 1; await asyncio.sleep(1)
+                        except discord.Forbidden:
+                            res["failed"] += 1; res["errors"].append(f"Emoji '{ed['name']}': Missing permissions")
+                        except Exception as e:
+                            res["failed"] += 1; res["errors"].append(f"Emoji '{ed['name']}': {str(e)[:50]}")
+
+                if "stickers" in components:
+                    existing_sticker_names = {s.name.lower() for s in getattr(guild, "stickers", []) or []}
+                    for sd in snap.get("stickers", []):
+                        if sd["name"].lower() in existing_sticker_names:
+                            res["skipped"] += 1; continue
+                        image_b64 = sd.get("image_b64")
+                        if not image_b64:
+                            res["failed"] += 1; res["errors"].append(f"Sticker '{sd['name']}': no image data in backup"); continue
+                        try:
+                            img_bytes = base64.b64decode(image_b64)
+                            import io as _io
+                            sf = discord.File(_io.BytesIO(img_bytes), filename=f"{sd['name']}.png")
+                            emoji_str = sd.get("emoji") or "⭐"
+                            desc = sd.get("description") or ""
+                            await guild.create_sticker(name=sd["name"], description=desc[:100], emoji=emoji_str, file=sf, reason=f"Dashboard restore: {backup_id}")
+                            existing_sticker_names.add(sd["name"].lower())
+                            res["created"] += 1; await asyncio.sleep(2)
+                        except discord.Forbidden:
+                            res["failed"] += 1; res["errors"].append(f"Sticker '{sd['name']}': Missing permissions")
+                        except Exception as e:
+                            res["failed"] += 1; res["errors"].append(f"Sticker '{sd['name']}': {str(e)[:50]}")
+
+                if "server_settings" in components:
+                    ss = snap.get("server_settings", {})
+                    gi = snap.get("guild", {})
+                    edit_kwargs = {}
+                    try:
+                        if gi.get("name"):
+                            edit_kwargs["name"] = gi["name"]
+                        if ss.get("verification_level") is not None:
+                            edit_kwargs["verification_level"] = discord.VerificationLevel(ss["verification_level"])
+                        if ss.get("default_notifications") is not None:
+                            edit_kwargs["default_notifications"] = discord.NotificationLevel(ss["default_notifications"])
+                        if ss.get("explicit_content_filter") is not None:
+                            edit_kwargs["explicit_content_filter"] = discord.ContentFilter(ss["explicit_content_filter"])
+                        if ss.get("afk_timeout") is not None:
+                            edit_kwargs["afk_timeout"] = ss["afk_timeout"]
+                        if ss.get("afk_channel_id"):
+                            afk_ch = guild.get_channel(ss["afk_channel_id"])
+                            if afk_ch:
+                                edit_kwargs["afk_channel"] = afk_ch
+                        if ss.get("premium_progress_bar_enabled") is not None:
+                            edit_kwargs["premium_progress_bar_enabled"] = ss["premium_progress_bar_enabled"]
+                        if edit_kwargs:
+                            await guild.edit(**edit_kwargs, reason=f"Dashboard restore: {backup_id}")
+                            res["created"] += 1
+                        # Icon restore
+                        icon_b64 = gi.get("icon_b64")
+                        if icon_b64:
+                            try:
+                                icon_bytes = base64.b64decode(icon_b64)
+                                await guild.edit(icon=icon_bytes, reason=f"Dashboard restore icon: {backup_id}")
+                            except Exception as e:
+                                res["errors"].append(f"Icon restore: {str(e)[:60]}")
+                    except discord.Forbidden:
+                        res["failed"] += 1; res["errors"].append("Server settings: Missing permissions (need Manage Guild)")
+                    except Exception as e:
+                        res["failed"] += 1; res["errors"].append(f"Server settings: {str(e)[:60]}")
 
                 elapsed = round(time.time() - t0, 1)
                 res["duration"] = str(elapsed)
@@ -16024,6 +16134,8 @@ if (typeof window !== 'undefined') {
                             <div class="lm-restore-comp active" data-comp="bot_settings" onclick="toggleRestoreComp(this)"><div class="lm-rc-check"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></div><div><div style="font-size:13px;color:#e2e8f0;font-weight:500;">Bot Settings</div><div style="font-size:10px;color:#64748b;">Prefix &amp; bot config</div></div></div>
                             <div class="lm-restore-comp active" data-comp="member_roles" onclick="toggleRestoreComp(this)"><div class="lm-rc-check"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></div><div><div style="font-size:13px;color:#e2e8f0;font-weight:500;">Member Roles</div><div style="font-size:10px;color:#64748b;">Restore role assignments</div></div></div>
                             <div class="lm-restore-comp" data-comp="stickers" onclick="toggleRestoreComp(this)"><div class="lm-rc-check"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></div><div><div style="font-size:13px;color:#e2e8f0;font-weight:500;">Stickers</div><div style="font-size:10px;color:#64748b;">Custom stickers</div></div></div>
+                            <div class="lm-restore-comp" data-comp="forum_channels" onclick="toggleRestoreComp(this)"><div class="lm-rc-check"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></div><div><div style="font-size:13px;color:#e2e8f0;font-weight:500;">Forum Channels</div><div style="font-size:10px;color:#64748b;">Forum-style channels</div></div></div>
+                            <div class="lm-restore-comp" data-comp="stage_channels" onclick="toggleRestoreComp(this)"><div class="lm-rc-check"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></div><div><div style="font-size:13px;color:#e2e8f0;font-weight:500;">Stage Channels</div><div style="font-size:10px;color:#64748b;">Stage/audio channels</div></div></div>
                         </div>
                     </div>
                     <div style="margin-bottom:16px;">

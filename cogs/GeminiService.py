@@ -37,6 +37,7 @@
 #
 # ===================================================================================
 """
+# GeminiService version: 1.8.0.0
 import discord
 from discord.ext import commands
 from discord import app_commands
@@ -45,8 +46,6 @@ from pathlib import Path
 import google.generativeai as genai
 from dotenv import load_dotenv
 from atomic_file_system import AtomicFileHandler, SafeDatabaseManager
-from cogs.plugin_registry import PluginRegistry
-from cogs.framework_diagnostics import FrameworkDiagnostics
 import aiosqlite
 import aiofiles
 import json
@@ -240,14 +239,20 @@ class GeminiService(commands.Cog):
         self.file_handler = None
         
         genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-        model_name = "gemini-2.5-flash-lite"
-        
+        model_name = os.getenv("GEMINI_MODEL", "gemini-2.5-flash-lite")
+
         self.model = genai.GenerativeModel(model_name)
         print(f"[GeminiService] Using model: {model_name}")
-        
+
         db_path = os.getenv("DATABASE_PATH", "bot_data.db")
         self.db_manager = SafeDatabaseManager(db_path)
         self.file_handler = AtomicFileHandler()
+        self._ai_cache: Dict[str, tuple] = {}
+        self._CACHE_TTL = 60
+        self._user_cooldowns: Dict[int, float] = {}
+        self._active_requests: int = 0
+        self._COOLDOWN_SECONDS = 15
+        self._MAX_CONCURRENT = 3
         
     @app_commands.command(name="ask_zdbf", description="Ask the ZDBF AI assistant about various bot aspects.")
     @app_commands.describe(
@@ -263,18 +268,30 @@ class GeminiService(commands.Cog):
         query: Optional[str] = None,
         file: Optional[str] = None
     ):
-        
-        
+        now = time.time()
+        last = self._user_cooldowns.get(interaction.user.id, 0)
+        if now - last < self._COOLDOWN_SECONDS:
+            remaining = self._COOLDOWN_SECONDS - (now - last)
+            return await interaction.response.send_message(
+                f"⏱️ This command is on cooldown. Try again in **{remaining:.1f}s**.", ephemeral=True
+            )
+        self._user_cooldowns[interaction.user.id] = now
+
+        if self._active_requests >= self._MAX_CONCURRENT:
+            return await interaction.response.send_message(
+                "⏱️ Too many requests in progress. Please try again shortly.", ephemeral=True
+            )
+        self._active_requests += 1
 
         try:
             await interaction.response.defer(ephemeral=(action != "help"))
         except discord.errors.NotFound:
-
+            self._active_requests -= 1
             return
         except discord.errors.HTTPException:
-
+            self._active_requests -= 1
             return
-        
+
         try:
             action = action.lower()
 
@@ -297,9 +314,15 @@ class GeminiService(commands.Cog):
 
                 embed = discord.Embed(
                     title="Permission Management",
-                    description="This feature allows you to control who can use which actions of `/ask_zdbf`.\n\n"
-                                "**Currently:** All users can use all actions.\n\n"
-                                "To restrict actions, you would need to implement a permission system in your database.",
+                    description=(
+                        "**Current permission model for `/ask_zdbf`:**\n\n"
+                        "**Bot Owner only:** `file`, `permission`\n"
+                        "**All users:** `help`, `framework`, `plugins`, `diagnose`, `database`, "
+                        "`extension`, `slash`, `hooks`, `automations`, `readme`\n\n"
+                        "The `file` action can read arbitrary files in the bot directory and is "
+                        "therefore restricted to the bot owner. The `permission` action is also "
+                        "owner-only as it describes the permission model itself."
+                    ),
                     color=0x7289DA
                 )
                 return await interaction.followup.send(embed=embed, ephemeral=True)
@@ -428,9 +451,16 @@ class GeminiService(commands.Cog):
                 final_query = query or "Describe the purpose of each table in the database."
 
             elif action == "file" or action == "extension":
+                if action == "file":
+                    bot_owner_id = int(os.getenv("BOT_OWNER_ID", 0))
+                    if interaction.user.id != bot_owner_id:
+                        return await interaction.followup.send(
+                            "This action is restricted to the bot owner.", ephemeral=True
+                        )
+
                 if not file:
                     return await interaction.followup.send(f"You must provide a filename for the `{action}` action.", ephemeral=True)
-                
+
                 bot_dir = Path(os.getcwd()).resolve()
                 allowed_base = (bot_dir / "extensions").resolve() if action == "extension" else bot_dir
 
@@ -498,15 +528,40 @@ class GeminiService(commands.Cog):
                 return await interaction.followup.send(f"Unknown action: `{action}`. Use `/ask_zdbf action:help` for a list of commands.", ephemeral=True)
 
 
+            CONTEXT_CAP = 8000
+            if len(context) > CONTEXT_CAP:
+                context = context[:CONTEXT_CAP] + "\n[...context truncated for length...]"
+
             prompt = f"{strict_prompt}\n\n== CONTEXT ==\n{context}\n\n== QUERY ==\n{final_query}"
-            
+
+            _CACHEABLE = {"diagnose", "plugins", "slash", "hooks", "automations"}
+            cache_hit = False
+            if action in _CACHEABLE:
+                cache_key = f"{action}:{final_query}"
+                cached = self._ai_cache.get(cache_key)
+                if cached is not None:
+                    cached_text, cached_ts = cached
+                    if time.time() - cached_ts < self._CACHE_TTL:
+                        response_text = cached_text
+                        cache_hit = True
+
             try:
-                response = await self.model.generate_content_async(prompt)
-                response_text = response.text
-                
+                if not cache_hit:
+                    response = await self.model.generate_content_async(prompt)
+                    response_text = response.text
+                    if action in _CACHEABLE:
+                        self._ai_cache[f"{action}:{final_query}"] = (response_text, time.time())
+
+                TRUNCATION_NOTE = "\n\n*(Response truncated — ask a more specific question for complete output)*"
+                if len(response_text) > 4096:
+                    cutoff = 4096 - len(TRUNCATION_NOTE)
+                    response_text = response_text[:cutoff] + TRUNCATION_NOTE
+
                 embed.title = f"ZDBF Assistant | Action: `{action}`"
-                embed.description = response_text[:4096]
-                
+                embed.description = response_text
+                if cache_hit:
+                    embed.set_footer(text="Served from cache (< 60s old)")
+
                 await interaction.followup.send(embed=embed, ephemeral=True)
 
             except Exception as e:
@@ -522,6 +577,8 @@ class GeminiService(commands.Cog):
             except:
 
                 print(f"Fatal error in ask_zdbf command: {e}")
+        finally:
+            self._active_requests -= 1
 
 async def setup(bot):
     await bot.add_cog(GeminiService(bot))

@@ -1,4 +1,5 @@
 from discord.ext import commands, tasks
+from discord import app_commands
 import discord
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -6,9 +7,12 @@ import psutil
 import platform
 import sys
 from typing import Dict, Any, Optional
+from collections import deque
 import logging
 import asyncio
 import time
+import json
+import os
 
 logger = logging.getLogger('discord')
 
@@ -19,20 +23,27 @@ class FrameworkDiagnostics(commands.Cog):
         self.bot = bot
         self.diagnostics_file = Path("./data/framework_diagnostics.json")
         self.health_file = Path("./data/framework_health.json")
+        self.config_file = Path("./data/framework_diagnostics_config.json")
+        self.health_history_file = Path("./data/framework_health_history.json")
         self.start_time = datetime.now()
         self.last_health_check = None
         self.alert_channel_id = None
         self.last_loop_check = time.monotonic()
-        self.loop_lag_threshold = 0.5
-        
+        self.loop_lag_threshold_ms = int(os.getenv("FW_LOOP_LAG_THRESHOLD_MS", 500))
+        self._lag_samples = deque(maxlen=10)
+        self._metrics_snapshots = deque(maxlen=12)  
+        self._health_history = deque(maxlen=48)
+        self._error_history = deque(maxlen=20)
+
         self.diagnostics_file.parent.mkdir(parents=True, exist_ok=True)
-        
+
         self.health_metrics = {
             "last_error": None,
             "event_loop_lag_ms": 0.0,
             "consecutive_write_failures": 0
         }
-        
+
+        self._load_config()
         self._process = None
     
     async def _get_process(self):
@@ -67,6 +78,25 @@ class FrameworkDiagnostics(commands.Cog):
                 "connections": 0
             }
     
+    def _load_config(self):
+       
+        try:
+            if self.config_file.exists():
+                with open(self.config_file, "r", encoding="utf-8") as f:
+                    cfg = json.load(f)
+                self.alert_channel_id = cfg.get("alert_channel_id")
+                logger.info(f"Framework Diagnostics: Loaded config — alert_channel_id={self.alert_channel_id}")
+        except Exception as e:
+            logger.error(f"Framework Diagnostics: Failed to load config: {e}")
+
+    def _save_config(self):
+        try:
+            self.config_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(self.config_file, "w", encoding="utf-8") as f:
+                json.dump({"alert_channel_id": self.alert_channel_id}, f, indent=2)
+        except Exception as e:
+            logger.error(f"Framework Diagnostics: Failed to save config: {e}")
+
     async def _check_event_loop_lag(self) -> float:
         current = time.monotonic()
         expected_interval = 1.0
@@ -80,9 +110,17 @@ class FrameworkDiagnostics(commands.Cog):
         return lag * 1000
     
     def _calculate_error_rate(self) -> float:
-        total_commands = self.bot.metrics.commands_processed
-        total_errors = self.bot.metrics.error_count
-        
+        if len(self._metrics_snapshots) >= 2:
+            oldest = self._metrics_snapshots[0]
+            newest = self._metrics_snapshots[-1]
+            cmd_delta = newest['commands'] - oldest['commands']
+            err_delta = newest['errors'] - oldest['errors']
+            if cmd_delta > 0:
+                return round(max(0.0, (err_delta / cmd_delta) * 100), 2)
+        if not hasattr(self.bot, 'metrics'):
+            return 0.0
+        total_commands = getattr(self.bot.metrics, 'commands_processed', 0)
+        total_errors = getattr(self.bot.metrics, 'error_count', 0)
         if total_commands > 0:
             return round((total_errors / total_commands) * 100, 2)
         return 0.0
@@ -148,9 +186,9 @@ class FrameworkDiagnostics(commands.Cog):
                 
                 "performance": {
                     **system_info,
-                    "commands_processed": self.bot.metrics.commands_processed,
-                    "messages_seen": self.bot.metrics.messages_seen,
-                    "error_count": self.bot.metrics.error_count,
+                    "commands_processed": getattr(getattr(self.bot, 'metrics', None), 'commands_processed', 0),
+                    "messages_seen": getattr(getattr(self.bot, 'metrics', None), 'messages_seen', 0),
+                    "error_count": getattr(getattr(self.bot, 'metrics', None), 'error_count', 0),
                     "event_loop_lag_ms": round(self.health_metrics["event_loop_lag_ms"], 2)
                 },
                 
@@ -168,6 +206,7 @@ class FrameworkDiagnostics(commands.Cog):
                 "health": {
                     "error_rate": error_rate,
                     "last_error": self.health_metrics["last_error"],
+                    "recent_error_count": len(self._error_history),
                     "consecutive_write_failures": self.health_metrics["consecutive_write_failures"],
                     "event_loop_lag_ms": round(self.health_metrics["event_loop_lag_ms"], 2)
                 }
@@ -195,15 +234,24 @@ class FrameworkDiagnostics(commands.Cog):
     @tasks.loop(seconds=1)
     async def loop_lag_monitor(self):
         lag = await self._check_event_loop_lag()
-        self.health_metrics["event_loop_lag_ms"] = lag
+        self._lag_samples.append(lag)
+        avg_lag = sum(self._lag_samples) / len(self._lag_samples)
+        self.health_metrics["event_loop_lag_ms"] = avg_lag
         
-        if lag > self.loop_lag_threshold * 1000:
-            logger.warning(f"Event loop lag detected: {lag:.2f}ms")
-            await self._send_alert(f"⚠️ Framework event loop lag: {lag:.2f}ms (threshold: {self.loop_lag_threshold * 1000}ms)")
+        if avg_lag > self.loop_lag_threshold_ms:
+            logger.warning(f"Event loop lag detected (avg): {avg_lag:.2f}ms")
+            await self._send_alert(f"⚠️ Framework event loop lag: {avg_lag:.2f}ms avg (threshold: {self.loop_lag_threshold_ms}ms)")
     
     @tasks.loop(minutes=5)
     async def health_monitor(self):
         self.last_health_check = datetime.now()
+        
+        if hasattr(self.bot, 'metrics'):
+            self._metrics_snapshots.append({
+                'time': time.time(),
+                'commands': getattr(self.bot.metrics, 'commands_processed', 0),
+                'errors': getattr(self.bot.metrics, 'error_count', 0)
+            })
         
         error_rate = self._calculate_error_rate()
         
@@ -219,13 +267,15 @@ class FrameworkDiagnostics(commands.Cog):
             "timestamp": datetime.now().isoformat(),
             "status": status,
             "error_rate": error_rate,
-            "total_commands": self.bot.metrics.commands_processed,
-            "total_errors": self.bot.metrics.error_count,
+            "total_commands": getattr(getattr(self.bot, 'metrics', None), 'commands_processed', 0),
+            "total_errors": getattr(getattr(self.bot, 'metrics', None), 'error_count', 0),
             "last_error": self.health_metrics["last_error"],
             "event_loop_lag_ms": round(self.health_metrics["event_loop_lag_ms"], 2),
             "uptime_seconds": (datetime.now() - self.start_time).total_seconds(),
             "latency_ms": round(self.bot.latency * 1000, 2)
         }
+        
+        self._health_history.append(health_status)
         
         try:
             await self.bot.config.file_handler.atomic_write_json(
@@ -238,6 +288,13 @@ class FrameworkDiagnostics(commands.Cog):
             logger.error(f"Failed to write health status: {e}")
             if self.health_metrics["consecutive_write_failures"] >= 3:
                 await self._send_alert(f"🚨 Critical: Framework health write failed {self.health_metrics['consecutive_write_failures']} times")
+        
+        try:
+            history_list = list(self._health_history)
+            with open(self.health_history_file, "w", encoding="utf-8") as f:
+                json.dump(history_list, f, indent=2)
+        except Exception as e:
+            logger.error(f"Failed to write health history: {e}")
     
     async def _send_alert(self, message: str):
         if not self.alert_channel_id:
@@ -270,11 +327,13 @@ class FrameworkDiagnostics(commands.Cog):
     
     @commands.Cog.listener()
     async def on_command_error(self, ctx, error):
-        self.health_metrics["last_error"] = {
+        entry = {
             "command": ctx.command.name if ctx.command else "unknown",
             "error": str(error),
             "timestamp": datetime.now().isoformat()
         }
+        self._error_history.append(entry)
+        self.health_metrics["last_error"] = entry
     
     @commands.hybrid_command(name="fw_diagnostics", help="Display framework diagnostics and health status (Bot Owner Only)")
     @commands.is_owner()
@@ -338,9 +397,10 @@ class FrameworkDiagnostics(commands.Cog):
         else:
             health_status = "✅ Healthy"
         
+        window_note = "(rolling 1h)" if len(self._metrics_snapshots) >= 2 else "(lifetime)"
         embed.add_field(
             name="🏥 Health",
-            value=f"```{health_status}\nError Rate: {diag['health']['error_rate']}%\nLoop Lag: {diag['performance']['event_loop_lag_ms']:.2f}ms```",
+            value=f"```{health_status}\nError Rate: {diag['health']['error_rate']}% {window_note}\nRecent Errors: {diag['health']['recent_error_count']}\nLoop Lag: {diag['performance']['event_loop_lag_ms']:.2f}ms (avg 10s)```",
             inline=False
         )
         
@@ -366,7 +426,77 @@ class FrameworkDiagnostics(commands.Cog):
             channel = ctx.channel
         
         self.alert_channel_id = channel.id
+        self._save_config()
         await ctx.send(f"✅ Framework diagnostics alert channel set to {channel.mention}", ephemeral=True)
+    
+    @commands.hybrid_command(name="fw_history", help="Show recent framework health check history (Bot Owner Only)")
+    @commands.is_owner()
+    @app_commands.describe(entries="Number of entries to show (1-20, default 10)")
+    async def fw_history_command(self, ctx, entries: int = 10):
+        entries = max(1, min(entries, 20))
+        history = list(self._health_history)[-entries:]
+        
+        if not history:
+            await ctx.send("❌ No health history yet — health monitor runs every 5 minutes.", ephemeral=True)
+            return
+        
+        embed = discord.Embed(
+            title="📈 Framework Health History",
+            description=f"Last {len(history)} health check(s) — recorded every 5 minutes",
+            color=0x5865f2,
+            timestamp=discord.utils.utcnow()
+        )
+        
+        lines = []
+        for h in reversed(history):
+            ts = h.get("timestamp", "?")
+            try:
+                dt = datetime.fromisoformat(ts)
+                ts_fmt = dt.strftime("%H:%M:%S")
+            except Exception:
+                ts_fmt = ts[:19]
+            status = h.get("status", "?")
+            err_rate = h.get("error_rate", 0)
+            lag = h.get("event_loop_lag_ms", 0)
+            status_icon = "✅" if status == "healthy" else ("⚠️" if status == "degraded" else "🚨")
+            lines.append(f"{status_icon} `{ts_fmt}` — {status} | err:{err_rate}% | lag:{lag:.1f}ms")
+        
+        embed.add_field(name="History (newest first)", value="\n".join(lines) or "No data", inline=False)
+        embed.set_footer(text="Framework Diagnostics — Health History")
+        await ctx.send(embed=embed, ephemeral=True)
+    
+    @commands.hybrid_command(name="fw_errors", help="Show recent command error history (Bot Owner Only)")
+    @commands.is_owner()
+    async def fw_errors_command(self, ctx):
+        history = list(self._error_history)
+        
+        if not history:
+            await ctx.send("✅ No command errors recorded in this session.", ephemeral=True)
+            return
+        
+        embed = discord.Embed(
+            title="⚠️ Recent Command Errors",
+            description=f"{len(history)} error(s) recorded (last 20 kept)",
+            color=0xff9900,
+            timestamp=discord.utils.utcnow()
+        )
+        
+        lines = []
+        for err in reversed(history):
+            ts = err.get("timestamp", "?")
+            try:
+                dt = datetime.fromisoformat(ts)
+                ts_fmt = dt.strftime("%H:%M:%S")
+            except Exception:
+                ts_fmt = ts[:19]
+            cmd = err.get("command", "unknown")
+            msg = str(err.get("error", "?"))[:80]
+            lines.append(f"`{ts_fmt}` **/{cmd}** — {msg}")
+        
+        embed.add_field(name="Errors (newest first)", value="\n".join(lines[:15]) or "None", inline=False)
+        if len(lines) > 15:
+            embed.set_footer(text=f"Showing 15 of {len(lines)} errors")
+        await ctx.send(embed=embed, ephemeral=True)
     
     def cog_unload(self):
         if self.health_monitor.is_running():
