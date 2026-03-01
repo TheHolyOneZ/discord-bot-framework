@@ -602,7 +602,7 @@ class DashboardView(discord.ui.View):
         cd = self.cog.storage.check_cd(g.id)
         if cd:
             e.add_field(name="\u23f3 Cooldown", value=f"Next backup available {f'<t:{int(time.time()) + cd}:R>'}", inline=False)
-        e.set_footer(text=f"Guild: {g.id} \u2022 Backup System v2.1.0")
+        e.set_footer(text=f"Guild: {g.id} \u2022 Backup System v2.2.0")
         if g.icon:
             e.set_thumbnail(url=g.icon.url)
         return e
@@ -1038,7 +1038,7 @@ class BackupRestore(commands.Cog):
             self.auto_loop.start()
         if BACKUP_RETENTION_DAYS > 0:
             self.cleanup_loop.start()
-        logger.info("BackupRestore cog loaded (v2.1.0)")
+        logger.info("BackupRestore cog loaded (v2.2.0)")
 
     def cog_unload(self):
         if self.auto_loop.is_running():
@@ -1850,4 +1850,4 @@ async def setup(bot):
         logger.info("BackupRestore cog DISABLED via ENABLE_BACKUP_RESTORE")
         return
     await bot.add_cog(BackupRestore(bot))
-    logger.info("BackupRestore cog setup complete (v3.0.0)")
+    logger.info("BackupRestore cog setup complete (v2.2.0)")

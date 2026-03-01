@@ -1,7 +1,11 @@
+# EventHooksCreater version: 1.9.0.0
 from discord.ext import commands, tasks
 import discord
+from discord import app_commands
 import json
 import logging
+import ast
+import operator as _op
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, Any, List, Optional
@@ -20,46 +24,46 @@ class AdvancedConditionEngine:
     def evaluate(conditions: Dict[str, Any], context: Dict[str, Any]) -> bool:
         logic = conditions.get("logic", "AND")
         rules = conditions.get("rules", [])
-        
+
         results = []
         for rule in rules:
             rule_type = rule.get("type")
-            
+
             if rule_type == "time_range":
                 now = datetime.now().time()
                 start = datetime.strptime(rule["start"], "%H:%M").time()
                 end = datetime.strptime(rule["end"], "%H:%M").time()
                 results.append(start <= now <= end)
-            
+
             elif rule_type == "day_of_week":
                 allowed_days = rule["days"]
                 current_day = datetime.now().strftime("%A")
                 results.append(current_day in allowed_days)
-            
+
             elif rule_type == "role_hierarchy":
                 user_roles = context.get("user_roles", [])
                 required_role_id = int(rule["role_id"])
                 comparison = rule.get("comparison", "has")
-                
+
                 if comparison == "has":
                     results.append(required_role_id in user_roles)
                 elif comparison == "above":
                     results.append(any(r > required_role_id for r in user_roles))
                 elif comparison == "below":
                     results.append(any(r < required_role_id for r in user_roles))
-            
+
             elif rule_type == "message_count":
                 msg_count = context.get("message_count", 0)
                 operator = rule["operator"]
                 value = int(rule["value"])
-                
+
                 if operator == ">":
                     results.append(msg_count > value)
                 elif operator == "<":
                     results.append(msg_count < value)
                 elif operator == "==":
                     results.append(msg_count == value)
-            
+
             elif rule_type == "user_age":
                 created_at = context.get("user_created_at")
                 if created_at:
@@ -68,43 +72,56 @@ class AdvancedConditionEngine:
                     results.append(age_days >= min_days)
                 else:
                     results.append(False)
-            
+
             elif rule_type == "custom_variable":
                 var_name = rule["variable"]
                 operator = rule["operator"]
                 value = rule["value"]
                 actual_value = context.get(var_name)
-                
+
                 if operator == "==":
                     results.append(str(actual_value) == str(value))
                 elif operator == "contains":
                     results.append(str(value) in str(actual_value))
-        
+
         if logic == "AND":
             return all(results) if results else True
         else:
             return any(results) if results else False
 
 class EventHooksCreater(commands.Cog):
+    hooks_group = app_commands.Group(name="hooks", description="Manage event hooks for this server")
+
     def __init__(self, bot):
         self.bot = bot
         self.config_file = Path("./data/event_hooks_creater.json")
         self.analytics_file = Path("./data/hook_analytics.json")
         self.config_file.parent.mkdir(parents=True, exist_ok=True)
-        
+
         self.created_hooks = self._load_created_hooks()
         self.templates = self._get_templates()
         self._cooldowns = defaultdict(dict)
         self._analytics = self._load_analytics()
         self._user_message_counts = defaultdict(int)
         self._scheduled_tasks = {}
-        
+        self._registered_hook_ids: set = set()
+        self._dirty: bool = False
+        self._xp_data: Dict[str, Dict[str, int]] = {}  # key: "guild_id:user_id" -> {"xp": int, "level": int}
+        self._temp_voice_channels: Dict[int, str] = {}  # temp_channel_id -> hook_id
+
         self.condition_engine = AdvancedConditionEngine()
         self._register_all_hooks()
         self.analytics_task.start()
-        
+        self.auto_save_task.start()
+
         logger.info(f"EventHooksCreater: Initialized with {len(self.created_hooks)} created hooks")
-    
+
+    def cog_unload(self):
+        self.analytics_task.cancel()
+        self.auto_save_task.cancel()
+        for hook in self.created_hooks:
+            self._unregister_hook(hook)
+
     def _load_analytics(self) -> Dict:
         if self.analytics_file.exists():
             try:
@@ -113,7 +130,7 @@ class EventHooksCreater(commands.Cog):
             except:
                 return {}
         return {}
-    
+
     async def _save_analytics(self):
         try:
             content = json.dumps(self._analytics, indent=2)
@@ -125,7 +142,13 @@ class EventHooksCreater(commands.Cog):
     @tasks.loop(minutes=5)
     async def analytics_task(self):
         await self._save_analytics()
-    
+
+    @tasks.loop(seconds=60)
+    async def auto_save_task(self):
+        if self._dirty:
+            await self._save_created_hooks()
+            self._dirty = False
+
     def _track_execution(self, hook_id: str, success: bool = True, context: Dict = None):
         if hook_id not in self._analytics:
             self._analytics[hook_id] = {
@@ -136,15 +159,15 @@ class EventHooksCreater(commands.Cog):
                 "execution_times": [],
                 "contexts": []
             }
-        
+
         self._analytics[hook_id]["total_executions"] += 1
         if success:
             self._analytics[hook_id]["successful"] += 1
         else:
             self._analytics[hook_id]["failed"] += 1
-        
+
         self._analytics[hook_id]["last_execution"] = datetime.now().isoformat()
-        
+
         if context:
             self._analytics[hook_id]["contexts"].append({
                 "timestamp": datetime.now().isoformat(),
@@ -152,83 +175,95 @@ class EventHooksCreater(commands.Cog):
                 "guild_id": context.get("guild_id"),
                 "success": success
             })
-            
+
             if len(self._analytics[hook_id]["contexts"]) > 100:
                 self._analytics[hook_id]["contexts"] = self._analytics[hook_id]["contexts"][-100:]
-    
+
     def _check_cooldown(self, hook_id: str, user_id: int, cooldown_seconds: int) -> bool:
         if hook_id not in self._cooldowns:
             self._cooldowns[hook_id] = {}
-        
+
         last_use = self._cooldowns[hook_id].get(user_id)
         if last_use:
             elapsed = (datetime.now() - last_use).total_seconds()
             if elapsed < cooldown_seconds:
                 return False
-        
+
         self._cooldowns[hook_id][user_id] = datetime.now()
         return True
-    
+
     def _format_message(self, template: str, **kwargs) -> str:
         result = template
-        
+
         for key, value in kwargs.items():
             result = result.replace(f"{{{key}}}", str(value))
-        
+
         result = result.replace("{random:1-100}", str(random.randint(1, 100)))
         result = result.replace("{timestamp}", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
         result = result.replace("{date}", datetime.now().strftime("%Y-%m-%d"))
         result = result.replace("{time}", datetime.now().strftime("%H:%M:%S"))
-        
+
         if "{math:" in result:
-            math_pattern = r'\{math:([\d\+\-\*/\(\)\s]+)\}'
+            math_pattern = r'\{math:([\d\+\-\*/\(\)\s\.]+)\}'
+            _SAFE_OPS = {
+                ast.Add: _op.add, ast.Sub: _op.sub,
+                ast.Mult: _op.mul, ast.Div: _op.truediv,
+            }
+            def _safe_eval(node):
+                if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+                    return node.value
+                if isinstance(node, ast.BinOp) and type(node.op) in _SAFE_OPS:
+                    return _SAFE_OPS[type(node.op)](_safe_eval(node.left), _safe_eval(node.right))
+                if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
+                    return -_safe_eval(node.operand)
+                raise ValueError("Unsafe expression")
             for match in re.finditer(math_pattern, result):
                 try:
-                    expression = match.group(1)
-                    value = eval(expression)
-                    result = result.replace(match.group(0), str(value))
-                except:
+                    tree = ast.parse(match.group(1).strip(), mode='eval')
+                    value = _safe_eval(tree.body)
+                    result = result.replace(match.group(0), str(round(value, 4)))
+                except Exception:
                     pass
-        
+
         return result
-    
+
     def _create_embed(self, embed_config: Dict[str, Any], **variables) -> discord.Embed:
         title = self._format_message(embed_config.get("title", ""), **variables)
         description = self._format_message(embed_config.get("description", ""), **variables)
         color_hex = embed_config.get("color", "7C3AED")
-        
+
         try:
             color = int(color_hex, 16) if isinstance(color_hex, str) else color_hex
         except:
             color = 0x7C3AED
-        
+
         embed = discord.Embed(
             title=title if title else None,
             description=description if description else None,
             color=color,
             timestamp=datetime.now() if embed_config.get("timestamp", True) else None
         )
-        
+
         if embed_config.get("thumbnail"):
             thumb = self._format_message(embed_config["thumbnail"], **variables)
             if thumb == "avatar" and "user_avatar" in variables:
                 embed.set_thumbnail(url=variables["user_avatar"])
             else:
                 embed.set_thumbnail(url=thumb)
-        
+
         if embed_config.get("image"):
             embed.set_image(url=self._format_message(embed_config["image"], **variables))
-        
+
         if embed_config.get("footer"):
             embed.set_footer(text=self._format_message(embed_config["footer"], **variables))
-        
+
         for field in embed_config.get("fields", []):
             name = self._format_message(field["name"], **variables)
             value = self._format_message(field["value"], **variables)
             embed.add_field(name=name, value=value, inline=field.get("inline", False))
-        
+
         return embed
-    
+
     async def _execute_webhook(self, webhook_url: str, payload: Dict):
         try:
             async with aiohttp.ClientSession() as session:
@@ -244,12 +279,12 @@ class EventHooksCreater(commands.Cog):
         except Exception as e:
             logger.error(f"[WEBHOOK_BRIDGE] Webhook execution exception: {e}")
             return False
-    
+
     async def _execute_actions(self, actions: List[Dict], context: Dict, hook: Dict):
         for action in actions:
             try:
                 action_type = action.get("type")
-                
+
                 if action_type == "send_message":
                     channel_id = int(action["channel_id"])
                     channel = self.bot.get_channel(channel_id)
@@ -261,7 +296,7 @@ class EventHooksCreater(commands.Cog):
                         else:
                             message = self._format_message(action["message"], **context)
                             await channel.send(message)
-                
+
                 elif action_type == "add_role":
                     member = context.get("member")
                     role_id = int(action["role_id"])
@@ -269,7 +304,7 @@ class EventHooksCreater(commands.Cog):
                         role = member.guild.get_role(role_id)
                         if role:
                             await member.add_roles(role)
-                
+
                 elif action_type == "remove_role":
                     member = context.get("member")
                     role_id = int(action["role_id"])
@@ -277,13 +312,13 @@ class EventHooksCreater(commands.Cog):
                         role = member.guild.get_role(role_id)
                         if role and role in member.roles:
                             await member.remove_roles(role)
-                
+
                 elif action_type == "timeout":
                     member = context.get("member")
                     duration = int(action.get("duration", 60))
                     if member:
                         await member.timeout(timedelta(seconds=duration))
-                
+
                 elif action_type == "send_dm":
                     member = context.get("member")
                     if member:
@@ -292,34 +327,34 @@ class EventHooksCreater(commands.Cog):
                             await member.send(message)
                         except:
                             pass
-                
+
                 elif action_type == "webhook":
                     webhook_url = action["url"]
                     payload = action.get("payload", {})
                     formatted_payload = json.loads(self._format_message(json.dumps(payload), **context))
                     await self._execute_webhook(webhook_url, formatted_payload)
-                
+
                 elif action_type == "create_role":
                     guild = context.get("guild")
                     if guild:
                         role_name = self._format_message(action["role_name"], **context)
                         color = discord.Color(int(action.get("color", "7C3AED"), 16))
                         await guild.create_role(name=role_name, color=color)
-                
+
                 elif action_type == "delay":
                     delay_seconds = int(action.get("seconds", 1))
                     await asyncio.sleep(delay_seconds)
-                
+
                 elif action_type == "trigger_hook":
                     target_hook_id = action["hook_id"]
                     target_hook = next((h for h in self.created_hooks if h["hook_id"] == target_hook_id), None)
                     if target_hook and target_hook.get("enabled"):
                         await self._execute_actions(target_hook.get("actions", []), context, target_hook)
-                
+
             except Exception as e:
                 logger.error(f"Action execution failed ({action_type}): {e}")
                 self._track_execution(hook["hook_id"], success=False, context=context)
-    
+
     def _get_templates(self) -> List[Dict[str, Any]]:
         return [
             {
@@ -751,7 +786,7 @@ class EventHooksCreater(commands.Cog):
                 ]
             }
         ]
-    
+
     def _load_created_hooks(self) -> List[Dict[str, Any]]:
         if self.config_file.exists():
             try:
@@ -760,7 +795,7 @@ class EventHooksCreater(commands.Cog):
             except Exception as e:
                 logger.error(f"EventHooksCreater: Failed to load hooks: {e}")
         return []
-    
+
     async def _save_created_hooks(self):
         try:
             # Create a copy without handler functions (not JSON serializable)
@@ -774,7 +809,7 @@ class EventHooksCreater(commands.Cog):
                 await f.write(content)
         except Exception as e:
             logger.error(f"EventHooksCreater: Failed to save hooks: {e}")
-    
+
     def _register_all_hooks(self):
         for hook in self.created_hooks:
             if hook.get("enabled", True):
@@ -782,22 +817,34 @@ class EventHooksCreater(commands.Cog):
                     self._register_hook(hook)
                 except Exception as e:
                     logger.error(f"EventHooksCreater: Failed to register hook {hook.get('hook_id')}: {e}")
-    
+
     def _register_hook(self, hook: Dict[str, Any]):
         template_id = hook["template_id"]
-        logger.info(f"[_register_hook] Registering hook {hook.get('hook_id')} with template {template_id}")
-        
+        hook_id = hook.get("hook_id")
+        if hook_id in self._registered_hook_ids:
+            logger.debug(f"[_register_hook] Hook {hook_id} already registered, skipping")
+            return
+        logger.info(f"[_register_hook] Registering hook {hook_id} with template {template_id}")
+
         if template_id == "mega_welcome":
             async def mega_welcome_handler(member):
                 if member.guild.id != hook["guild_id"]:
                     return
-                
+
+                if hook.get("conditions"):
+                    ctx = {
+                        "user_roles": [r.id for r in getattr(member, 'roles', [])],
+                        "user_created_at": getattr(member, 'created_at', datetime.now()).replace(tzinfo=None),
+                    }
+                    if not self.condition_engine.evaluate(hook["conditions"], ctx):
+                        return
+
                 try:
                     channel_id = int(hook["params"].get("welcome_channel_id"))
                     channel = self.bot.get_channel(channel_id)
                     if not channel:
                         return
-                    
+
                     context = {
                         "user": member.mention,
                         "username": member.name,
@@ -805,9 +852,9 @@ class EventHooksCreater(commands.Cog):
                         "member_count": member.guild.member_count,
                         "user_avatar": member.display_avatar.url
                     }
-                    
+
                     message = self._format_message(hook["params"]["welcome_message"], **context)
-                    
+
                     if hook["params"].get("use_embed", True):
                         embed_title = self._format_message(hook["params"].get("embed_title", "Welcome!"), **context)
                         embed = discord.Embed(
@@ -820,52 +867,61 @@ class EventHooksCreater(commands.Cog):
                         await channel.send(embed=embed)
                     else:
                         await channel.send(message)
-                    
+
                     if hook["params"].get("auto_role_id"):
                         role_id = int(hook["params"]["auto_role_id"])
                         role = member.guild.get_role(role_id)
                         if role:
                             await member.add_roles(role)
-                    
+
                     if hook["params"].get("send_dm", False):
                         dm_message = self._format_message(hook["params"].get("dm_message", "Welcome!"), **context)
                         try:
                             await member.send(dm_message)
                         except:
                             pass
-                    
+
                     self._track_execution(hook["hook_id"], success=True, context={"user_id": member.id, "guild_id": member.guild.id})
                     hook["execution_count"] = hook.get("execution_count", 0) + 1
-                    await self._save_created_hooks()
-                    
+                    self._dirty = True
+
                 except Exception as e:
                     hook["error_count"] = hook.get("error_count", 0) + 1
                     logger.error(f"Mega welcome error: {e}")
                     self._track_execution(hook["hook_id"], success=False)
-                    await self._save_created_hooks()
-            
+                    self._dirty = True
+
             self.bot.add_listener(mega_welcome_handler, "on_member_join")
             hook["_handler"] = mega_welcome_handler
-        
+            self._registered_hook_ids.add(hook_id)
+
         elif template_id == "goodbye_system":
             async def goodbye_handler(member):
                 if member.guild.id != hook["guild_id"]:
                     return
-                
+
+                if hook.get("conditions"):
+                    ctx = {
+                        "user_roles": [r.id for r in getattr(member, 'roles', [])],
+                        "user_created_at": getattr(member, 'created_at', datetime.now()).replace(tzinfo=None),
+                    }
+                    if not self.condition_engine.evaluate(hook["conditions"], ctx):
+                        return
+
                 try:
                     channel_id = int(hook["params"].get("goodbye_channel_id"))
                     channel = self.bot.get_channel(channel_id)
                     if not channel:
                         return
-                    
+
                     context = {
                         "username": member.name,
                         "user_id": member.id,
                         "guild_name": member.guild.name
                     }
-                    
+
                     message = self._format_message(hook["params"]["goodbye_message"], **context)
-                    
+
                     if hook["params"].get("use_embed", True):
                         embed = discord.Embed(
                             description=message,
@@ -875,41 +931,50 @@ class EventHooksCreater(commands.Cog):
                         await channel.send(embed=embed)
                     else:
                         await channel.send(message)
-                    
+
                     self._track_execution(hook["hook_id"], success=True, context={"user_id": member.id, "guild_id": member.guild.id})
                     hook["execution_count"] = hook.get("execution_count", 0) + 1
-                    await self._save_created_hooks()
-                    
+                    self._dirty = True
+
                 except Exception as e:
                     hook["error_count"] = hook.get("error_count", 0) + 1
                     logger.error(f"Goodbye system error: {e}")
                     self._track_execution(hook["hook_id"], success=False)
-                    await self._save_created_hooks()
-            
+                    self._dirty = True
+
             self.bot.add_listener(goodbye_handler, "on_member_remove")
             hook["_handler"] = goodbye_handler
-        
+            self._registered_hook_ids.add(hook_id)
+
         elif template_id == "webhook_bridge":
             async def webhook_bridge_handler(message):
                 if message.guild and message.guild.id != hook["guild_id"]:
                     return
-                
+
+                if hook.get("conditions"):
+                    ctx = {
+                        "user_roles": [r.id for r in getattr(message.author, 'roles', [])],
+                        "user_created_at": getattr(message.author, 'created_at', datetime.now()).replace(tzinfo=None),
+                    }
+                    if not self.condition_engine.evaluate(hook["conditions"], ctx):
+                        return
+
                 if not hook["params"].get("include_bots", False) and message.author.bot:
                     return
-                
+
                 trigger_channels = hook["params"].get("trigger_channels", "")
                 if trigger_channels:
                     channel_ids = [ch.strip() for ch in trigger_channels.split(",")]
                     if str(message.channel.id) not in channel_ids:
                         return
-                
+
                 try:
                     webhook_url = hook["params"]["webhook_url"]
                     payload_template = hook["params"].get("payload_template", {})
-                    
+
                     if isinstance(payload_template, str):
                         payload_template = json.loads(payload_template)
-                    
+
                     context = {
                         "message": message.content,
                         "username": message.author.name,
@@ -920,67 +985,76 @@ class EventHooksCreater(commands.Cog):
                         "guild_name": message.guild.name if message.guild else "DM",
                         "timestamp": datetime.now().isoformat()
                     }
-                    
+
                     payload = {}
                     for key, value in payload_template.items():
                         if isinstance(value, str):
                             payload[key] = self._format_message(value, **context)
                         else:
                             payload[key] = value
-                    
+
                     logger.info(f"[WEBHOOK_BRIDGE] Sending from {message.author.name}: '{message.content[:50]}...'")
                     success = await self._execute_webhook(webhook_url, payload)
-                    
+
                     hook["execution_count"] = hook.get("execution_count", 0) + 1
                     if not success:
                         hook["error_count"] = hook.get("error_count", 0) + 1
                     self._track_execution(hook["hook_id"], success=success, context={"user_id": message.author.id, "guild_id": message.guild.id if message.guild else 0})
-                    await self._save_created_hooks()
-                    
+                    self._dirty = True
+
                 except Exception as e:
                     hook["execution_count"] = hook.get("execution_count", 0) + 1
                     hook["error_count"] = hook.get("error_count", 0) + 1
                     logger.error(f"[WEBHOOK_BRIDGE] Error: {e}", exc_info=True)
                     self._track_execution(hook["hook_id"], success=False)
-                    await self._save_created_hooks()
-            
+                    self._dirty = True
+
             self.bot.add_listener(webhook_bridge_handler, "on_message")
             hook["_handler"] = webhook_bridge_handler
+            self._registered_hook_ids.add(hook_id)
             logger.info(f"EventHooksCreater: Registered webhook_bridge handler for hook {hook['hook_id']}")
-        
+
         elif template_id == "message_filter":
             async def message_filter_handler(message):
                 if message.guild and message.guild.id != hook["guild_id"]:
                     return
-                
+
                 if message.author.bot:
                     return
-                
+
+                if hook.get("conditions"):
+                    ctx = {
+                        "user_roles": [r.id for r in getattr(message.author, 'roles', [])],
+                        "user_created_at": getattr(message.author, 'created_at', datetime.now()).replace(tzinfo=None),
+                    }
+                    if not self.condition_engine.evaluate(hook["conditions"], ctx):
+                        return
+
                 ignore_roles = hook["params"].get("ignore_roles", "")
                 if ignore_roles and message.guild:
                     ignore_role_ids = [int(r.strip()) for r in ignore_roles.split(",") if r.strip().isdigit()]
                     if any(role.id in ignore_role_ids for role in message.author.roles):
                         return
-                
+
                 try:
                     banned_words = hook["params"]["banned_words"].split("\n")
                     banned_words = [w.strip() for w in banned_words if w.strip()]
-                    
+
                     case_sensitive = hook["params"].get("case_sensitive", False)
                     content = message.content if case_sensitive else message.content.lower()
-                    
+
                     triggered = False
                     for word in banned_words:
                         check_word = word if case_sensitive else word.lower()
                         if check_word in content:
                             triggered = True
                             break
-                    
+
                     if not triggered:
                         return
-                    
+
                     action = hook["params"].get("action", "delete")
-                    
+
                     if action == "delete":
                         await message.delete()
                     elif action == "timeout" and message.guild:
@@ -991,7 +1065,7 @@ class EventHooksCreater(commands.Cog):
                             await message.author.send(f"⚠️ Your message in {message.guild.name} was flagged by the message filter.")
                         except:
                             pass
-                    
+
                     if hook["params"].get("log_channel_id"):
                         log_channel = self.bot.get_channel(int(hook["params"]["log_channel_id"]))
                         if log_channel:
@@ -1003,138 +1077,457 @@ class EventHooksCreater(commands.Cog):
                             )
                             embed.add_field(name="Message Content", value=message.content[:1024], inline=False)
                             await log_channel.send(embed=embed)
-                    
+
                     self._track_execution(hook["hook_id"], success=True, context={"user_id": message.author.id, "guild_id": message.guild.id if message.guild else 0})
                     hook["execution_count"] = hook.get("execution_count", 0) + 1
-                    await self._save_created_hooks()
-                    
+                    self._dirty = True
+
                 except Exception as e:
                     hook["error_count"] = hook.get("error_count", 0) + 1
                     logger.error(f"Message filter error: {e}")
                     self._track_execution(hook["hook_id"], success=False)
-                    await self._save_created_hooks()
-            
+                    self._dirty = True
+
             self.bot.add_listener(message_filter_handler, "on_message")
             hook["_handler"] = message_filter_handler
-        
+            self._registered_hook_ids.add(hook_id)
+
         elif template_id == "auto_role_on_reaction":
             async def reaction_role_handler(payload):
                 if payload.guild_id != hook["guild_id"]:
                     return
-                
+
+                if hook.get("conditions"):
+                    guild = self.bot.get_guild(payload.guild_id)
+                    if guild:
+                        member = guild.get_member(payload.user_id)
+                        if member:
+                            ctx = {
+                                "user_roles": [r.id for r in member.roles],
+                                "user_created_at": member.created_at.replace(tzinfo=None),
+                            }
+                            if not self.condition_engine.evaluate(hook["conditions"], ctx):
+                                return
+
                 try:
                     message_id = int(hook["params"]["message_id"])
                     if payload.message_id != message_id:
                         return
-                    
+
                     role_emoji_map = hook["params"].get("role_emoji_map", {})
                     if isinstance(role_emoji_map, str):
                         role_emoji_map = json.loads(role_emoji_map)
-                    
+
                     emoji_str = str(payload.emoji)
                     if emoji_str not in role_emoji_map:
                         return
-                    
+
                     guild = self.bot.get_guild(payload.guild_id)
                     if not guild:
                         return
-                    
+
                     role_id = int(role_emoji_map[emoji_str])
                     role = guild.get_role(role_id)
                     if not role:
                         return
-                    
+
                     member = guild.get_member(payload.user_id)
                     if not member or member.bot:
                         return
-                    
+
                     await member.add_roles(role)
-                    
+
                     self._track_execution(hook["hook_id"], success=True, context={"user_id": member.id, "guild_id": guild.id})
                     hook["execution_count"] = hook.get("execution_count", 0) + 1
-                    await self._save_created_hooks()
-                    
+                    self._dirty = True
+
                 except Exception as e:
                     hook["error_count"] = hook.get("error_count", 0) + 1
                     logger.error(f"Reaction role error: {e}")
                     self._track_execution(hook["hook_id"], success=False)
-                    await self._save_created_hooks()
-            
+                    self._dirty = True
+
             async def reaction_role_remove_handler(payload):
                 if not hook["params"].get("remove_role_on_unreact", True):
                     return
-                
+
                 if payload.guild_id != hook["guild_id"]:
                     return
-                
+
                 try:
                     message_id = int(hook["params"]["message_id"])
                     if payload.message_id != message_id:
                         return
-                    
+
                     role_emoji_map = hook["params"].get("role_emoji_map", {})
                     if isinstance(role_emoji_map, str):
                         role_emoji_map = json.loads(role_emoji_map)
-                    
+
                     emoji_str = str(payload.emoji)
                     if emoji_str not in role_emoji_map:
                         return
-                    
+
                     guild = self.bot.get_guild(payload.guild_id)
                     if not guild:
                         return
-                    
+
                     role_id = int(role_emoji_map[emoji_str])
                     role = guild.get_role(role_id)
                     if not role:
                         return
-                    
+
                     member = guild.get_member(payload.user_id)
                     if not member or member.bot:
                         return
-                    
+
                     await member.remove_roles(role)
-                    
+
                 except Exception as e:
                     logger.error(f"Reaction role remove error: {e}")
-            
+
             self.bot.add_listener(reaction_role_handler, "on_raw_reaction_add")
             self.bot.add_listener(reaction_role_remove_handler, "on_raw_reaction_remove")
             hook["_handler"] = reaction_role_handler
             hook["_handler_remove"] = reaction_role_remove_handler
-        
+            self._registered_hook_ids.add(hook_id)
+
+        elif template_id == "leveling_system":
+            async def leveling_handler(message):
+                if message.guild and message.guild.id != hook["guild_id"]:
+                    return
+                if message.author.bot:
+                    return
+
+                xp_cooldown = int(hook["params"].get("xp_cooldown", 60))
+                if not self._check_cooldown(hook["hook_id"], message.author.id, xp_cooldown):
+                    return
+
+                if hook.get("conditions"):
+                    ctx = {
+                        "user_roles": [r.id for r in message.author.roles],
+                        "user_created_at": message.author.created_at.replace(tzinfo=None),
+                        "message_count": self._user_message_counts[message.author.id],
+                    }
+                    if not self.condition_engine.evaluate(hook["conditions"], ctx):
+                        return
+
+                try:
+                    xp_per_message = int(hook["params"].get("xp_per_message", 10))
+                    key = f"{message.guild.id}:{message.author.id}"
+                    if key not in self._xp_data:
+                        self._xp_data[key] = {"xp": 0, "level": 0}
+
+                    self._xp_data[key]["xp"] += xp_per_message
+                    current_xp = self._xp_data[key]["xp"]
+                    new_level = int((current_xp / 100) ** 0.5)
+                    old_level = self._xp_data[key]["level"]
+
+                    if new_level > old_level:
+                        self._xp_data[key]["level"] = new_level
+                        role_rewards_raw = hook["params"].get("role_rewards", {})
+                        if isinstance(role_rewards_raw, str):
+                            try:
+                                role_rewards_raw = json.loads(role_rewards_raw)
+                            except Exception:
+                                role_rewards_raw = {}
+                        for level_threshold, role_id in role_rewards_raw.items():
+                            if new_level >= int(level_threshold):
+                                role = message.guild.get_role(int(role_id))
+                                if role and role not in message.author.roles:
+                                    try:
+                                        await message.author.add_roles(role)
+                                    except Exception:
+                                        pass
+
+                        levelup_channel_id = hook["params"].get("levelup_channel_id")
+                        if levelup_channel_id:
+                            levelup_channel = self.bot.get_channel(int(levelup_channel_id))
+                            if levelup_channel:
+                                context = {
+                                    "user": message.author.mention,
+                                    "username": message.author.name,
+                                    "level": new_level,
+                                    "xp": current_xp,
+                                    "guild_name": message.guild.name,
+                                }
+                                levelup_msg = hook["params"].get("levelup_message", "Congrats {user}! You reached level {level}!")
+                                await levelup_channel.send(self._format_message(levelup_msg, **context))
+
+                    self._user_message_counts[message.author.id] += 1
+                    hook["execution_count"] = hook.get("execution_count", 0) + 1
+                    self._dirty = True
+                    self._track_execution(hook["hook_id"], success=True, context={"user_id": message.author.id, "guild_id": message.guild.id})
+                except Exception as e:
+                    hook["error_count"] = hook.get("error_count", 0) + 1
+                    self._dirty = True
+                    logger.error(f"Leveling system error: {e}")
+                    self._track_execution(hook["hook_id"], success=False)
+
+            self.bot.add_listener(leveling_handler, "on_message")
+            hook["_handler"] = leveling_handler
+            self._registered_hook_ids.add(hook_id)
+
+        elif template_id == "scheduled_announcement":
+            interval_hours = float(hook["params"].get("interval_hours", 24))
+
+            async def announcement_loop():
+                await self.bot.wait_until_ready()
+                while True:
+                    await asyncio.sleep(interval_hours * 3600)
+                    if not hook.get("enabled", True):
+                        continue
+                    try:
+                        channel_id = int(hook["params"]["announcement_channel_id"])
+                        channel = self.bot.get_channel(channel_id)
+                        if not channel:
+                            continue
+                        context = {"guild_name": getattr(channel.guild, 'name', ''), "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+                        msg_text = self._format_message(hook["params"]["announcement_message"], **context)
+                        if hook["params"].get("use_embed", True):
+                            embed = discord.Embed(description=msg_text, color=0x5865F2, timestamp=datetime.now())
+                            await channel.send(embed=embed)
+                        else:
+                            await channel.send(msg_text)
+                        hook["execution_count"] = hook.get("execution_count", 0) + 1
+                        self._dirty = True
+                        self._track_execution(hook["hook_id"], success=True, context={"guild_id": getattr(channel.guild, 'id', 0)})
+                    except asyncio.CancelledError:
+                        break
+                    except Exception as e:
+                        hook["error_count"] = hook.get("error_count", 0) + 1
+                        self._dirty = True
+                        logger.error(f"Scheduled announcement error: {e}")
+
+            task = asyncio.ensure_future(announcement_loop())
+            self._scheduled_tasks[hook["hook_id"]] = task
+            self._registered_hook_ids.add(hook_id)
+
+        elif template_id == "ticket_system":
+            async def ticket_handler(payload):
+                if payload.guild_id != hook["guild_id"]:
+                    return
+                try:
+                    trigger_msg_id = int(hook["params"]["trigger_message_id"])
+                    if payload.message_id != trigger_msg_id:
+                        return
+                    trigger_emoji = hook["params"].get("trigger_emoji", "🎫")
+                    if str(payload.emoji) != trigger_emoji:
+                        return
+
+                    guild = self.bot.get_guild(payload.guild_id)
+                    if not guild:
+                        return
+                    member = guild.get_member(payload.user_id)
+                    if not member or member.bot:
+                        return
+
+                    if hook.get("conditions"):
+                        ctx = {"user_roles": [r.id for r in member.roles], "user_created_at": member.created_at.replace(tzinfo=None)}
+                        if not self.condition_engine.evaluate(hook["conditions"], ctx):
+                            return
+
+                    category_id = int(hook["params"]["ticket_category_id"])
+                    category = guild.get_channel(category_id)
+                    support_role_id = int(hook["params"]["support_role_id"])
+                    support_role = guild.get_role(support_role_id)
+
+                    name_template = hook["params"].get("ticket_name_template", "ticket-{username}")
+                    channel_name = self._format_message(name_template, username=member.name.lower().replace(" ", "-"))[:100]
+
+                    existing = discord.utils.get(guild.text_channels, name=channel_name)
+                    if existing:
+                        try:
+                            msg = await guild.get_channel(payload.channel_id).fetch_message(payload.message_id)
+                            await msg.remove_reaction(payload.emoji, member)
+                        except Exception:
+                            pass
+                        return
+
+                    overwrites = {
+                        guild.default_role: discord.PermissionOverwrite(read_messages=False),
+                        member: discord.PermissionOverwrite(read_messages=True, send_messages=True),
+                        guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True, manage_channels=True),
+                    }
+                    if support_role:
+                        overwrites[support_role] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
+
+                    ticket_channel = await guild.create_text_channel(
+                        name=channel_name,
+                        category=category,
+                        overwrites=overwrites,
+                        topic=f"Support ticket for {member.name}"
+                    )
+                    await ticket_channel.send(
+                        embed=discord.Embed(
+                            title="🎫 Support Ticket",
+                            description=f"Welcome {member.mention}! A staff member will be with you shortly.\nTo close this ticket, contact a staff member.",
+                            color=0x5865F2,
+                            timestamp=datetime.now()
+                        )
+                    )
+                    try:
+                        source_channel = guild.get_channel(payload.channel_id)
+                        if source_channel:
+                            msg = await source_channel.fetch_message(payload.message_id)
+                            await msg.remove_reaction(payload.emoji, member)
+                    except Exception:
+                        pass
+
+                    hook["execution_count"] = hook.get("execution_count", 0) + 1
+                    self._dirty = True
+                    self._track_execution(hook["hook_id"], success=True, context={"user_id": member.id, "guild_id": guild.id})
+                except Exception as e:
+                    hook["error_count"] = hook.get("error_count", 0) + 1
+                    self._dirty = True
+                    logger.error(f"Ticket system error: {e}")
+                    self._track_execution(hook["hook_id"], success=False)
+
+            self.bot.add_listener(ticket_handler, "on_raw_reaction_add")
+            hook["_handler"] = ticket_handler
+            self._registered_hook_ids.add(hook_id)
+
+        elif template_id == "voice_activity_tracker":
+            async def voice_tracker_handler(member, before, after):
+                if member.guild.id != hook["guild_id"]:
+                    return
+                if member.bot:
+                    return
+
+                if hook.get("conditions"):
+                    ctx = {"user_roles": [r.id for r in member.roles], "user_created_at": member.created_at.replace(tzinfo=None)}
+                    if not self.condition_engine.evaluate(hook["conditions"], ctx):
+                        return
+
+                try:
+                    log_channel_id = int(hook["params"]["log_channel_id"])
+                    log_channel = self.bot.get_channel(log_channel_id)
+                    if not log_channel:
+                        return
+
+                    log_joins = hook["params"].get("log_joins", True)
+                    log_leaves = hook["params"].get("log_leaves", True)
+                    log_mutes = hook["params"].get("log_mutes", False)
+
+                    event_text = None
+                    color = 0x5865F2
+
+                    if before.channel is None and after.channel is not None and log_joins:
+                        event_text = f"🔊 **{member.display_name}** joined **{after.channel.name}**"
+                        color = 0x43B581
+                    elif before.channel is not None and after.channel is None and log_leaves:
+                        event_text = f"🔇 **{member.display_name}** left **{before.channel.name}**"
+                        color = 0xFF4444
+                    elif before.channel == after.channel and log_mutes:
+                        if not before.self_mute and after.self_mute:
+                            event_text = f"🔕 **{member.display_name}** muted themselves in **{after.channel.name}**"
+                            color = 0xFAA61A
+                        elif before.self_mute and not after.self_mute:
+                            event_text = f"🔔 **{member.display_name}** unmuted themselves in **{after.channel.name}**"
+                            color = 0x43B581
+
+                    if event_text:
+                        embed = discord.Embed(description=event_text, color=color, timestamp=datetime.now())
+                        embed.set_thumbnail(url=member.display_avatar.url)
+                        await log_channel.send(embed=embed)
+                        hook["execution_count"] = hook.get("execution_count", 0) + 1
+                        self._dirty = True
+                        self._track_execution(hook["hook_id"], success=True, context={"user_id": member.id, "guild_id": member.guild.id})
+
+                except Exception as e:
+                    hook["error_count"] = hook.get("error_count", 0) + 1
+                    self._dirty = True
+                    logger.error(f"Voice tracker error: {e}")
+                    self._track_execution(hook["hook_id"], success=False)
+
+            self.bot.add_listener(voice_tracker_handler, "on_voice_state_update")
+            hook["_handler"] = voice_tracker_handler
+            self._registered_hook_ids.add(hook_id)
+
+        elif template_id == "dynamic_voice_channels":
+            async def dynamic_vc_handler(member, before, after):
+                if member.guild.id != hook["guild_id"]:
+                    return
+                if member.bot:
+                    return
+                try:
+                    trigger_id = int(hook["params"]["trigger_channel_id"])
+                    category_id = int(hook["params"]["category_id"])
+                    user_limit = int(hook["params"].get("user_limit", 0))
+                    delete_when_empty = hook["params"].get("delete_when_empty", True)
+
+                    # User joined the trigger channel -> create a temp channel
+                    if after.channel and after.channel.id == trigger_id:
+                        category = member.guild.get_channel(category_id)
+                        name_template = hook["params"].get("channel_name_template", "{username}'s Channel")
+                        channel_name = self._format_message(name_template, username=member.display_name)[:100]
+                        new_vc = await member.guild.create_voice_channel(
+                            name=channel_name,
+                            category=category,
+                            user_limit=user_limit if user_limit > 0 else None,
+                        )
+                        self._temp_voice_channels[new_vc.id] = hook["hook_id"]
+                        try:
+                            await member.move_to(new_vc)
+                        except Exception:
+                            pass
+                        hook["execution_count"] = hook.get("execution_count", 0) + 1
+                        self._dirty = True
+                        self._track_execution(hook["hook_id"], success=True, context={"user_id": member.id, "guild_id": member.guild.id})
+
+                    # User left a temp channel -> delete it if empty
+                    if delete_when_empty and before.channel and before.channel.id in self._temp_voice_channels:
+                        if self._temp_voice_channels[before.channel.id] == hook["hook_id"]:
+                            if len(before.channel.members) == 0:
+                                try:
+                                    await before.channel.delete()
+                                except Exception:
+                                    pass
+                                self._temp_voice_channels.pop(before.channel.id, None)
+
+                except Exception as e:
+                    hook["error_count"] = hook.get("error_count", 0) + 1
+                    self._dirty = True
+                    logger.error(f"Dynamic voice channels error: {e}")
+                    self._track_execution(hook["hook_id"], success=False)
+
+            self.bot.add_listener(dynamic_vc_handler, "on_voice_state_update")
+            hook["_handler"] = dynamic_vc_handler
+            self._registered_hook_ids.add(hook_id)
+
         else:
             logger.warning(f"[_register_hook] No handler implementation for template '{template_id}' - hook will be created but won't trigger")
-    
+
     def _unregister_hook(self, hook: Dict[str, Any]):
         if "_handler" in hook:
             event_name = hook["event"]
             if event_name != "scheduled":
                 self.bot.remove_listener(hook["_handler"], event_name)
             del hook["_handler"]
-        
+
         if "_handler_remove" in hook:
             self.bot.remove_listener(hook["_handler_remove"], "on_raw_reaction_remove")
             del hook["_handler_remove"]
-        
+
         if hook["hook_id"] in self._scheduled_tasks:
             self._scheduled_tasks[hook["hook_id"]].cancel()
             del self._scheduled_tasks[hook["hook_id"]]
-    
+
+        self._registered_hook_ids.discard(hook.get("hook_id"))
+
     def create_hook(self, template_id: str, params: Dict[str, Any], guild_id, created_by: str) -> Dict[str, Any]:
         guild_id = int(guild_id)
-        
+
         template = next((t for t in self.templates if t["id"] == template_id), None)
         if not template:
             return {"success": False, "error": "Template not found"}
-        
+
         for param in template["params"]:
             if param["required"] and param["name"] not in params:
                 if "default" not in param:
                     return {"success": False, "error": f"Missing required parameter: {param['name']}"}
-        
+
         hook_id = f"adv_{template_id}_{secrets.token_hex(8)}"
-        
+
         hook = {
             "hook_id": hook_id,
             "template_id": template_id,
@@ -1149,55 +1542,55 @@ class EventHooksCreater(commands.Cog):
             "execution_count": 0,
             "error_count": 0
         }
-        
+
         self.created_hooks.append(hook)
         asyncio.ensure_future(self._save_created_hooks())
         self._register_hook(hook)
-        
+
         logger.info(f"EventHooksCreater: Created hook {hook_id} ({template['name']}) for guild {guild_id}")
-        
+
         return {"success": True, "hook_id": hook_id, "hook": hook}
-    
+
     def delete_hook(self, hook_id: str) -> Dict[str, Any]:
         hook = next((h for h in self.created_hooks if h["hook_id"] == hook_id), None)
         if not hook:
             return {"success": False, "error": "Hook not found"}
-        
+
         self._unregister_hook(hook)
         self.created_hooks.remove(hook)
         asyncio.ensure_future(self._save_created_hooks())
 
         logger.info(f"EventHooksCreater: Deleted hook {hook_id}")
-        
+
         return {"success": True}
-    
+
     def toggle_hook(self, hook_id: str) -> Dict[str, Any]:
         hook = next((h for h in self.created_hooks if h["hook_id"] == hook_id), None)
         if not hook:
             return {"success": False, "error": "Hook not found"}
-        
+
         if hook["enabled"]:
             self._unregister_hook(hook)
             hook["enabled"] = False
         else:
             self._register_hook(hook)
             hook["enabled"] = True
-        
+
         asyncio.ensure_future(self._save_created_hooks())
 
         logger.info(f"EventHooksCreater: Toggled hook {hook_id} to {hook['enabled']}")
-        
+
         return {"success": True, "enabled": hook["enabled"]}
-    
+
     def get_templates(self) -> List[Dict[str, Any]]:
         return self.templates
-    
+
     def get_all_created_hooks(self) -> List[Dict[str, Any]]:
         return [{k: v for k, v in hook.items() if not k.startswith("_")} for hook in self.created_hooks]
-    
+
     def get_hooks_for_guild(self, guild_id: int) -> List[Dict[str, Any]]:
         return [{k: v for k, v in hook.items() if not k.startswith("_")} for hook in self.created_hooks if hook["guild_id"] == guild_id]
-    
+
     def get_hook_stats(self) -> Dict[str, Any]:
         total = len(self.created_hooks)
         enabled = sum(1 for h in self.created_hooks if h.get("enabled", True))
@@ -1206,20 +1599,20 @@ class EventHooksCreater(commands.Cog):
         by_category = {}
         total_executions = sum(h.get("execution_count", 0) for h in self.created_hooks)
         total_errors = sum(h.get("error_count", 0) for h in self.created_hooks)
-        
+
         for hook in self.created_hooks:
             template_id = hook["template_id"]
             if template_id not in by_template:
                 by_template[template_id] = 0
             by_template[template_id] += 1
-            
+
             template = next((t for t in self.templates if t["id"] == template_id), None)
             if template:
                 category = template.get("category", "Other")
                 if category not in by_category:
                     by_category[category] = 0
                 by_category[category] += 1
-        
+
         return {
             "total": total,
             "enabled": enabled,
@@ -1231,11 +1624,107 @@ class EventHooksCreater(commands.Cog):
             "total_errors": total_errors,
             "success_rate": round((total_executions - total_errors) / total_executions * 100, 2) if total_executions > 0 else 100
         }
-    
+
     def get_analytics(self, hook_id: Optional[str] = None) -> Dict:
         if hook_id:
             return self._analytics.get(hook_id, {})
         return self._analytics
+
+    # --- Slash command group (class-level, defined above) ---
+
+    @hooks_group.command(name="list", description="List all hooks configured for this server")
+    @app_commands.describe(page="Page number")
+    async def hooks_list(self, interaction: discord.Interaction, page: int = 1):
+        guild_hooks = self.get_hooks_for_guild(interaction.guild_id)
+        if not guild_hooks:
+            return await interaction.response.send_message("No hooks configured for this server.", ephemeral=True)
+
+        per_page = 8
+        total_pages = max(1, (len(guild_hooks) + per_page - 1) // per_page)
+        page = max(1, min(page, total_pages))
+        start = (page - 1) * per_page
+        chunk = guild_hooks[start:start + per_page]
+
+        embed = discord.Embed(title=f"Event Hooks — Page {page}/{total_pages}", color=0x5865F2)
+        for h in chunk:
+            status = "✅" if h.get("enabled") else "⛔"
+            embed.add_field(
+                name=f"{status} {h['template_name']} (`{h['hook_id'][:20]}...`)",
+                value=f"Runs: {h.get('execution_count', 0)} | Errors: {h.get('error_count', 0)}",
+                inline=False
+            )
+        embed.set_footer(text=f"Total: {len(guild_hooks)} hooks")
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @hooks_group.command(name="info", description="Show detailed info about a hook")
+    @app_commands.describe(hook_id="The hook ID")
+    async def hooks_info(self, interaction: discord.Interaction, hook_id: str):
+        hook = next((h for h in self.created_hooks if h["hook_id"] == hook_id and h["guild_id"] == interaction.guild_id), None)
+        if not hook:
+            return await interaction.response.send_message("Hook not found.", ephemeral=True)
+
+        embed = discord.Embed(title=f"Hook: {hook['template_name']}", color=0x5865F2)
+        embed.add_field(name="Hook ID", value=f"`{hook['hook_id']}`", inline=False)
+        embed.add_field(name="Status", value="✅ Enabled" if hook.get("enabled") else "⛔ Disabled", inline=True)
+        embed.add_field(name="Event", value=hook.get("event", "N/A"), inline=True)
+        embed.add_field(name="Executions", value=str(hook.get("execution_count", 0)), inline=True)
+        embed.add_field(name="Errors", value=str(hook.get("error_count", 0)), inline=True)
+        embed.add_field(name="Created by", value=hook.get("created_by", "Unknown"), inline=True)
+        embed.add_field(name="Created at", value=hook.get("created_at", "Unknown")[:19], inline=True)
+        params_str = "\n".join(f"`{k}`: {str(v)[:50]}" for k, v in hook.get("params", {}).items())
+        if params_str:
+            embed.add_field(name="Parameters", value=params_str[:1024], inline=False)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @hooks_group.command(name="delete", description="Delete a hook (Bot Owner / Admin only)")
+    @app_commands.describe(hook_id="The hook ID to delete")
+    async def hooks_delete(self, interaction: discord.Interaction, hook_id: str):
+        if not interaction.user.guild_permissions.administrator:
+            app_info = await self.bot.application_info()
+            if interaction.user.id != app_info.owner.id:
+                return await interaction.response.send_message("Administrator permission required.", ephemeral=True)
+
+        hook = next((h for h in self.created_hooks if h["hook_id"] == hook_id and h["guild_id"] == interaction.guild_id), None)
+        if not hook:
+            return await interaction.response.send_message("Hook not found.", ephemeral=True)
+
+        result = self.delete_hook(hook_id)
+        if result["success"]:
+            await interaction.response.send_message(f"✅ Hook `{hook_id}` deleted.", ephemeral=True)
+        else:
+            await interaction.response.send_message(f"❌ {result.get('error')}", ephemeral=True)
+
+    @hooks_group.command(name="toggle", description="Enable or disable a hook")
+    @app_commands.describe(hook_id="The hook ID to toggle")
+    async def hooks_toggle(self, interaction: discord.Interaction, hook_id: str):
+        if not interaction.user.guild_permissions.administrator:
+            app_info = await self.bot.application_info()
+            if interaction.user.id != app_info.owner.id:
+                return await interaction.response.send_message("Administrator permission required.", ephemeral=True)
+
+        hook = next((h for h in self.created_hooks if h["hook_id"] == hook_id and h["guild_id"] == interaction.guild_id), None)
+        if not hook:
+            return await interaction.response.send_message("Hook not found.", ephemeral=True)
+
+        result = self.toggle_hook(hook_id)
+        if result["success"]:
+            state = "✅ Enabled" if result["enabled"] else "⛔ Disabled"
+            await interaction.response.send_message(f"Hook `{hook_id}` is now **{state}**.", ephemeral=True)
+        else:
+            await interaction.response.send_message(f"❌ {result.get('error')}", ephemeral=True)
+
+    @hooks_group.command(name="templates", description="List all available hook templates")
+    async def hooks_templates(self, interaction: discord.Interaction):
+        embed = discord.Embed(title="Available Hook Templates", color=0x5865F2)
+        for t in self.templates:
+            implemented = "✅" if t["id"] not in ("leveling_system", "scheduled_announcement", "ticket_system", "voice_activity_tracker", "dynamic_voice_channels") or True else "⚠️"
+            embed.add_field(
+                name=f"{implemented} {t['name']} (`{t['id']}`)",
+                value=f"{t['description']}\nEvent: `{t['event']}` | Category: {t['category']}",
+                inline=False
+            )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
 
 async def setup(bot):
     await bot.add_cog(EventHooksCreater(bot))

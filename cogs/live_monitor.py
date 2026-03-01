@@ -1387,7 +1387,7 @@ echo json_encode([
                 }
                 fw_section = self.bot.config.get("framework", {}) or {}
                 framework_info = {
-                    "version": "1.8.0.0",
+                    "version": "1.9.0.0",
                     "recommended_python": fw_section.get("recommended_python", "3.12.7"),
                     "python_runtime": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
                     "docs_url": "https://zsync.eu/zdbf",
@@ -1730,6 +1730,7 @@ echo json_encode([
             "hook_creator": hook_creator_data,
             "backup_restore": backup_data,
             "shard_info": shard_data,
+            "gemini": self.bot.get_cog("GeminiServiceHelper").collect_dashboard_data(None) if self.bot.get_cog("GeminiServiceHelper") else {},
         }
 
     async def _process_ticket_deletions(self):
@@ -2267,6 +2268,7 @@ echo json_encode([
                 "hook_creator": data.get("hook_creator", {}),
                 "backup_restore": data.get("backup_restore", {}),
                 "shard_info": data.get("shard_info", {}),
+                "gemini": data.get("gemini", {}),
             }
             
             await self._process_ticket_deletions()
@@ -3608,14 +3610,26 @@ echo json_encode([
                     })
                 except Exception as e:
                     logger.error(f"Live Monitor: request_chat_history error: {e}")
-        
+
+            elif cmd_type.startswith("gemini_"):
+                user_discord_id = params.get("discord_id", "")
+                await self._handle_gemini_command(cmd_type, params, user_discord_id)
+
         except asyncio.CancelledError:
             logger.info("Live Monitor: _execute_command cancelled")
             raise
         except Exception as e:
             logger.error(f"Live Monitor: Command execution error: {e}")
             self._log_event("command_error", {"command": cmd_type, "error": str(e)})
-    
+
+    async def _handle_gemini_command(self, cmd: str, params: dict, user_discord_id: str):
+        """Delegate gemini_* dashboard commands to GeminiServiceHelper."""
+        helper = self.bot.get_cog("GeminiServiceHelper")
+        if not helper:
+            logger.warning("Live Monitor: GeminiServiceHelper not loaded — cannot handle gemini command")
+            return
+        await helper.handle_command(cmd, params, user_discord_id, guild_id=None)
+
     @app_commands.command(name="livemonitor", description="Configure the live monitoring system")
     @app_commands.describe(
         action="Action to perform",
@@ -12905,6 +12919,10 @@ echo json_encode([
                     <button class="lm-sidebar-item" data-tab="guilds">Guilds / Servers</button>
                     <button class="lm-sidebar-item" data-tab="events">Events</button>
                     <button class="lm-sidebar-item" data-tab="invite">Bot Invite Helper</button>
+                    <button class="lm-sidebar-item" data-tab="gemini-chat" data-view-perm="view_gemini_chat">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:inline-block;vertical-align:middle;margin-right:8px;"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><circle cx="9" cy="10" r="1" fill="currentColor"/><circle cx="12" cy="10" r="1" fill="currentColor"/><circle cx="15" cy="10" r="1" fill="currentColor"/></svg>
+                        AI Assistant
+                    </button>
                     <button class="lm-sidebar-item" data-tab="marketplace">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:8px;display:inline-block;vertical-align:middle;">
                             <circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/>
@@ -15932,6 +15950,8 @@ if (typeof window !== 'undefined') {
 
                 <!-- DASHBOARD_PLUGINS_TABS_PLACEHOLDER -->
 
+                <!-- GEMINI_TAB_CONTENT -->
+
             </div>
         </div>
 
@@ -15973,6 +15993,9 @@ if (typeof window !== 'undefined') {
                     <button class="lm-nav-palette-item" data-tab="invite">
                         <div class="lm-nav-palette-icon">🔗</div>
                         <div class="lm-nav-palette-label">Bot Invite</div>
+                    </button>
+                    <button class="lm-nav-palette-item" data-tab="gemini-chat" data-view-perm="view_gemini_chat">
+                        <span>AI Assistant</span><span class="lm-badge">Tools</span>
                     </button>
                     <button class="lm-nav-palette-item" data-tab="marketplace">
                         <div class="lm-nav-palette-icon">
@@ -16037,6 +16060,10 @@ if (typeof window !== 'undefined') {
             <button class="lm-drawer-item" data-tab="guilds">Guilds / Servers</button>
             <button class="lm-drawer-item" data-tab="events">Events</button>
             <button class="lm-drawer-item" data-tab="invite">Bot Invite Helper</button>
+            <button class="lm-drawer-item" data-tab="gemini-chat" data-view-perm="view_gemini_chat">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:inline-block;vertical-align:middle;margin-right:8px;"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><circle cx="9" cy="10" r="1" fill="currentColor"/><circle cx="12" cy="10" r="1" fill="currentColor"/><circle cx="15" cy="10" r="1" fill="currentColor"/></svg>
+                AI Assistant
+            </button>
             <button class="lm-drawer-item" data-tab="marketplace">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:8px;display:inline-block;vertical-align:middle;">
                     <circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/>
@@ -16731,6 +16758,7 @@ if (typeof window !== 'undefined') {
                 tickets: 'view_tickets',
                 backups: 'view_backups',
                 shards: 'view_shards',
+                'gemini-chat': 'view_gemini_chat',
                 credits: null,
                 /* DASHBOARD_PLUGINS_TAB_MAP_PLACEHOLDER */
             };
@@ -16774,6 +16802,7 @@ if (typeof window !== 'undefined') {
                 guilds: 'view_guilds',
                 database: 'view_database',
                 marketplace: 'view_marketplace',
+                'gemini-chat': 'view_gemini_chat',
                 credits: null,
                 /* DASHBOARD_PLUGINS_TAB_PERM_MAP_PLACEHOLDER */
             };
@@ -20555,6 +20584,7 @@ if (typeof window !== 'undefined') {
                 { key: 'view_roles', label: 'Roles & Access' },
                 { key: 'view_backups', label: 'Backup & Restore' },
                 { key: 'view_shards', label: 'Shard Manager' },
+                { key: 'view_gemini_chat', label: 'AI Chat (Gemini)' },
                 /* DASHBOARD_PLUGINS_VIEW_PERMS_PLACEHOLDER */
             ];
 
@@ -20652,6 +20682,11 @@ if (typeof window !== 'undefined') {
                 { key: 'action_view_shard_details', label: 'View Shard Details' },
                 { key: 'action_reset_shard_metrics', label: 'Reset Shard Metrics' },
                 { key: 'action_control_bot_status_config', label: 'Control Bot Status Config' },
+
+                // Gemini AI Chat Actions
+                { key: 'action_gemini_send', label: 'Send AI Message' },
+                { key: 'action_gemini_clear_history', label: 'Clear AI Chat History' },
+                { key: 'action_gemini_config', label: 'Update AI Config' },
                 /* DASHBOARD_PLUGINS_ACTION_PERMS_PLACEHOLDER */
             ];
 
@@ -23143,7 +23178,7 @@ if (typeof window !== 'undefined') {
                     isFirstLoad = false;
                 }
                 
-                const packages = ['core', 'commands', 'plugins', 'hooks', 'extensions', 'system_details', 'events', 'filesystem', 'hook_creator', 'backup_restore', 'shard_info'];
+                const packages = ['core', 'commands', 'plugins', 'hooks', 'extensions', 'system_details', 'events', 'filesystem', 'hook_creator', 'backup_restore', 'shard_info', 'gemini'];
                 const loadPromises = packages.map((pkg, index) => 
                     new Promise(resolve => {
                         setTimeout(() => {
@@ -23175,7 +23210,8 @@ if (typeof window !== 'undefined') {
                     "file_system": results[7] || {},
                     "hook_creator": results[8] || {},
                     "backup_restore": results[9] || {},
-                    "shard_info": results[10] || {}
+                    "shard_info": results[10] || {},
+                    "gemini": results[11] || {}
                 };
                 
                 if (!results[0]) {
@@ -23301,7 +23337,13 @@ if (typeof window !== 'undefined') {
                 if (data.shard_info) {
                     updateShardsTab(data.shard_info);
                 }
-                
+
+                if (data.gemini && typeof window.geminiInit === 'function') {
+                    const discordUserId = (typeof window.LM_CURRENT_USER !== 'undefined' && window.LM_CURRENT_USER)
+                        ? window.LM_CURRENT_USER.discord_user_id : null;
+                    window.geminiInit(data, discordUserId);
+                }
+
                 setTimeout(() => {
                     if (searchState.commands && document.getElementById('cmd-search')) {
                         document.getElementById('cmd-search').value = searchState.commands;
@@ -24078,7 +24120,10 @@ if (typeof window !== 'undefined') {
             base_html = base_html.replace('/* DASHBOARD_PLUGINS_ACTION_PERMS_PLACEHOLDER */', '')
             base_html = base_html.replace('/* DASHBOARD_PLUGINS_TAB_MAP_PLACEHOLDER */', '')
             base_html = base_html.replace('/* DASHBOARD_PLUGINS_TAB_PERM_MAP_PLACEHOLDER */', '')
-        
+
+        # Inject Gemini chat tab (self-contained — no cog dependency needed)
+        base_html = base_html.replace('<!-- GEMINI_TAB_CONTENT -->', self._get_gemini_tab_html())
+
         php_guard = """<?php
 require_once __DIR__ . '/lm_db.php';
 require_once __DIR__ . '/lm_auth.php';
@@ -25388,7 +25433,8 @@ function lm_default_permissions_for_tier(string $tier): array {
                 'view_hook_creator' => true,    // Hook Creator tab
                 'view_backups' => true,         // Backup & Restore tab
                 'view_shards' => true,          // Shard Manager tab
-                
+                'view_gemini_chat' => true,     // AI Assistant (Gemini) tab
+
                 // ACTION PERMISSIONS - Dashboard Actions (5)
                 'action_clear_cache' => true,
                 'action_toggle_logging' => true,
@@ -25482,7 +25528,12 @@ function lm_default_permissions_for_tier(string $tier): array {
                 // ACTION PERMISSIONS - Shard Manager Actions (2)
                 'action_view_shard_details' => true,
                 'action_reset_shard_metrics' => true,
-                
+
+                // ACTION PERMISSIONS - Gemini AI Chat Actions (3)
+                'action_gemini_send' => true,
+                'action_gemini_clear_history' => true,
+                'action_gemini_config' => true,
+
                 // DASHBOARD PLUGIN PERMISSIONS (dynamically added)
                 /* DASHBOARD_PLUGINS_OWNER_PERMISSIONS_PLACEHOLDER */
             ];
@@ -25511,7 +25562,8 @@ function lm_default_permissions_for_tier(string $tier): array {
                 'view_hook_creator' => true,    // Hook Creator tab
                 'view_backups' => true,         // Backup & Restore tab
                 'view_shards' => true,          // Shard Manager tab
-                
+                'view_gemini_chat' => true,     // AI Assistant (Gemini) tab
+
                 // ALL ACTION PERMISSIONS - FALSE by default (customize per role)
                 'action_clear_cache' => false,
                 'action_toggle_logging' => false,
@@ -25575,6 +25627,9 @@ function lm_default_permissions_for_tier(string $tier): array {
                 'action_edit_backup_config' => false,
                 'action_view_shard_details' => false,
                 'action_reset_shard_metrics' => false,
+                'action_gemini_send' => false,
+                'action_gemini_clear_history' => false,
+                'action_gemini_config' => false,
             ];
     }
 }
@@ -27922,6 +27977,1344 @@ ErrorDocument 404 "Not Found"
 # ============================================
 '''
 
+    def _get_gemini_tab_html(self) -> str:
+        """Return the self-contained HTML/CSS/JS for the AI Assistant tab.
+        Embedded directly so this file stays self-contained (no cogs/ folder
+        available in CGI-bin context where generate_dashboard.py runs).
+        """
+        return '''<div id="tab-gemini-chat" class="tab-content" style="display:none;">
+<style>
+.gai-root {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    max-width: 100%;
+}
+
+.gai-hero {
+    position: relative;
+    overflow: hidden;
+    border-radius: 20px;
+    padding: 32px 36px 28px;
+    margin-bottom: 20px;
+    background: #0f0a1e;
+    border: 1px solid rgba(139,92,246,.18);
+}
+.gai-hero-bg {
+    position: absolute;
+    inset: 0;
+    background:
+        radial-gradient(ellipse 80% 60% at 10% 20%, rgba(109,40,217,.28) 0%, transparent 60%),
+        radial-gradient(ellipse 60% 80% at 90% 80%, rgba(14,165,233,.18) 0%, transparent 55%),
+        radial-gradient(ellipse 50% 50% at 50% 0%,  rgba(167,139,250,.12) 0%, transparent 70%);
+    animation: gaiBgPulse 10s ease-in-out infinite alternate;
+}
+@keyframes gaiBgPulse {
+    0%   { opacity: .7; }
+    100% { opacity: 1; }
+}
+.gai-hero-grid {
+    position: absolute;
+    inset: 0;
+    background-image:
+        linear-gradient(rgba(139,92,246,.06) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(139,92,246,.06) 1px, transparent 1px);
+    background-size: 40px 40px;
+    mask-image: radial-gradient(ellipse 90% 90% at 50% 50%, black 40%, transparent 100%);
+}
+.gai-hero-content { position: relative; z-index: 1; }
+.gai-hero-eyebrow {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+.gai-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    padding: 3px 9px;
+    border-radius: 20px;
+}
+.gai-chip-enc {
+    background: rgba(16,185,129,.12);
+    border: 1px solid rgba(16,185,129,.35);
+    color: #34d399;
+}
+.gai-chip-model {
+    background: rgba(139,92,246,.12);
+    border: 1px solid rgba(139,92,246,.35);
+    color: #a78bfa;
+}
+.gai-hero-title {
+    font-size: 26px;
+    font-weight: 800;
+    color: #f5f3ff;
+    letter-spacing: -.5px;
+    line-height: 1.15;
+    margin-bottom: 6px;
+}
+.gai-hero-title span {
+    background: linear-gradient(135deg, #a78bfa, #60a5fa, #c084fc);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+.gai-hero-sub {
+    font-size: 13px;
+    color: rgba(196,181,253,.6);
+    max-width: 480px;
+    line-height: 1.5;
+}
+/* Stats strip */
+.gai-stats {
+    display: flex;
+    gap: 20px;
+    margin-top: 20px;
+    padding-top: 18px;
+    border-top: 1px solid rgba(139,92,246,.12);
+    flex-wrap: wrap;
+}
+.gai-stat {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.gai-stat-val {
+    font-size: 18px;
+    font-weight: 700;
+    color: #e2e8f0;
+    line-height: 1;
+}
+.gai-stat-lbl {
+    font-size: 10px;
+    color: rgba(148,163,184,.55);
+    text-transform: uppercase;
+    letter-spacing: .06em;
+}
+
+.gai-toolbar {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+}
+.gai-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+    font-size: 12.5px;
+    font-weight: 600;
+    font-family: inherit;
+    padding: 7px 14px;
+    transition: all .18s cubic-bezier(.4,0,.2,1);
+    white-space: nowrap;
+    position: relative;
+}
+.gai-btn:disabled { opacity: .35; cursor: not-allowed; transform: none !important; }
+.gai-btn-clear {
+    background: rgba(239,68,68,.1);
+    border: 1px solid rgba(239,68,68,.25);
+    color: #fca5a5;
+}
+.gai-btn-clear:hover:not(:disabled) {
+    background: rgba(239,68,68,.2);
+    border-color: rgba(239,68,68,.45);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(239,68,68,.15);
+}
+.gai-btn-config {
+    background: rgba(139,92,246,.1);
+    border: 1px solid rgba(139,92,246,.25);
+    color: #c4b5fd;
+}
+.gai-btn-config:hover:not(:disabled) {
+    background: rgba(139,92,246,.2);
+    border-color: rgba(139,92,246,.45);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(139,92,246,.15);
+}
+.gai-btn-config.active {
+    background: rgba(139,92,246,.25);
+    border-color: rgba(139,92,246,.6);
+}
+.gai-status-text {
+    font-size: 12px;
+    color: rgba(148,163,184,.65);
+    margin-left: 4px;
+    transition: opacity .3s;
+}
+
+.gai-config-drawer {
+    background: rgba(10,6,30,.9);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(139,92,246,.22);
+    border-radius: 16px;
+    padding: 0;
+    margin-bottom: 16px;
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height .35s cubic-bezier(.4,0,.2,1), padding .35s, border-color .2s;
+}
+.gai-config-drawer.open {
+    max-height: 320px;
+    padding: 22px 24px 20px;
+    border-color: rgba(139,92,246,.4);
+}
+.gai-config-title {
+    font-size: 12px;
+    font-weight: 700;
+    color: rgba(196,181,253,.8);
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+}
+.gai-field { margin-bottom: 14px; }
+.gai-field-label {
+    display: block;
+    font-size: 11px;
+    font-weight: 600;
+    color: rgba(148,163,184,.7);
+    text-transform: uppercase;
+    letter-spacing: .06em;
+    margin-bottom: 6px;
+}
+.gai-field-input {
+    width: 100%;
+    background: rgba(255,255,255,.05);
+    border: 1px solid rgba(139,92,246,.2);
+    border-radius: 10px;
+    color: #e2e8f0;
+    font-size: 13px;
+    font-family: inherit;
+    padding: 9px 13px;
+    outline: none;
+    transition: border-color .2s, box-shadow .2s;
+    box-sizing: border-box;
+}
+.gai-field-input:focus {
+    border-color: rgba(139,92,246,.55);
+    box-shadow: 0 0 0 3px rgba(139,92,246,.1);
+}
+.gai-config-actions { display: flex; gap: 10px; align-items: center; }
+.gai-btn-save {
+    background: linear-gradient(135deg, #6d28d9, #7c3aed);
+    border: none;
+    border-radius: 10px;
+    color: #fff;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 8px 20px;
+    transition: opacity .2s, transform .15s;
+    box-shadow: 0 2px 12px rgba(109,40,217,.35);
+}
+.gai-btn-save:hover { opacity: .88; transform: translateY(-1px); }
+
+.gai-panel {
+    background: rgba(255,255,255,.025);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(139,92,246,.15);
+    border-radius: 20px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    box-shadow: 0 8px 32px rgba(0,0,0,.3), inset 0 1px 0 rgba(255,255,255,.04);
+}
+
+/* Panel header */
+.gai-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 20px;
+    border-bottom: 1px solid rgba(139,92,246,.1);
+    background: rgba(0,0,0,.12);
+}
+.gai-panel-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    color: #c4b5fd;
+}
+.gai-panel-dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: #10b981;
+    box-shadow: 0 0 6px rgba(16,185,129,.6);
+    flex-shrink: 0;
+}
+.gai-panel-dot.offline { background: #6b7280; box-shadow: none; }
+.gai-panel-hint {
+    font-size: 11px;
+    color: rgba(100,116,139,.6);
+}
+
+/* Messages */
+.gai-messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 24px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-height: 380px;
+    max-height: 500px;
+    scroll-behavior: smooth;
+}
+.gai-messages::-webkit-scrollbar { width: 3px; }
+.gai-messages::-webkit-scrollbar-track { background: transparent; }
+.gai-messages::-webkit-scrollbar-thumb {
+    background: rgba(139,92,246,.25);
+    border-radius: 3px;
+}
+
+/* Message rows */
+.gai-msg-row {
+    display: flex;
+    align-items: flex-end;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+.gai-msg-row.user { flex-direction: row-reverse; }
+.gai-avatar {
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.gai-avatar-user {
+    background: linear-gradient(135deg, #5b21b6, #7c3aed);
+    box-shadow: 0 2px 8px rgba(109,40,217,.4);
+}
+.gai-avatar-ai {
+    background: linear-gradient(135deg, #0e4f6e, #0369a1);
+    box-shadow: 0 2px 8px rgba(14,165,233,.3);
+}
+.gai-bubble-wrap { display: flex; flex-direction: column; max-width: 74%; }
+.gai-msg-row.user .gai-bubble-wrap { align-items: flex-end; }
+.gai-bubble {
+    padding: 11px 15px;
+    font-size: 13.5px;
+    line-height: 1.6;
+    color: #e2e8f0;
+    word-break: break-word;
+    white-space: pre-wrap;
+    position: relative;
+}
+.gai-bubble-user {
+    background: linear-gradient(135deg, #4c1d95 0%, #5b21b6 60%, #6d28d9 100%);
+    border-radius: 18px 18px 4px 18px;
+    box-shadow: 0 3px 14px rgba(109,40,217,.25);
+}
+.gai-bubble-ai {
+    background: rgba(255,255,255,.065);
+    border: 1px solid rgba(255,255,255,.08);
+    border-radius: 18px 18px 18px 4px;
+    box-shadow: 0 2px 8px rgba(0,0,0,.15);
+}
+.gai-bubble-meta {
+    font-size: 10px;
+    color: rgba(100,116,139,.55);
+    margin-top: 4px;
+    padding: 0 4px;
+}
+
+/* Empty state */
+.gai-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    flex: 1;
+    gap: 12px;
+    padding: 40px 20px;
+    color: rgba(100,116,139,.7);
+    text-align: center;
+}
+.gai-empty-icon {
+    width: 56px; height: 56px;
+    background: rgba(139,92,246,.08);
+    border: 1px solid rgba(139,92,246,.15);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.gai-empty-title { font-size: 15px; font-weight: 600; color: rgba(196,181,253,.5); }
+.gai-empty-sub { font-size: 12px; color: rgba(100,116,139,.5); }
+
+/* Typing indicator */
+.gai-typing-row {
+    display: none;
+    align-items: flex-end;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+.gai-typing-row.visible { display: flex; }
+.gai-typing-bubble {
+    background: rgba(255,255,255,.065);
+    border: 1px solid rgba(255,255,255,.08);
+    border-radius: 18px 18px 18px 4px;
+    padding: 12px 16px;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+.gai-dot {
+    width: 7px; height: 7px;
+    background: rgba(139,92,246,.7);
+    border-radius: 50%;
+    animation: gaiDotBounce 1.3s infinite ease-in-out;
+}
+.gai-dot:nth-child(2) { animation-delay: .18s; background: rgba(139,92,246,.55); }
+.gai-dot:nth-child(3) { animation-delay: .36s; background: rgba(139,92,246,.4); }
+@keyframes gaiDotBounce {
+    0%,60%,100% { transform: translateY(0) scale(1); }
+    30%          { transform: translateY(-7px) scale(1.1); }
+}
+
+/* Input area */
+.gai-input-area {
+    padding: 14px 18px 16px;
+    border-top: 1px solid rgba(139,92,246,.1);
+    background: rgba(0,0,0,.1);
+}
+.gai-input-row {
+    display: flex;
+    gap: 10px;
+    align-items: flex-end;
+}
+.gai-textarea {
+    flex: 1;
+    min-width: 0;
+    background: rgba(255,255,255,.05);
+    border: 1px solid rgba(139,92,246,.2);
+    border-radius: 14px;
+    color: #e2e8f0;
+    font-size: 13.5px;
+    font-family: inherit;
+    line-height: 1.5;
+    outline: none;
+    padding: 11px 14px;
+    resize: none;
+    box-sizing: border-box;
+    transition: border-color .2s, box-shadow .2s;
+    min-height: 44px;
+    max-height: 140px;
+    overflow-y: auto;
+}
+.gai-textarea:focus {
+    border-color: rgba(139,92,246,.5);
+    box-shadow: 0 0 0 3px rgba(139,92,246,.1);
+}
+.gai-textarea::placeholder { color: rgba(100,116,139,.5); }
+.gai-textarea:disabled { opacity: .4; cursor: not-allowed; }
+.gai-input-hint {
+    font-size: 10px;
+    color: rgba(100,116,139,.4);
+    margin-top: 5px;
+    padding: 0 2px;
+}
+.gai-send-btn {
+    background: linear-gradient(135deg, #6d28d9, #7c3aed);
+    border: none;
+    border-radius: 14px;
+    color: #fff;
+    cursor: pointer;
+    width: 44px;
+    height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    transition: all .2s cubic-bezier(.4,0,.2,1);
+    box-shadow: 0 3px 12px rgba(109,40,217,.3);
+}
+.gai-send-btn:hover:not(:disabled) {
+    transform: translateY(-2px) scale(1.06);
+    box-shadow: 0 6px 18px rgba(109,40,217,.45);
+}
+.gai-send-btn:active:not(:disabled) { transform: scale(.96); }
+.gai-send-btn:disabled { opacity: .35; cursor: not-allowed; transform: none; box-shadow: none; }
+.gai-skip-btn {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 0 16px;
+    height: 44px;
+    border-radius: 12px;
+    border: 1px solid rgba(252,165,165,.3);
+    background: rgba(252,165,165,.08);
+    color: rgba(252,165,165,.85);
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    white-space: nowrap;
+    flex-shrink: 0;
+    transition: background .15s, border-color .15s;
+}
+.gai-skip-btn:hover { background: rgba(252,165,165,.15); border-color: rgba(252,165,165,.5); }
+.gai-btn-attach { border-color: rgba(52,211,153,.35); color: rgba(52,211,153,.95); background: rgba(52,211,153,.09); }
+.gai-btn-attach:hover { background: rgba(52,211,153,.18); border-color: rgba(52,211,153,.55); }
+.gai-btn-attach.active { background: rgba(52,211,153,.22); border-color: rgba(52,211,153,.65); color: rgba(52,211,153,1); }
+.gai-attach-row {
+    display: none;
+    flex-direction: column;
+    gap: 7px;
+    padding: 9px 12px;
+    background: rgba(52,211,153,.05);
+    border: 1px solid rgba(52,211,153,.18);
+    border-radius: 10px;
+    margin-bottom: 8px;
+}
+.gai-attach-row.visible { display: flex; }
+.gai-attach-header { display: flex; align-items: center; gap: 6px; }
+.gai-attach-label { display: flex; align-items: center; gap: 5px; font-size: 11px; color: rgba(52,211,153,.75); white-space: nowrap; }
+.gai-attach-clear-all { margin-left: auto; background: none; border: none; color: rgba(52,211,153,.4); cursor: pointer; padding: 2px 6px; border-radius: 5px; font-size: 11px; transition: color .15s; }
+.gai-attach-clear-all:hover { color: rgba(252,165,165,.85); }
+.gai-attach-chips { display: flex; flex-wrap: wrap; gap: 5px; min-height: 0; }
+.gai-attach-chip { display: inline-flex; align-items: center; gap: 4px; background: rgba(52,211,153,.12); border: 1px solid rgba(52,211,153,.3); border-radius: 20px; padding: 2px 8px 2px 10px; font-size: 11px; color: rgba(52,211,153,.95); font-family: \'Courier New\', monospace; }
+.gai-attach-chip-rm { background: none; border: none; color: rgba(52,211,153,.5); cursor: pointer; padding: 0 0 0 3px; font-size: 13px; line-height: 1; transition: color .15s; }
+.gai-attach-chip-rm:hover { color: rgba(252,165,165,.9); }
+.gai-attach-field-wrap { position: relative; }
+.gai-attach-input {
+    width: 100%;
+    box-sizing: border-box;
+    background: rgba(0,0,0,.3);
+    border: 1px solid rgba(52,211,153,.25);
+    border-radius: 7px;
+    color: rgba(255,255,255,.85);
+    font-size: 12px;
+    padding: 5px 10px;
+    outline: none;
+    font-family: \'Courier New\', monospace;
+}
+.gai-attach-input:focus { border-color: rgba(52,211,153,.5); box-shadow: 0 0 0 2px rgba(52,211,153,.08); }
+.gai-attach-input::placeholder { color: rgba(100,116,139,.4); }
+.gai-attach-dropdown {
+    display: none;
+    position: absolute;
+    bottom: calc(100% + 4px);
+    left: 0; right: 0;
+    background: #10101e;
+    border: 1px solid rgba(52,211,153,.3);
+    border-radius: 9px;
+    overflow: hidden;
+    z-index: 200;
+    max-height: 200px;
+    overflow-y: auto;
+    box-shadow: 0 -8px 24px rgba(0,0,0,.55);
+}
+.gai-attach-dd-item { padding: 7px 12px; font-size: 12px; font-family: \'Courier New\', monospace; color: rgba(255,255,255,.72); cursor: pointer; transition: background .1s, color .1s; }
+.gai-attach-dd-item:hover, .gai-attach-dd-item.selected { background: rgba(52,211,153,.12); color: rgba(52,211,153,.95); }
+
+@keyframes gaiFadeUp {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+.gai-msg-row { animation: gaiFadeUp .2s ease-out; }
+.gai-bubble .gai-p { margin: 0 0 5px 0; }
+.gai-bubble .gai-p:last-child { margin-bottom: 0; }
+.gai-bubble .gai-h { display: block; font-weight: 700; margin: 8px 0 3px; }
+.gai-bubble .gai-h1 { font-size: 15px; color: rgba(196,181,253,.98); }
+.gai-bubble .gai-h2 { font-size: 14px; color: rgba(196,181,253,.9); }
+.gai-bubble .gai-h3 { font-size: 13px; color: rgba(196,181,253,.8); }
+.gai-bubble .gai-ul, .gai-bubble .gai-ol { margin: 3px 0 5px 18px; padding: 0; }
+.gai-bubble .gai-ul li, .gai-bubble .gai-ol li { margin-bottom: 2px; line-height: 1.55; }
+.gai-bubble strong { font-weight: 600; color: rgba(255,255,255,.97); }
+.gai-bubble em { font-style: italic; color: rgba(255,255,255,.82); }
+.gai-inline-code { background: rgba(0,0,0,.38); border-radius: 4px; padding: 1px 5px; font-family: 'Courier New',monospace; font-size: 12px; color: rgba(167,243,208,.92); }
+.gai-code-block { background: rgba(0,0,0,.5); border: 1px solid rgba(255,255,255,.1); border-radius: 10px; padding: 12px 16px; margin: 6px 0; overflow-x: auto; font-family: 'Courier New',monospace; font-size: 12px; white-space: pre; line-height: 1.5; color: rgba(216,180,254,.92); }
+.gai-bubble .gai-hr { border: none; border-top: 1px solid rgba(255,255,255,.13); margin: 7px 0; }
+.gai-btn-note { border-color: rgba(96,165,250,.35); color: rgba(147,197,253,.95); background: rgba(96,165,250,.09); }
+.gai-btn-note:hover { background: rgba(96,165,250,.18); border-color: rgba(96,165,250,.55); }
+.gai-note-overlay {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,.55); backdrop-filter: blur(6px);
+    z-index: 9000; opacity: 0; pointer-events: none; transition: opacity .2s;
+}
+.gai-note-overlay.open { opacity: 1; pointer-events: all; }
+.gai-note-popup {
+    position: fixed; top: 50%; left: 50%;
+    transform: translate(-50%,-54%) scale(.95);
+    z-index: 9001; width: min(560px,92vw); max-height: 80vh; overflow-y: auto;
+    background: linear-gradient(135deg,#0f0a1e 0%,#0d1230 100%);
+    border: 1px solid rgba(139,92,246,.4); border-radius: 20px;
+    box-shadow: 0 32px 80px rgba(0,0,0,.7),0 0 0 1px rgba(139,92,246,.12);
+    opacity: 0; pointer-events: none; transition: opacity .25s, transform .25s;
+}
+.gai-note-popup.open { opacity: 1; pointer-events: all; transform: translate(-50%,-50%) scale(1); }
+.gai-note-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 18px 22px 14px; border-bottom: 1px solid rgba(139,92,246,.18);
+}
+.gai-note-title { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 14px; color: rgba(196,181,253,.95); }
+.gai-note-close { background: none; border: none; color: rgba(255,255,255,.4); cursor: pointer; padding: 4px; border-radius: 6px; display: flex; align-items: center; transition: color .15s; }
+.gai-note-close:hover { color: rgba(255,255,255,.85); }
+.gai-note-body { padding: 18px 22px; display: flex; flex-direction: column; gap: 16px; }
+.gai-note-section-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em; margin-bottom: 10px; }
+.gai-note-can .gai-note-section-title { color: rgba(52,211,153,.85); }
+.gai-note-cant .gai-note-section-title { color: rgba(252,165,165,.8); }
+.gai-note-section ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 5px; }
+.gai-note-section li { font-size: 13px; color: rgba(255,255,255,.7); line-height: 1.55; }
+.gai-note-section li strong { color: rgba(255,255,255,.9); }
+.gai-note-footer { padding: 12px 22px 18px; font-size: 11px; color: rgba(255,255,255,.32); border-top: 1px solid rgba(255,255,255,.06); text-align: center; }
+</style>
+
+<!-- ══ ROOT ═══════════════════════════════════════════════════ -->
+<div class="gai-root">
+
+<!-- ── Hero ─────────────────────────────────────────────────── -->
+<div class="gai-hero">
+    <div class="gai-hero-bg"></div>
+    <div class="gai-hero-grid"></div>
+    <div class="gai-hero-content">
+        <div class="gai-hero-eyebrow">
+            <span class="gai-chip gai-chip-enc">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/></svg>
+                AES-256-CBC
+            </span>
+            <span class="gai-chip gai-chip-model" id="gaiModelChip">gemini-2.5-flash-lite</span>
+        </div>
+        <div class="gai-hero-title">AI <span>Assistant</span></div>
+        <div class="gai-hero-sub">Private encrypted chat — messages are end-to-end encrypted before leaving your browser. Session history persists across reloads.</div>
+        <div class="gai-stats">
+            <div class="gai-stat">
+                <div class="gai-stat-val" id="gaiMsgCount">0</div>
+                <div class="gai-stat-lbl">Messages</div>
+            </div>
+            <div class="gai-stat">
+                <div class="gai-stat-val" id="gaiSessionAge">—</div>
+                <div class="gai-stat-lbl">Last Message</div>
+            </div>
+            <div class="gai-stat">
+                <div class="gai-stat-val" style="color:#10b981;">✓</div>
+                <div class="gai-stat-lbl">Encrypted</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ── Toolbar ───────────────────────────────────────────────── -->
+<div class="gai-toolbar">
+    <button class="gai-btn gai-btn-clear" id="geminiClearBtn" onclick="geminiClearHistory()">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+        Clear History
+    </button>
+    <button class="gai-btn gai-btn-config" id="geminiConfigBtn" onclick="geminiToggleConfig()">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        Config
+    </button>
+    <button class="gai-btn gai-btn-note" onclick="geminiShowNote()">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        Capabilities
+    </button>
+    <button class="gai-btn gai-btn-attach" id="geminiAttachBtn" onclick="geminiToggleAttach()">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+        Attach File
+    </button>
+    <span class="gai-status-text" id="geminiStatusMsg"></span>
+</div>
+
+<!-- ── Config drawer ─────────────────────────────────────────── -->
+<div class="gai-config-drawer" id="geminiConfigDrawer">
+    <div class="gai-config-title">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        Model Configuration
+    </div>
+    <div class="gai-field">
+        <label class="gai-field-label">Gemini Model</label>
+        <input class="gai-field-input" id="geminiModelInput" type="text" placeholder="gemini-2.5-flash-lite">
+    </div>
+    <div class="gai-field">
+        <label class="gai-field-label">System Prompt</label>
+        <textarea class="gai-field-input" id="geminiPromptInput" rows="3" placeholder="You are a helpful assistant embedded in the ZDBF dashboard..."></textarea>
+    </div>
+    <div class="gai-config-actions">
+        <button class="gai-btn-save" onclick="geminiSaveConfig()">Save Changes</button>
+        <button class="gai-btn gai-btn-config" onclick="geminiToggleConfig()" style="padding:6px 12px;">Cancel</button>
+    </div>
+</div>
+
+<!-- ── Chat panel ────────────────────────────────────────────── -->
+<div class="gai-panel">
+    <!-- Panel header -->
+    <div class="gai-panel-header">
+        <div class="gai-panel-title">
+            <div class="gai-panel-dot offline" id="gaiPanelDot"></div>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            Conversation
+        </div>
+        <span class="gai-panel-hint">Enter ↵ to send &nbsp;·&nbsp; Shift+Enter for new line</span>
+    </div>
+
+    <!-- Messages -->
+    <div class="gai-messages" id="geminiMessages">
+        <div class="gai-empty" id="geminiNoMsg">
+            <div class="gai-empty-icon">
+                <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="rgba(139,92,246,.6)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><line x1="9" y1="10" x2="9" y2="10"/><line x1="12" y1="10" x2="12" y2="10"/><line x1="15" y1="10" x2="15" y2="10"/></svg>
+            </div>
+            <div class="gai-empty-title">No messages yet</div>
+            <div class="gai-empty-sub">Ask anything about your bot, framework, or configuration</div>
+        </div>
+    </div>
+
+    <!-- Typing indicator -->
+    <div class="gai-typing-row" id="geminiTyping">
+        <div class="gai-avatar gai-avatar-ai">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="rgba(96,165,250,.9)" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>
+        </div>
+        <div class="gai-typing-bubble">
+            <div class="gai-dot"></div>
+            <div class="gai-dot"></div>
+            <div class="gai-dot"></div>
+        </div>
+    </div>
+
+    <!-- Input -->
+    <div class="gai-input-area">
+        <div class="gai-attach-row" id="geminiAttachRow">
+            <div class="gai-attach-header">
+                <span class="gai-attach-label">
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+                    Attach files — type a name and press Enter to add
+                </span>
+                <button class="gai-attach-clear-all" onclick="geminiClearAttach()" title="Clear all attachments">✕ clear all</button>
+            </div>
+            <div class="gai-attach-chips" id="geminiAttachChips"></div>
+            <div class="gai-attach-field-wrap">
+                <input class="gai-attach-input" id="geminiAttachInput" type="text"
+                    placeholder="e.g. main.py  or  cogs/GeminiService.py"
+                    oninput="gaiAttachFilter(this.value)"
+                    onkeydown="gaiAttachKeydown(event)"
+                    onblur="setTimeout(gaiHideDropdown,150)">
+                <div class="gai-attach-dropdown" id="geminiAttachDropdown"></div>
+            </div>
+        </div>
+        <div class="gai-input-row">
+            <textarea class="gai-textarea" id="geminiInput" rows="1"
+                placeholder="Ask anything about your bot or framework…"
+                onkeydown="if(event.key===\'Enter\'&&!event.shiftKey){event.preventDefault();geminiSend();}"
+                oninput="this.style.height=\'auto\';this.style.height=Math.min(this.scrollHeight,140)+\'px\';"></textarea>
+            <button class="gai-send-btn" id="geminiSendBtn" onclick="geminiSend()" title="Send message">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+            </button>
+            <button class="gai-skip-btn" id="geminiSkipBtn" onclick="geminiSkip()" title="Cancel and send a new message" style="display:none;">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                Cancel
+            </button>
+        </div>
+        <div class="gai-input-hint">Enter &nbsp;·&nbsp; Shift+Enter for new line</div>
+    </div>
+</div>
+
+
+<div class="gai-note-overlay" id="geminiNoteOverlay" onclick="geminiHideNote()"></div>
+<div class="gai-note-popup" id="geminiNotePopup">
+    <div class="gai-note-header">
+        <span class="gai-note-title">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="rgba(147,197,253,.9)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            AI Assistant — Capabilities
+        </span>
+        <button class="gai-note-close" onclick="geminiHideNote()">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+    </div>
+    <div class="gai-note-body">
+        <div class="gai-note-section gai-note-can">
+            <div class="gai-note-section-title">✓ What I can do</div>
+            <ul>
+                <li><strong>Framework Info</strong> — live bot stats: version, guild count, user count, all loaded cogs</li>
+                <li><strong>Extension / Cog Info</strong> — full description and slash commands for any loaded cog (just name it)</li>
+                <li><strong>File Structure</strong> — lists root files, cogs/, data/, and other project directories</li>
+                <li><strong>File Reading</strong> — reads and shows the content of allowed files: root *.py, cogs/*.py, data/* (sensitive files always blocked). Mention a filename or use the Attach File button.</li>
+                <li><strong>README Search</strong> — scans the full ZDBF README with hierarchical context, returns the most relevant sections</li>
+                <li><strong>Creator attribution</strong> — ZDBF was created by TheHolyOneZ (TheZ). I will correct anyone who claims otherwise.</li>
+                <li><strong>General ZDBF Q&amp;A</strong> — questions about cogs, commands, configuration, discord.py, and bot architecture</li>
+            </ul>
+        </div>
+        <div class="gai-note-section gai-note-cant">
+            <div class="gai-note-section-title">✗ What I cannot do</div>
+            <ul>
+                <li>Search the internet or access any external URL</li>
+                <li>Persist memory between dashboard sessions (each session starts fresh)</li>
+                <li>Execute bot commands or modify configuration directly</li>
+                <li>Read files outside the allowed paths (root *.py, cogs/*.py, data/* — .env, session data, and live monitor config are always blocked)</li>
+                <li>Guarantee accuracy for topics not covered by the ZDBF README or loaded cog info</li>
+            </ul>
+        </div>
+    </div>
+    <div class="gai-note-footer">Context is injected automatically based on your question. Mention a cog name, ask "what files exist", or ask a how-to question to trigger the relevant tool.</div>
+</div>
+</div><!-- /.gai-root -->
+
+<script>
+(function() {
+    'use strict';
+    let _key                 = null;
+    let _uid                 = null;
+    let _config              = {};
+    let _historyTs           = [];
+    let _locked              = false;
+    let _lastSentAt          = 0;
+    let _hasOptimisticBubble = false;
+    let _attachedFiles       = [];
+    let _availableFiles      = [];
+    let _ddSelectedIdx       = -1;
+
+    function _hexToBytes(hex) {
+        const arr = new Uint8Array(hex.length >> 1);
+        for (let i = 0; i < hex.length; i += 2)
+            arr[i >> 1] = parseInt(hex.substr(i, 2), 16);
+        return arr;
+    }
+    function _bytesToHex(buf) {
+        return Array.from(new Uint8Array(buf))
+            .map(function(b) { return b.toString(16).padStart(2, '0'); }).join('');
+    }
+    async function _importKey(keyHex, usage) {
+        return crypto.subtle.importKey(
+            'raw', _hexToBytes(keyHex),
+            { name: 'AES-CBC' }, false, [usage]
+        );
+    }
+    async function gaiEncrypt(text, keyHex) {
+        const iv  = crypto.getRandomValues(new Uint8Array(16));
+        const key = await _importKey(keyHex, 'encrypt');
+        const ct  = await crypto.subtle.encrypt(
+            { name: 'AES-CBC', iv: iv }, key,
+            new TextEncoder().encode(text)
+        );
+        return _bytesToHex(iv) + ':' + _bytesToHex(ct);
+    }
+    async function gaiDecrypt(token, keyHex) {
+        try {
+            const colon = token.indexOf(':');
+            if (colon < 0) return '[encrypted]';
+            const iv  = _hexToBytes(token.slice(0, colon));
+            const ct  = _hexToBytes(token.slice(colon + 1));
+            const key = await _importKey(keyHex, 'decrypt');
+            const pt  = await crypto.subtle.decrypt(
+                { name: 'AES-CBC', iv: iv }, key, ct
+            );
+            return new TextDecoder().decode(pt);
+        } catch(e) { return '[decryption error]'; }
+    }
+
+    function gaiGetOrCreateLocalKey(uid) {
+        var lsKey = 'gai_key_' + uid;
+        var stored = localStorage.getItem(lsKey);
+        if (!stored || stored.length !== 64) {
+            var bytes = crypto.getRandomValues(new Uint8Array(32));
+            stored = Array.from(bytes).map(function(b) { return b.toString(16).padStart(2,'0'); }).join('');
+            localStorage.setItem(lsKey, stored);
+        }
+        return stored;
+    }
+
+    window.geminiInit = async function(monitorData, userId) {
+        _uid = userId || _uid;
+        if (!_uid) return;
+
+        const gd = monitorData && monitorData.gemini;
+        if (!gd) return;
+
+        _config = gd.config || {};
+        _availableFiles = gd.available_files || [];
+
+        const chip = document.getElementById('gaiModelChip');
+        if (chip && _config.model) chip.textContent = _config.model;
+
+        const sessions = gd.user_sessions || {};
+        const uData = sessions[_uid];
+        if (uData && uData.aes_key) {
+            _key = uData.aes_key;
+            localStorage.setItem('gai_key_' + _uid, _key);
+            await gaiRender(uData.history || []);
+            gaiUpdateStats(uData.history || []);
+            const dot = document.getElementById('gaiPanelDot');
+            if (dot) { dot.classList.remove('offline'); }
+        } else {
+            _key = gaiGetOrCreateLocalKey(_uid);
+        }
+
+        const mIn = document.getElementById('geminiModelInput');
+        const pIn = document.getElementById('geminiPromptInput');
+        if (mIn && _config.model) mIn.value = _config.model;
+        if (pIn && _config.system_prompt) pIn.value = _config.system_prompt;
+
+        gaiApplyPerms();
+    };
+
+    async function gaiRender(history) {
+        if (!_key) return;
+        const box   = document.getElementById('geminiMessages');
+        const noMsg = document.getElementById('geminiNoMsg');
+        if (!box) return;
+
+        if (!history || history.length === 0) {
+            Array.from(box.querySelectorAll('.gai-msg-row')).forEach(function(el) { el.remove(); });
+            if (noMsg) noMsg.style.display = '';
+            _historyTs = [];
+            return;
+        }
+        if (noMsg) noMsg.style.display = 'none';
+
+        const renderedTs = new Set(_historyTs);
+        const newEntries = history.filter(function(e) { return e.ts && !renderedTs.has(e.ts); });
+
+        if (newEntries.length === 0) return;
+
+        if (_hasOptimisticBubble && newEntries.some(function(e) { return e.role === 'user'; })) {
+            const opt = box.querySelector('.gai-optimistic');
+            if (opt) opt.remove();
+            _hasOptimisticBubble = false;
+        }
+
+        const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 120;
+
+        const texts = await Promise.all(
+            newEntries.map(function(e) { return gaiDecrypt(e.enc, _key); })
+        );
+        texts.forEach(function(text, i) {
+            box.appendChild(gaiMakeBubble(text, newEntries[i].role === 'user', newEntries[i].ts));
+            if (newEntries[i].ts) _historyTs.push(newEntries[i].ts);
+        });
+
+        if (nearBottom) box.scrollTop = box.scrollHeight;
+
+        if (_locked && newEntries.some(function(e) { return e.role === 'assistant'; })) {
+            _locked = false;
+            gaiSetLocked(false);
+        }
+    }
+
+    function gaiSetLocked(locked) {
+        const sendBtn = document.getElementById('geminiSendBtn');
+        const input   = document.getElementById('geminiInput');
+        const skipBtn = document.getElementById('geminiSkipBtn');
+        const typing  = document.getElementById('geminiTyping');
+        const p = (typeof window.LM_PERMS !== 'undefined') ? window.LM_PERMS : null;
+        const canSend = !p || !!p.action_gemini_send;
+        if (sendBtn) sendBtn.disabled = locked || !canSend;
+        if (input)   input.disabled   = locked || !canSend;
+        if (skipBtn) skipBtn.style.display = locked ? '' : 'none';
+        if (!locked && typing) typing.classList.remove('visible');
+    }
+
+    window.geminiSkip = function() {
+        _locked = false;
+        _hasOptimisticBubble = false;
+        const box = document.getElementById('geminiMessages');
+        if (box) { const opt = box.querySelector('.gai-optimistic'); if (opt) opt.remove(); }
+        gaiSetLocked(false);
+        gaiStatus('Request cancelled — you can send a new message.');
+    };
+
+    function gaiMarkdown(raw) {
+        if (!raw) return '';
+        const result = [];
+        const codeRe = /```([\w]*)\\n?([\s\S]*?)```/g;
+        let last = 0, m;
+        while ((m = codeRe.exec(raw)) !== null) {
+            if (m.index > last) result.push(gaiMdText(raw.slice(last, m.index)));
+            result.push('<pre class="gai-code-block"><code>' + gaiEsc(m[2].trimEnd()) + '</code></pre>');
+            last = codeRe.lastIndex;
+        }
+        if (last < raw.length) result.push(gaiMdText(raw.slice(last)));
+        return result.join('');
+    }
+
+    function gaiMdText(text) {
+        const lines = text.split('\\n');
+        const out = [];
+        let inUl = false, inOl = false;
+        function closeList() {
+            if (inUl) { out.push('</ul>'); inUl = false; }
+            if (inOl) { out.push('</ol>'); inOl = false; }
+        }
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            if (/^### /.test(line))     { closeList(); out.push('<b class="gai-h gai-h3">' + gaiMdInline(line.slice(4)) + '</b>'); }
+            else if (/^## /.test(line)) { closeList(); out.push('<b class="gai-h gai-h2">' + gaiMdInline(line.slice(3)) + '</b>'); }
+            else if (/^# /.test(line))  { closeList(); out.push('<b class="gai-h gai-h1">' + gaiMdInline(line.slice(2)) + '</b>'); }
+            else if (/^[-*] /.test(line)) {
+                if (inOl) { out.push('</ol>'); inOl = false; }
+                if (!inUl) { out.push('<ul class="gai-ul">'); inUl = true; }
+                out.push('<li>' + gaiMdInline(line.slice(2)) + '</li>');
+            } else if (/^\d+\. /.test(line)) {
+                if (inUl) { out.push('</ul>'); inUl = false; }
+                if (!inOl) { out.push('<ol class="gai-ol">'); inOl = true; }
+                out.push('<li>' + gaiMdInline(line.replace(/^\d+\. /, '')) + '</li>');
+            } else if (/^---+$/.test(line.trim())) {
+                closeList(); out.push('<hr class="gai-hr">');
+            } else if (line.trim() === '') {
+                closeList(); out.push('');
+            } else {
+                closeList(); out.push('<span class="gai-p">' + gaiMdInline(line) + '</span><br>');
+            }
+        }
+        closeList();
+        return out.join('\\n');
+    }
+
+    function gaiMdInline(text) {
+        text = gaiEsc(text);
+        text = text.replace(/`([^`]+)`/g, '<code class="gai-inline-code">$1</code>');
+        text = text.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
+        text = text.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+        text = text.replace(/__(.+?)__/g, '<strong>$1</strong>');
+        text = text.replace(/\*(.+?)\*/g, '<em>$1</em>');
+        return text;
+    }
+
+    function gaiMakeBubble(text, isUser, ts) {
+        const row = document.createElement('div');
+        row.className = 'gai-msg-row' + (isUser ? ' user' : '');
+
+        const avatar = document.createElement('div');
+        avatar.className = 'gai-avatar ' + (isUser ? 'gai-avatar-user' : 'gai-avatar-ai');
+        avatar.innerHTML = isUser
+            ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(196,181,253,.9)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>'
+            : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(96,165,250,.9)" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>';
+
+        const wrap = document.createElement('div');
+        wrap.className = 'gai-bubble-wrap';
+
+        const bubble = document.createElement('div');
+        bubble.className = 'gai-bubble ' + (isUser ? 'gai-bubble-user' : 'gai-bubble-ai');
+        bubble.innerHTML = gaiMarkdown(text);
+
+        const meta = document.createElement('div');
+        meta.className = 'gai-bubble-meta';
+        const label = isUser ? 'You' : 'Gemini';
+        const timeStr = ts ? new Date(ts * 1000).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : '';
+        meta.textContent = label + (timeStr ? ' · ' + timeStr : '');
+
+        wrap.appendChild(bubble);
+        wrap.appendChild(meta);
+        row.appendChild(avatar);
+        row.appendChild(wrap);
+        return row;
+    }
+
+    function gaiEsc(str) {
+        return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+
+    function gaiUpdateStats(history) {
+        const cntEl = document.getElementById('gaiMsgCount');
+        const ageEl = document.getElementById('gaiSessionAge');
+        if (cntEl) cntEl.textContent = history.length || '0';
+        if (ageEl && history.length > 0) {
+            const last = history[history.length - 1];
+            if (last && last.ts) {
+                const diff = Math.floor((Date.now() / 1000) - last.ts);
+                if (diff < 60)        ageEl.textContent = diff + 's ago';
+                else if (diff < 3600) ageEl.textContent = Math.floor(diff/60) + 'm ago';
+                else                  ageEl.textContent = Math.floor(diff/3600) + 'h ago';
+            } else { ageEl.textContent = '—'; }
+        } else if (ageEl) { ageEl.textContent = '—'; }
+    }
+
+    window.geminiSend = async function() {
+        const input = document.getElementById('geminiInput');
+        const text  = input ? input.value.trim() : '';
+        if (!text || !_key || !_uid) return;
+
+        if (_locked) {
+            gaiStatus('Please wait for the current response before sending again.', true);
+            return;
+        }
+
+        const now = Date.now() / 1000;
+        const sinceLastSend = now - _lastSentAt;
+        if (_lastSentAt > 0 && sinceLastSend < 15) {
+            const wait = Math.ceil(15 - sinceLastSend);
+            gaiStatus('Rate limited — please wait ' + wait + 's.', true);
+            return;
+        }
+
+        const encrypted = await gaiEncrypt(text, _key);
+
+        const box   = document.getElementById('geminiMessages');
+        const noMsg = document.getElementById('geminiNoMsg');
+        if (noMsg) noMsg.style.display = 'none';
+        if (box) {
+            const bubble = gaiMakeBubble(text, true, now);
+            bubble.classList.add('gai-optimistic');
+            box.appendChild(bubble);
+            box.scrollTop = box.scrollHeight;
+            _hasOptimisticBubble = true;
+        }
+
+        if (input) { input.value = ''; input.style.height = 'auto'; }
+
+        const typing = document.getElementById('geminiTyping');
+        if (typing) typing.classList.add('visible');
+        gaiSetLocked(true);
+
+        lmPost('gemini_send_message', { encrypted_msg: encrypted, discord_id: _uid, key_hex: _key, file_path: _attachedFiles.join(',') }, function(ok) {
+            if (ok) {
+                _locked = true;
+                _lastSentAt = now;
+                geminiClearAttach();
+            } else {
+                _locked = false;
+                _hasOptimisticBubble = false;
+                const opt = box && box.querySelector('.gai-optimistic');
+                if (opt) opt.remove();
+                gaiSetLocked(false);
+                gaiStatus('Send failed — check bot logs.', true);
+            }
+        });
+    };
+
+    window.geminiClearHistory = function() {
+        if (!_uid) return;
+        if (!confirm('Clear your entire AI chat history? This cannot be undone.')) return;
+        lmPost('gemini_clear_history', { discord_id: _uid }, function(ok) {
+            if (ok) {
+                const box = document.getElementById('geminiMessages');
+                if (box) Array.from(box.querySelectorAll('.gai-msg-row')).forEach(function(el) { el.remove(); });
+                const noMsg = document.getElementById('geminiNoMsg');
+                if (noMsg) noMsg.style.display = '';
+                _historyTs = [];
+                _locked = false;
+                _hasOptimisticBubble = false;
+                gaiSetLocked(false);
+                gaiUpdateStats([]);
+                gaiStatus('History cleared.');
+            } else {
+                gaiStatus('Clear failed.', true);
+            }
+        });
+    };
+
+    window.geminiToggleConfig = function() {
+        const drawer  = document.getElementById('geminiConfigDrawer');
+        const btn     = document.getElementById('geminiConfigBtn');
+        if (!drawer) return;
+        const isOpen = drawer.classList.toggle('open');
+        if (btn) btn.classList.toggle('active', isOpen);
+    };
+
+    window.geminiSaveConfig = function() {
+        const model  = document.getElementById('geminiModelInput');
+        const prompt = document.getElementById('geminiPromptInput');
+        lmPost('gemini_update_config', {
+            discord_id:    _uid,
+            model:         model  ? model.value.trim()  : '',
+            system_prompt: prompt ? prompt.value.trim() : '',
+        }, function(ok) {
+            gaiStatus(ok ? 'Config saved.' : 'Save failed.', !ok);
+            if (ok) {
+                const m = model ? model.value.trim() : '';
+                const chip = document.getElementById('gaiModelChip');
+                if (chip && m) chip.textContent = m;
+                const drawer = document.getElementById('geminiConfigDrawer');
+                const btn    = document.getElementById('geminiConfigBtn');
+                if (drawer) drawer.classList.remove('open');
+                if (btn)    btn.classList.remove('active');
+            }
+        });
+    };
+
+    window.geminiShowNote = function() {
+        document.getElementById('geminiNoteOverlay').classList.add('open');
+        document.getElementById('geminiNotePopup').classList.add('open');
+    };
+    window.geminiHideNote = function() {
+        document.getElementById('geminiNoteOverlay').classList.remove('open');
+        document.getElementById('geminiNotePopup').classList.remove('open');
+    };
+
+    window.geminiToggleAttach = function() {
+        const row = document.getElementById('geminiAttachRow');
+        const btn = document.getElementById('geminiAttachBtn');
+        const inp = document.getElementById('geminiAttachInput');
+        if (!row) return;
+        const open = row.classList.toggle('visible');
+        if (btn) btn.classList.toggle('active', open);
+        if (open && inp) inp.focus();
+    };
+
+    window.geminiClearAttach = function() {
+        const row = document.getElementById('geminiAttachRow');
+        const btn = document.getElementById('geminiAttachBtn');
+        const inp = document.getElementById('geminiAttachInput');
+        _attachedFiles = [];
+        gaiRenderChips();
+        gaiHideDropdown();
+        if (row) row.classList.remove('visible');
+        if (btn) btn.classList.remove('active');
+        if (inp) inp.value = '';
+    };
+
+    function gaiAddAttachedFile(path) {
+        if (!path || _attachedFiles.indexOf(path) >= 0) return;
+        _attachedFiles.push(path);
+        gaiRenderChips();
+    }
+
+    window.geminiRemoveFile = function(path) {
+        _attachedFiles = _attachedFiles.filter(function(f) { return f !== path; });
+        gaiRenderChips();
+    };
+
+    function gaiRenderChips() {
+        const el = document.getElementById('geminiAttachChips');
+        if (!el) return;
+        el.innerHTML = '';
+        _attachedFiles.forEach(function(f) {
+            const chip = document.createElement('span');
+            chip.className = 'gai-attach-chip';
+            const name = f.split('/').pop();
+            chip.innerHTML = gaiEsc(name) +
+                '<button class="gai-attach-chip-rm" onclick="geminiRemoveFile(' + JSON.stringify(f) + ')" title="Remove">×</button>';
+            el.appendChild(chip);
+        });
+    }
+
+    function gaiShowDropdown(matches) {
+        const dd = document.getElementById('geminiAttachDropdown');
+        if (!dd) return;
+        if (!matches.length) { dd.style.display = 'none'; _ddSelectedIdx = -1; return; }
+        dd.innerHTML = '';
+        _ddSelectedIdx = -1;
+        matches.forEach(function(f) {
+            const item = document.createElement('div');
+            item.className = 'gai-attach-dd-item';
+            item.dataset.path = f;
+            item.textContent = f;
+            item.onmousedown = function(e) {
+                e.preventDefault();
+                gaiAddAttachedFile(f);
+                const inp = document.getElementById('geminiAttachInput');
+                if (inp) { inp.value = ''; inp.focus(); }
+                gaiHideDropdown();
+            };
+            dd.appendChild(item);
+        });
+        dd.style.display = 'block';
+    }
+
+    window.gaiHideDropdown = function() {
+        const dd = document.getElementById('geminiAttachDropdown');
+        if (dd) dd.style.display = 'none';
+        _ddSelectedIdx = -1;
+    };
+
+    window.gaiAttachFilter = function(val) {
+        val = (val || '').trim().toLowerCase();
+        if (!val) { gaiHideDropdown(); return; }
+        const matches = _availableFiles.filter(function(f) {
+            return f.toLowerCase().indexOf(val) >= 0;
+        }).slice(0, 10);
+        gaiShowDropdown(matches);
+    };
+
+    window.gaiAttachKeydown = function(e) {
+        const dd = document.getElementById('geminiAttachDropdown');
+        const ddVisible = dd && dd.style.display !== 'none';
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            if (!ddVisible) return;
+            const items = dd.querySelectorAll('.gai-attach-dd-item');
+            if (items[_ddSelectedIdx]) items[_ddSelectedIdx].classList.remove('selected');
+            _ddSelectedIdx = Math.min(_ddSelectedIdx + 1, items.length - 1);
+            if (items[_ddSelectedIdx]) { items[_ddSelectedIdx].classList.add('selected'); items[_ddSelectedIdx].scrollIntoView({block:'nearest'}); }
+            return;
+        }
+        if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            if (!ddVisible) return;
+            const items = dd.querySelectorAll('.gai-attach-dd-item');
+            if (items[_ddSelectedIdx]) items[_ddSelectedIdx].classList.remove('selected');
+            _ddSelectedIdx = Math.max(_ddSelectedIdx - 1, 0);
+            if (items[_ddSelectedIdx]) { items[_ddSelectedIdx].classList.add('selected'); items[_ddSelectedIdx].scrollIntoView({block:'nearest'}); }
+            return;
+        }
+        if (e.key === 'Escape') { gaiHideDropdown(); return; }
+        if (e.key === 'Enter' || e.key === ',') {
+            e.preventDefault();
+            if (ddVisible && _ddSelectedIdx >= 0) {
+                const items = dd.querySelectorAll('.gai-attach-dd-item');
+                if (items[_ddSelectedIdx]) {
+                    gaiAddAttachedFile(items[_ddSelectedIdx].dataset.path);
+                    e.target.value = '';
+                    gaiHideDropdown();
+                    return;
+                }
+            }
+            const val = e.target.value.trim().replace(/,+$/, '');
+            if (val) gaiAddAttachedFile(val);
+            e.target.value = '';
+            gaiHideDropdown();
+        }
+    };
+
+    function gaiApplyPerms() {
+        const p = (typeof window.LM_PERMS !== 'undefined') ? window.LM_PERMS : null;
+        const canSend   = !p || !!p.action_gemini_send;
+        const canClear  = !p || !!p.action_gemini_clear_history;
+        const canConfig = !p || !!p.action_gemini_config;
+        const sendBtn   = document.getElementById('geminiSendBtn');
+        const clearBtn  = document.getElementById('geminiClearBtn');
+        const configBtn = document.getElementById('geminiConfigBtn');
+        const input     = document.getElementById('geminiInput');
+        if (sendBtn)  sendBtn.disabled  = !canSend || _locked;
+        if (clearBtn) clearBtn.disabled = !canClear;
+        if (configBtn) configBtn.disabled = !canConfig;
+        if (input) {
+            input.disabled = !canSend || _locked;
+            if (!canSend) input.placeholder = 'You do not have permission to send messages.';
+        }
+    }
+
+    function gaiStatus(msg, isError) {
+        const el = document.getElementById('geminiStatusMsg');
+        if (!el) return;
+        el.textContent = msg;
+        el.style.color = isError ? 'rgba(252,165,165,.8)' : 'rgba(52,211,153,.8)';
+        if (msg) setTimeout(function() { if (el.textContent === msg) el.textContent = ''; }, 3500);
+    }
+
+    function lmPost(cmd, params, cb) {
+        fetch('./send_command.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({ command: cmd, params: params }),
+        })
+        .then(function(r) { cb && cb(r.ok); })
+        .catch(function()  { cb && cb(false); });
+    }
+
+})();
+</script>
+</div>'''
+
     def _generate_data_htaccess(self) -> str:
         """Generate .htaccess for the data directory to completely block access.
         
@@ -28956,7 +30349,7 @@ try {
     }}
 
     $package = $_GET['package'] ?? 'unknown';
-    $validPackages = ['core', 'commands', 'plugins', 'hooks', 'extensions', 'system_details', 'events', 'filesystem', 'fileops', 'assets', 'tickets', 'hook_creator', 'status', 'plugin_response', 'plugin_requests_clear', 'backup_restore', 'shard_info', 'backup_action', 'backup_actions_clear'];
+    $validPackages = ['core', 'commands', 'plugins', 'hooks', 'extensions', 'system_details', 'events', 'filesystem', 'fileops', 'assets', 'tickets', 'hook_creator', 'status', 'plugin_response', 'plugin_requests_clear', 'backup_restore', 'shard_info', 'backup_action', 'backup_actions_clear', 'gemini'];
 
     if (!in_array($package, $validPackages)) {{
         http_response_code(400);
@@ -29272,7 +30665,15 @@ function lm_command_allowed_for_permissions(string $command, array $perms): bool
             return !empty($perms['action_delete_backup']);
         case 'backup_toggle_pin':
             return !empty($perms['action_edit_backup_config']);
-        
+
+        // Gemini AI Chat Actions
+        case 'gemini_send_message':
+            return !empty($perms['action_gemini_send']);
+        case 'gemini_clear_history':
+            return !empty($perms['action_gemini_clear_history']);
+        case 'gemini_update_config':
+            return !empty($perms['action_gemini_config']);
+
         default:
             return true;
     }

@@ -12,6 +12,7 @@ from datetime import datetime
 import logging
 import asyncio
 import re
+import json
 
 logger = logging.getLogger('discord')
 
@@ -53,17 +54,88 @@ class PluginMetadata:
         }
 
 
+class PluginListView(discord.ui.View):
+    """Paginated view for /pr_list — 10 plugins per page."""
+
+    def __init__(self, cog: "PluginRegistry", items: list):
+        super().__init__(timeout=120)
+        self._cog = cog
+        self.items = items          # list of (name, PluginMetadata)
+        self.page = 0
+        self.per_page = 10
+        self.max_page = max(0, (len(items) - 1) // self.per_page)
+        self._update_buttons()
+
+    def _update_buttons(self):
+        self.prev_button.disabled = (self.page == 0)
+        self.next_button.disabled = (self.page >= self.max_page)
+
+    def build_embed(self) -> discord.Embed:
+        start = self.page * self.per_page
+        page_items = self.items[start:start + self.per_page]
+
+        embed = discord.Embed(
+            title="🔌 Registered Plugins",
+            description=f"**Total: {len(self.items)}** • Page {self.page + 1}/{self.max_page + 1}",
+            color=0x5865f2,
+            timestamp=discord.utils.utcnow(),
+        )
+
+        for name, metadata in page_items:
+            icons = []
+            if metadata.scan_errors:
+                icons.append("⚠️")
+            if not self._cog.check_dependencies(name)[0]:
+                icons.append("❌")
+            if self._cog.detect_conflicts(name)[0]:
+                icons.append("⚠️")
+            if self._cog._detect_circular_dependencies(name)[0]:
+                icons.append("🔄")
+            status = " ".join(icons) if icons else "✅"
+            cmds = f"Commands: {len(metadata.commands)}" if metadata.commands else "No commands"
+            cogs_ = f"Cogs: {len(metadata.cogs)}" if metadata.cogs else "No cogs"
+            val = f"```{status}\nv{metadata.version}\n{cmds}\n{cogs_}\nLoad: {metadata.load_time:.3f}s```"
+            embed.add_field(name=f"📦 {name}", value=val, inline=True)
+
+        return embed
+
+    @discord.ui.button(label="◀ Prev", style=discord.ButtonStyle.secondary)
+    async def prev_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.page = max(0, self.page - 1)
+        self._update_buttons()
+        await interaction.response.edit_message(embed=self.build_embed(), view=self)
+
+    @discord.ui.button(label="Next ▶", style=discord.ButtonStyle.secondary)
+    async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.page = min(self.max_page, self.page + 1)
+        self._update_buttons()
+        await interaction.response.edit_message(embed=self.build_embed(), view=self)
+
+
 class PluginRegistry(commands.Cog):
     
     def __init__(self, bot):
         self.bot = bot
         self.registry: Dict[str, PluginMetadata] = {}
         self.registry_file = Path("./data/plugin_registry.json")
+        self._config_file = Path("./data/plugin_registry_config.json")
+        self._fallback_listeners_added = False
         self.enforce_dependencies = True
         self.enforce_conflicts = True
         self.alert_channel_id = None
-        
+
         self.registry_file.parent.mkdir(parents=True, exist_ok=True)
+
+        # Load persisted config (alert channel + enforcement states)
+        if self._config_file.exists():
+            try:
+                with open(self._config_file, "r", encoding="utf-8") as _f:
+                    _cfg = json.load(_f)
+                self.alert_channel_id = _cfg.get("alert_channel_id")
+                self.enforce_dependencies = _cfg.get("enforce_dependencies", True)
+                self.enforce_conflicts = _cfg.get("enforce_conflicts", True)
+            except Exception as _e:
+                logger.warning(f"Plugin Registry: Failed to load config: {_e}")
         
         bot.register_plugin = self.register_plugin
         bot.unregister_plugin = self.unregister_plugin
@@ -78,11 +150,17 @@ class PluginRegistry(commands.Cog):
     @commands.Cog.listener()
     async def on_ready(self):
         await self.scan_loaded_extensions()
-        
+
         if hasattr(self.bot, 'register_hook'):
             self.bot.register_hook("extension_loaded", self.on_extension_loaded_hook, priority=10)
             self.bot.register_hook("extension_unloaded", self.on_extension_unloaded_hook, priority=10)
             logger.info("Plugin Registry: Registered with event hooks system")
+        else:
+            # EventHooks cog absent — fall back to direct bot event listeners
+            self.bot.add_listener(self._on_extension_loaded_direct, 'on_extension_loaded')
+            self.bot.add_listener(self._on_extension_unloaded_direct, 'on_extension_unloaded')
+            self._fallback_listeners_added = True
+            logger.info("Plugin Registry: EventHooks absent — using direct bot event listeners")
     
     async def scan_loaded_extensions(self):
         logger.info("Plugin Registry: Scanning loaded extensions")
@@ -208,14 +286,20 @@ class PluginRegistry(commands.Cog):
                 await self._auto_scan_extension(metadata, full_name)
         
         self.registry[name] = metadata
-        
+
         is_valid, validation_errors = await self.validate_plugin_load(name)
         if validation_errors:
-            logger.warning(f"Plugin '{name}' registered with validation warnings: {'; '.join(validation_errors)}")
-            await self._send_alert(f"⚠️ Plugin Registry: '{name}' has issues:\n" + "\n".join(f"- {e}" for e in validation_errors))
-        else:
-            logger.info(f"Plugin registered: {name}")
-        
+            # Enforcement is blocking — remove the plugin and refuse registration
+            del self.registry[name]
+            msg = (
+                f"❌ Plugin Registry: '{name}' refused — enforcement blocked:\n"
+                + "\n".join(f"- {e}" for e in validation_errors)
+            )
+            logger.error(f"Plugin '{name}' refused by enforcement: {'; '.join(validation_errors)}")
+            await self._send_alert(msg)
+            return None
+
+        logger.info(f"Plugin registered: {name}")
         return metadata
     
     async def _auto_scan_extension(self, metadata: PluginMetadata, full_ext_name: str):
@@ -255,7 +339,17 @@ class PluginRegistry(commands.Cog):
                 conflicts = ext_module.__conflicts__
                 if isinstance(conflicts, (list, set)):
                     metadata.conflicts_with = set(conflicts)
-            
+
+            if hasattr(ext_module, '__provides_hooks__'):
+                ph = ext_module.__provides_hooks__
+                if isinstance(ph, (list, tuple, set)):
+                    metadata.provides_hooks = list(ph)
+
+            if hasattr(ext_module, '__listens_to_hooks__'):
+                lh = ext_module.__listens_to_hooks__
+                if isinstance(lh, (list, tuple, set)):
+                    metadata.listens_to_hooks = list(lh)
+
             if hasattr(ext_module, '__file__'):
                 metadata.file_path = Path(ext_module.__file__)
             
@@ -345,6 +439,18 @@ class PluginRegistry(commands.Cog):
         except Exception as e:
             logger.error(f"Failed to save registry: {e}")
     
+    async def _save_config(self):
+        """Persist alert_channel_id, enforce_dependencies, and enforce_conflicts to disk."""
+        try:
+            cfg = {
+                "alert_channel_id": self.alert_channel_id,
+                "enforce_dependencies": self.enforce_dependencies,
+                "enforce_conflicts": self.enforce_conflicts,
+            }
+            await self.bot.config.file_handler.atomic_write_json(str(self._config_file), cfg)
+        except Exception as e:
+            logger.error(f"Plugin Registry: Failed to save config: {e}")
+
     async def _send_alert(self, message: str):
         if not self.alert_channel_id:
             logger.warning(f"Plugin Registry Alert (no channel): {message}")
@@ -376,57 +482,36 @@ class PluginRegistry(commands.Cog):
         simple_name = extension_name.replace("extensions.", "")
         self.unregister_plugin(simple_name)
         await self.save_registry()
-    
+
+    # ── Fallback handlers used when EventHooks is not loaded ──────────────
+    async def _on_extension_loaded_direct(self, extension_name: str):
+        if not extension_name.startswith("cogs."):
+            simple_name = extension_name.replace("extensions.", "")
+            await self.register_plugin(simple_name, auto_scan=True)
+            await self.save_registry()
+
+    async def _on_extension_unloaded_direct(self, extension_name: str):
+        simple_name = extension_name.replace("extensions.", "")
+        self.unregister_plugin(simple_name)
+        await self.save_registry()
+
     @commands.hybrid_command(name="pr_list", help="List all registered plugins with metadata")
     @commands.cooldown(1, 10, commands.BucketType.user)
     async def pr_list_command(self, ctx):
-        embed = discord.Embed(
-            title="🔌 Registered Plugins",
-            description=f"**Total plugins: {len(self.registry)}**",
-            color=0x5865f2,
-            timestamp=discord.utils.utcnow()
-        )
-        
         if not self.registry:
-            embed.description = "```No plugins registered```"
+            embed = discord.Embed(
+                title="🔌 Registered Plugins",
+                description="```No plugins registered```",
+                color=0x5865f2,
+                timestamp=discord.utils.utcnow(),
+            )
             await ctx.send(embed=embed)
             return
-        
-        for name, metadata in sorted(self.registry.items()):
-            status_icons = []
-            
-            if metadata.scan_errors:
-                status_icons.append("⚠️")
-            
-            deps_ok, _ = self.check_dependencies(name)
-            if not deps_ok:
-                status_icons.append("❌")
-            
-            has_conflicts, _ = self.detect_conflicts(name)
-            if has_conflicts:
-                status_icons.append("⚠️")
-            
-            has_cycle, _ = self._detect_circular_dependencies(name)
-            if has_cycle:
-                status_icons.append("🔄")
-            
-            status = " ".join(status_icons) if status_icons else "✅"
-            
-            commands_text = f"Commands: {len(metadata.commands)}" if metadata.commands else "No commands"
-            cogs_text = f"Cogs: {len(metadata.cogs)}" if metadata.cogs else "No cogs"
-            
-            value = f"```{status}\nVersion: {metadata.version}\n{commands_text}\n{cogs_text}\nLoad: {metadata.load_time:.3f}s```"
-            
-            embed.add_field(
-                name=f"📦 {name}",
-                value=value,
-                inline=True
-            )
-        
-        embed.set_footer(text=f"Registry: {self.registry_file}")
-        
-        await ctx.send(embed=embed)
-        
+
+        items = sorted(self.registry.items())
+        view = PluginListView(self, items)
+        await ctx.send(embed=view.build_embed(), view=view)
+
         try:
             await ctx.message.delete()
         except:
@@ -558,10 +643,12 @@ class PluginRegistry(commands.Cog):
         if mode.lower() == "deps":
             self.enforce_dependencies = not self.enforce_dependencies
             status = "enabled" if self.enforce_dependencies else "disabled"
+            await self._save_config()
             await ctx.send(f"✅ Dependency enforcement {status}", ephemeral=True)
         elif mode.lower() == "conflicts":
             self.enforce_conflicts = not self.enforce_conflicts
             status = "enabled" if self.enforce_conflicts else "disabled"
+            await self._save_config()
             await ctx.send(f"✅ Conflict enforcement {status}", ephemeral=True)
         else:
             await ctx.send("❌ Mode must be 'deps' or 'conflicts'", ephemeral=True)
@@ -571,11 +658,16 @@ class PluginRegistry(commands.Cog):
     async def pr_alert_channel_command(self, ctx, channel: discord.TextChannel = None):
         if channel is None:
             channel = ctx.channel
-        
+
         self.alert_channel_id = channel.id
+        await self._save_config()
         await ctx.send(f"✅ Plugin Registry alert channel set to {channel.mention}", ephemeral=True)
     
     def cog_unload(self):
+        if self._fallback_listeners_added:
+            self.bot.remove_listener(self._on_extension_loaded_direct, 'on_extension_loaded')
+            self.bot.remove_listener(self._on_extension_unloaded_direct, 'on_extension_unloaded')
+
         if hasattr(self.bot, 'register_plugin'):
             delattr(self.bot, 'register_plugin')
         if hasattr(self.bot, 'unregister_plugin'):
