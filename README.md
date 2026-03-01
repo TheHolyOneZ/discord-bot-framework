@@ -22,8 +22,13 @@
 </p>
 
 <p align="center">
-  **✨ NEW (v1.8.0.0): Framework Diagnostics & GeminiService overhaul + Backup completeness**
-  <br>Framework Diagnostics gains persistent alert channel, rolling error-rate window, rolling lag average, `/fw_history`, `/fw_errors`, and more. GeminiService gets real rate-limiting, TTL cache, owner-only file security, and configurable Gemini model. Backup/Restore now fully restores forum channels, stage channels, emojis, stickers, and server settings — with images embedded as base64 at capture time (CDN URLs are no longer relied upon).
+  **✨ NEW (v1.9.0.0): AI Assistant dashboard tab + EventHooksCreater overhaul + Plugin Registry upgrade**
+  <br>Brand-new <strong>GeminiServiceHelper</strong> cog adds an AES-256-CBC encrypted AI chat tab directly inside the Live Monitor dashboard — no slash commands required. EventHooksCreater fully implemented (leveling, tickets, voice channels, scheduled announcements, dynamic voice) with new `/hooks` slash commands. Plugin Registry now enforces dependencies for real, persists config across restarts, and paginates plugin lists.
+</p>
+
+<p align="center">
+  **✨ PREVIOUS (v1.8.0.0): Framework Diagnostics & GeminiService overhaul + Backup completeness**
+  <br>Framework Diagnostics gains persistent alert channel, rolling error-rate, rolling lag average, `/fw_history`, `/fw_errors`. GeminiService gets real rate-limiting, TTL cache, owner-only file security. Backup/Restore now fully restores forum channels, stage channels, emojis, stickers, and server settings with base64 image capture.
 </p>
 
 <p align="center">
@@ -208,22 +213,42 @@ No PHP hosting required • Instant setup • All features included
 - Custom event emission support
 
 
-**Plugin Registry** (`cogs/plugin_registry.py`)
+**Automation Creator** (`cogs/EventHooksCreater.py`) — v1.9.0.0 (full overhaul, 5.5 → 9.0+)
+- User-defined automations built on top of Discord events — create, manage, and monitor from Discord commands or the Live Monitor Hook Creator tab
+- **Implemented automation templates:**
+  - `leveling_system` — XP per message with per-user cooldown, level-up announcements, role rewards at configurable thresholds
+  - `scheduled_announcement` — recurring message/embed to a channel at a configurable interval (hours); implemented as a per-hook `asyncio.Task`
+  - `ticket_system` — private text channel created per user on emoji reaction; support role granted access; reaction removed after ticket creation
+  - `voice_activity_tracker` — logs join, leave, and mute/unmute events to a log channel; each event type independently togglable
+  - `dynamic_voice_channels` — temporary voice channel created when a user joins a trigger channel; auto-deleted when empty
+- **Advanced Condition Engine** — hooks respect conditions (time_range, day_of_week, role_hierarchy, message_count, user_age, custom_variable) — previously dead code, now evaluated at the top of every handler
+- **Action pipeline** wired in — `_execute_actions` now called by all handlers (send_message, add_role, remove_role, timeout, send_dm, webhook, create_role, delay, trigger_hook)
+- **Safe math evaluator** — `eval()` replaced with AST-based parser; only numeric constants and `+`, `-`, `*`, `/` permitted
+- **No listener accumulation** — `_registered_hook_ids: set` prevents duplicate listeners on reload
+- **Batch I/O** — dirty flag + 60-second `auto_save` background task instead of writing on every execution
+- **New slash commands:** `/hooks list`, `/hooks info`, `/hooks delete`, `/hooks toggle`, `/hooks create`
+
+
+**Plugin Registry** (`cogs/plugin_registry.py`) — v1.9.0.0
 - Automatic metadata extraction from extensions with error logging
-- **Dependency validation and enforcement:**
+- **Dependency validation and enforcement (v1.9.0.0 — now blocking):**
   - Version comparison support (`>=`, `>`, `==`, `<=`, `<`)
   - Missing dependency detection
   - Version mismatch detection
+  - `register_plugin()` **refuses** to register plugins with unmet dependencies when enforcement is enabled (was advisory-only before)
 - **Conflict detection and prevention:**
   - Bidirectional conflict checking
   - Automatic conflict alerts
 - **Circular dependency detection:**
   - Prevents infinite dependency loops
   - Shows full dependency cycle path
+- **Hook metadata scanning (v1.9.0.0):**
+  - `__provides_hooks__` and `__listens_to_hooks__` module attributes read during auto-scan
 - Command and cog enumeration
 - Load time tracking per plugin
-- Auto-registration on extension load via event hooks
-- JSON-based registry persistence with enforcement settings
+- Auto-registration on extension load — falls back to direct `bot.add_listener()` if EventHooks is absent
+- **Persistent config (v1.9.0.0):** alert channel, `enforce_dependencies`, and `enforce_conflicts` persisted to `./data/plugin_registry_config.json` — survive restarts
+- **Paginated list (v1.9.0.0):** `/pr_list` uses `PluginListView` with Prev/Next buttons, 10 plugins per page
 - **Alert system:**
   - Configurable alert channel
   - Validation issue warnings
@@ -316,26 +341,33 @@ No PHP hosting required • Instant setup • All features included
   - Automatic updates when commands are converted
   - Real-time command count tracking
 
-**🤖 AI Assistant (`cogs/GeminiService.py`)** — v1.8.0.0
+**🤖 AI Assistant — Slash Commands (`cogs/GeminiService.py`)** — v1.8.0.0
 - **Powered by Google Gemini** (model configurable via `GEMINI_MODEL` env var, default: `gemini-2.5-flash-lite`)
 - **Deep Contextual Awareness:**
   - Dynamically pulls real-time data from `PluginRegistry`, `FrameworkDiagnostics`, `SlashCommandLimiter`, `EventHooks`, and `EventHooksCreater`
   - File content analysis (owner-only, path-traversal-safe), database schema querying, `README.md` smart search
-- **Security (v1.8.0.0):**
-  - `file` action is now **bot owner only** — previously any Discord user could read `.env`, `config.json`, and any file in the bot directory
-  - `permission` action accurately describes the real access model (`file` + `permission` = owner only; all other actions = everyone)
-- **Rate Limiting (v1.8.0.0 — properly implemented):**
-  - **Per-user cooldown: 15 seconds** between calls — implemented as a manual `_user_cooldowns` dict checked before defer; `@commands.cooldown` was silently ignored for pure `@app_commands.command` handlers and has been replaced
-  - **Global concurrency limit: 3 simultaneous calls** — manual `_active_requests` counter with always-executing `finally` decrement
-  - Both limits fire before `interaction.response.defer()`, so the response is immediate and ephemeral
-- **Performance (v1.8.0.0):**
-  - **60-second TTL in-memory cache** for repeated identical queries on `diagnose`, `plugins`, `slash`, `hooks`, `automations`; cache hits noted in embed footer (`Served from cache (< 60s old)`)
-  - Context sent to Gemini capped at **8,000 characters** to prevent token-limit errors
-  - AI responses exceeding Discord's 4,096-character embed limit now show a visible truncation notice instead of cutting off silently
-- **Resilience (v1.8.0.0):**
-  - `PluginRegistry` and `FrameworkDiagnostics` are no longer imported at module level — GeminiService loads cleanly even if those cogs are absent
+- **Security (v1.8.0.0):** `file` action is **bot owner only**; `@commands.cooldown` replaced with manual `_user_cooldowns` dict (was silently ignored for pure slash commands)
+- **Rate Limiting:** 15s per-user cooldown, max 3 simultaneous requests, both fire before `interaction.response.defer()` for immediate ephemeral feedback
+- **Performance:** 60-second TTL cache for `diagnose`, `plugins`, `slash`, `hooks`, `automations`; context capped at 8,000 chars; truncation notice for responses over 4,096 chars
 - **Interactive Help Menu:** 12-page paginated button-driven guide (`/ask_zdbf action:help`)
 - **Actions:** `help`, `framework`, `plugins`, `diagnose`, `database`, `file`, `extension`, `permission`, `slash`, `hooks`, `automations`, `readme`
+
+**🤖 AI Assistant — Dashboard Chat (`cogs/GeminiServiceHelper.py`)** — v1.9.0.0 ✨ NEW
+- **Encrypted AI chat embedded directly in the Live Monitor dashboard** — no slash commands required, accessed from the **AI Assistant** tab
+- **AES-256-CBC end-to-end encryption:** server-side via Python `cryptography` library, client-side via native Web Crypto API (`crypto.subtle`) — no CDN dependencies, no CSP conflicts
+- **Per-user encrypted sessions** persisted to `./data/gemini_dashboard_sessions.json`; history survives bot restarts
+- **Context tools** auto-injected based on message keywords:
+  - **Framework Info** — live stats (version, guild count, cog list)
+  - **Cog/Extension Info** — description + commands for any loaded cog (name detected in message)
+  - **File Structure** — directory map of root, `cogs/`, `data/`
+  - **README Search** — hierarchical breadcrumb parsing, 3,000-char budget, top 4 scored sections
+  - **File Reading** — sandboxed to root `*.py`, `cogs/*.py`, `data/*`; `.env` and sensitive JSON files always blocked
+  - **Capabilities** — triggered by "what can you do" style queries
+- **Attach File button** with live-filter autocomplete dropdown: type a filename, autocomplete filters against all allowed files, press Enter to attach as a chip; multiple files supported (up to 3 read per message)
+- **Smart scroll, optimistic bubbles, typing indicator, lock + Cancel, markdown rendering** (fenced code, headers, bold, italic, inline code — XSS-safe, no external deps)
+- **Capabilities popup** — animated glassmorphism modal listing what the AI can and cannot do
+- **4 dashboard permission flags:** `view_gemini_chat`, `action_gemini_send`, `action_gemini_clear_history`, `action_gemini_config`
+- **Requires:** `pip install cryptography` (added to `requirements.txt`)
 
 **⚙️ Guild Settings (`cogs/guild_settings.py`)**
 - **Per-Guild Configuration Management:**
@@ -471,7 +503,7 @@ No PHP hosting required • Instant setup • All features included
 - HTTPS recommended for security
 - No database server required (uses SQLite files)
 
-**Dashboard Tabs (20 total):**
+**Dashboard Tabs (21 total):**
 | Tab | Description |
 |-----|-------------|
 | Dashboard | Real-time bot stats, latency, uptime, guild/user counts |
@@ -493,6 +525,7 @@ No PHP hosting required • Instant setup • All features included
 | Shard Manager | Real-time shard monitoring, IPC clusters, health diagnostics |
 | Roles & Access | Manage dashboard user roles (Owner/Helper/Visitor) |
 | Security & Logs | Audit logs, login history, security events |
+| **AI Assistant** ✨ | **AES-256-CBC encrypted Gemini chat — file attach, autocomplete, markdown rendering** |
 | Credits | Framework attribution (required to remain visible) |
 
 
@@ -989,9 +1022,10 @@ discord-bot-framework/
 │   ├── shard_monitor.py         # Real-time shard health monitoring
 │   ├── shard_manager.py         # Multi-process IPC shard management
 │   ├── backup_restore.py        # Backup & Restore system
+│   ├── GeminiService.py         # AI assistant — slash commands (/ask_zdbf)
+│   ├── GeminiServiceHelper.py   # AI assistant — Live Monitor dashboard chat (NEW v1.9.0.0)
 │   ├── SHARD_MONITOR_DOCS.md   # Shard Monitor documentation
-│   ├── SHARD_MANAGER_DOCS.md   # Shard Manager documentation
-│   └── GeminiService.py         # AI assistant powered by Google Gemini
+│   └── SHARD_MANAGER_DOCS.md   # Shard Manager documentation
 │
 ├── data/                        # Auto-generated data directory
 │   ├── main.db                  # Global SQLite database
@@ -1000,10 +1034,13 @@ discord-bot-framework/
 │   ├── [guild_id]/              # Per-guild databases
 │   │   ├── guild.db
 │   │   └── guild_backup_*.db
-│   ├── plugin_registry.json     # Plugin metadata cache
-│   ├── framework_diagnostics.json # System diagnostics
-│   ├── framework_health.json    # Health monitoring data
-│   ├── live_monitor_config.json # Live Monitor settings
+│   ├── plugin_registry.json          # Plugin metadata cache
+│   ├── plugin_registry_config.json   # Plugin Registry alert channel + enforcement states (NEW)
+│   ├── framework_diagnostics.json    # System diagnostics
+│   ├── framework_diagnostics_config.json # FW Diagnostics alert channel (NEW)
+│   ├── framework_health.json         # Health monitoring data
+│   ├── live_monitor_config.json      # Live Monitor settings
+│   ├── gemini_dashboard_sessions.json # AI Assistant encrypted session history (NEW)
 │   ├── shard_monitor/           # Shard monitor data
 │   │   ├── shard_metrics.json   # Periodic metrics snapshot
 │   │   └── alert_config.json    # Alert channel & threshold config
@@ -1116,11 +1153,11 @@ discord-bot-framework/
 
 | Command | Description | AI Query |
 |---------|-------------|----------|
-| `!pr_list` / `/pr_list` | List all registered plugins with status indicators | `/ask_zdbf action:plugins` |
+| `!pr_list` / `/pr_list` | List all registered plugins — paginated, 10 per page with Prev/Next (v1.9.0.0) | `/ask_zdbf action:plugins` |
 | `!pr_info <name>` / `/pr_info` | Detailed information about a specific plugin | `/ask_zdbf action:plugins query:"tell me about [plugin]"` |
 | `!pr_validate <name>` | Validate plugin dependencies and conflicts (Owner) | `/ask_zdbf action:plugins query:"does [plugin] have issues?"` |
-| `!pr_enforce <mode>` | Toggle dependency/conflict enforcement (Owner) | - |
-| `!pr_alert_channel [channel]` | Set alert channel for registry warnings (Owner) | - |
+| `!pr_enforce <mode>` | Toggle dependency/conflict enforcement — now **blocking** in v1.9.0.0 (Owner) | - |
+| `!pr_alert_channel [channel]` | Set alert channel for registry warnings — persisted across restarts (Owner) | - |
 
 ### 📊 Framework Diagnostics Commands
 
@@ -1133,6 +1170,8 @@ discord-bot-framework/
 
 ### 🪝 Event Hooks Commands
 
+**Internal framework event system (`cogs/event_hooks.py`):**
+
 | Command | Description | AI Query |
 |---------|-------------|----------|
 | `!eh_list` / `/eh_list` | Display registered hooks with metrics (Owner) | `/ask_zdbf action:hooks` |
@@ -1141,6 +1180,18 @@ discord-bot-framework/
 | `!eh_enable <hook_id>` | Re-enable a disabled hook (Owner) | - |
 | `!eh_reset_circuit <hook_id>` | Reset circuit breaker for hook (Owner) | - |
 | `!eh_alert_channel [channel]` | Set alert channel for event hooks (Owner) | - |
+
+**User-created automations (`cogs/EventHooksCreater.py`) — v1.9.0.0:**
+
+| Command | Description | Access |
+|---------|-------------|--------|
+| `/hooks list [page]` | Paginated list of all automations in this guild | Owner / Admin |
+| `/hooks info <hook_id>` | Detailed embed: params, conditions, execution stats, last run | Owner / Admin |
+| `/hooks delete <hook_id>` | Delete an automation with confirmation | Owner |
+| `/hooks toggle <hook_id>` | Enable or disable an automation | Owner / Admin |
+| `/hooks create <template_id>` | Create a new automation from a template | Owner / Admin |
+
+**Available templates:** `leveling_system`, `scheduled_announcement`, `ticket_system`, `voice_activity_tracker`, `dynamic_voice_channels`
 
 ### 📡 Live Monitor Commands
 
@@ -1156,6 +1207,8 @@ discord-bot-framework/
 
 ### 🤖 AI Assistant Commands
 
+**Slash command interface (`cogs/GeminiService.py`):**
+
 | Command | Description | Cooldown | Hybrid |
 |---------|-------------|----------|--------|
 | `/ask_zdbf <action> [query]` | Ask the AI assistant about the bot, its code, or data | 15s | ❌ (Slash Only) |
@@ -1166,13 +1219,26 @@ discord-bot-framework/
 - **`plugins`**: Get an AI-powered analysis of installed plugins.
 - **`diagnose`**: Receive a health report summary from the AI.
 - **`database`**: Ask a question about the database schema in natural language.
-- **`file`**: Ask a question about a specific file's content.
+- **`file`**: Ask a question about a specific file's content. (Owner only)
 - **`extension`**: Inspect an extension file from the `/extensions` folder.
 - **`slash`**: Inquire about the slash command auto-conversion system.
 - **`hooks`**: Ask about the internal framework (EventHooks) event system.
 - **`automations`**: Ask about user-created automations.
 - **`readme`**: Ask a question about the bot's `README.md` file.
 - **`permission`**: (Owner Only) Manage permissions for the AI assistant.
+
+**Dashboard AI chat (`cogs/GeminiServiceHelper.py`) — v1.9.0.0 ✨ NEW:**
+
+The Live Monitor dashboard includes a dedicated **AI Assistant** tab (tab 21) with a fully encrypted chat interface — no slash commands required.
+
+| Feature | Detail |
+|---------|--------|
+| Encryption | AES-256-CBC; client uses Web Crypto API, server uses `cryptography` library |
+| Attach File | Toolbar button with live autocomplete; supports multiple files as chip tags |
+| Auto-detect | File names in your message are automatically detected and read |
+| Markdown | Fenced code blocks, headers, bold, italic, inline code — no external deps |
+| Permissions | `view_gemini_chat` · `action_gemini_send` · `action_gemini_clear_history` · `action_gemini_config` |
+| Config | Owner can change Gemini model and system prompt live from the config drawer |
 
 ### 📊 Shard Monitor Commands
 

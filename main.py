@@ -1998,30 +1998,30 @@ async def framework_command(ctx):
             return
     embed = discord.Embed(
         title="🤖 Discord Bot Framework",
-        description="**Advanced Discord Bot Framework with Dynamic Features**",
+        description="**Advanced Discord Bot Framework — v1.9.0.0**\n12 framework cogs · AI dashboard chat · Full automation suite",
         color=0x5865f2,
         timestamp=discord.utils.utcnow()
     )
-    
+
     features = [
-        "• **Atomic File System**: Safe, thread-safe file and database operations to prevent data corruption.",
-        "• **Per-Guild Database System**: Each server gets its own isolated database for custom settings.",
-        "• **Internal Event Hooks**: Allows extensions to communicate and interact programmatically.",
-        "• **User-Created Automations**: Build custom automations (welcome messages, reaction roles) with an advanced conditional engine.",
-        "• **Framework Health Diagnostics**: Monitors bot performance, system metrics, and event loop lag.",
-        "• **AI Assistant (Google Gemini)**: Inspect the bot's code and functionality using natural language.",
-        "• **Plugin & Dependency Management**: Tracks extensions, dependencies, and detects conflicts.",
-        "• **Automatic Slash Command Fallback**: Intelligently converts slash commands to prefix commands when Discord's 100-command limit is reached.",
-        "• **Live Monitoring Dashboard**: Real-time bot statistics, system health, command usage, and remote control capabilities via a web interface.",
-        "• **Hot-Reload Capability**: Reload extensions without restarting the bot.",
-        "• **Role-Based Command Permissions**: Restrict command usage to specific roles.",
-        "• **Automatic Sharding Support**: Scales to a large number of servers with ease.",
-        "• **Advanced Help Menu**: An interactive, category-based help menu.",
-        "• **Comprehensive Logging System**: Advanced logging with rotation and cleanup.",
-        "• **Metrics & Statistics Tracking**: Detailed usage and performance metrics for commands and events.",
-        "• **Customizable Bot Status**: Dynamic bot status updates based on server count and other metrics.",
-        "• **Persistent Configuration System**: Secure and reliable JSON-based configuration management.",
-        "• **Efficient Command Handling**: Optimized command processing and cooldowns."
+        "• Atomic File System — thread-safe file & DB ops",
+        "• Per-Guild Database System — isolated per-server",
+        "• Internal Event Hooks — extension communication",
+        "• User-Created Automations — conditional engine",
+        "• Framework Health Diagnostics — metrics & lag",
+        "• AI Assistant (Gemini) — natural language queries",
+        "• Plugin & Dependency Management — conflict detection",
+        "• Slash Command Fallback — 100-cmd limit protection",
+        "• Live Monitoring Dashboard — web-based real-time",
+        "• Hot-Reload — reload extensions without restart",
+        "• Role-Based Command Permissions — per-guild control",
+        "• Automatic Sharding Support — multi-server scaling",
+        "• Advanced Help Menu — category-based interactive",
+        "• Comprehensive Logging — rotation & cleanup",
+        "• Metrics & Statistics — command & event tracking",
+        "• Customizable Bot Status — dynamic status updates",
+        "• Persistent Configuration — JSON-based management",
+        "• Efficient Command Handling — optimized processing",
     ]
     
     embed.add_field(
@@ -2029,14 +2029,34 @@ async def framework_command(ctx):
         value="```" + "\n".join(features) + "```",
         inline=False
     )
-    
+
+    new_in_190 = [
+        "• AI Dashboard Chat (GeminiServiceHelper): AES-256 encrypted Gemini chat in Live Monitor Tab 21",
+        "• Automation Creator (EventHooksCreater): 5 new hook types — leveling, scheduled announcements,",
+        "  ticket system, voice activity tracker, dynamic voice channels",
+        "• Backup & Restore v2.2: emojis, stickers, server settings & icon restored from base64",
+        "• Plugin Registry: blocking dependency enforcement, persistent config, paginated /pr_list",
+        "• Framework Diagnostics: rolling error rate, loop lag history, /fw_history & /fw_errors",
+    ]
+
+    embed.add_field(
+        name="🆕 What's New in v1.9.0.0",
+        value="```" + "\n".join(new_in_190) + "```",
+        inline=False
+    )
+
     commands_list = [
         "!help - Interactive help menu",
         "!stats - Bot statistics",
         "!shardinfo - Shard information",
         "!extensions - List loaded extensions",
         "!config - Configure permissions",
-        "!setprefix - Set custom prefix"
+        "!setprefix - Set custom prefix",
+        "/ask_zdbf - AI assistant (Gemini slash command)",
+        "/hooks list/info/create/toggle/delete - Automation Creator",
+        "/backup, /restore - Guild backup & restore",
+        "/fw_diagnostics, /fw_history, /fw_errors - Health monitoring",
+        "/pr_list, /pr_info - Plugin Registry"
     ]
     
     owner_commands = [

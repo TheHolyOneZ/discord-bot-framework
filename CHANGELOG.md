@@ -1,75 +1,104 @@
-## [Update] — 2026-02-28 — v1.7.2.2 → v1.8.0.0
+## [Add] — 2026-03-01 — v1.9.0.0
 
-### `cogs/framework_diagnostics.py` 
+---
 
-#### Persistence
-- [FIX] Alert channel now persisted to `./data/framework_diagnostics_config.json` — survives bot restarts, no longer needs to be re-set every time
+### `cogs/GeminiServiceHelper.py` — **Fully new cog**
 
-#### Reliability
-- [FIX] `bot.metrics` is no longer a hard dependency — all accesses wrapped with `getattr` fallbacks; cog loads and runs without crashing even if the main bot doesn't implement `bot.metrics`
-- [FIX] Loop lag threshold is now configurable via `FW_LOOP_LAG_THRESHOLD_MS` env var (default: 500ms) — no longer hardcoded and no longer stored confusingly as seconds while being compared as ms
+A dedicated AI assistant embedded directly inside the Live Monitor web dashboard. No slash commands — entirely dashboard-native, accessed from the new **AI Assistant** tab (tab 21).
 
-#### Accuracy
-- [FIX] Loop lag now uses a rolling average of the last 10 readings instead of the raw instantaneous value — eliminates false alerts from single-tick jitter
-- [FIX] Error rate now computed over a rolling 1-hour window (delta of 12 × 5-minute snapshots) instead of lifetime totals — an early error burst no longer permanently inflates the rate; `/fw_diagnostics` shows `(rolling 1h)` or `(lifetime)` to indicate which mode is active
+#### Encryption
+- [ADD] AES-256-CBC end-to-end encryption: server-side via Python `cryptography` library, client-side via native Web Crypto API (`crypto.subtle`) — no external CDN, no CSP issues
+- [ADD] Per-user AES keys stored server-side; new users bootstrap a key in `localStorage` which is registered on first send
+- [ADD] Encrypted session history persisted to `./data/gemini_dashboard_sessions.json`
 
-#### History & Observability
-- [ADD] Health check history: last 48 entries (4 hours) kept in memory and persisted to `./data/framework_health_history.json` after each health_monitor run
-- [ADD] Error history: last 20 command errors kept in a deque; `on_command_error` now appends each error with timestamp and command name instead of overwriting a single field
-- [ADD] `/fw_history [entries]` command — shows last N (1–20) health check snapshots with timestamp, status, error rate, and loop lag per entry
-- [ADD] `/fw_errors` command — shows the last 20 command errors with timestamp, command name, and error message
+#### Context tools (auto-injected based on message keywords)
+- [ADD] **Framework Info** — live bot stats (version, guild count, loaded cogs)
+- [ADD] **Extension/Cog Info** — docstring and slash commands for any loaded cog, detected by cog name appearing in the message
+- [ADD] **File Structure** — lists root `.py` files, `cogs/`, `data/`, and notable project files
+- [ADD] **README Search** — full hierarchical breadcrumb parse of `README.md`; up to 3,000 chars from the top 4 scoring sections
+- [ADD] **Capabilities** — triggered by "what can you do"-style queries; lists all tools and what the AI cannot do
+- [ADD] **File Reading** — sandboxed reader; allowed: root `*.py`, `cogs/*.py`, `data/*` (direct children only); always blocked: `.env`, `gemini_dashboard_sessions.json`, live monitor config JSON files
 
-#### Embed improvements
-- [CHG] `/fw_diagnostics` health field now shows rolling window note, recent error count, and `(avg 10s)` annotation on loop lag
+#### Attach File (Option C)
+- [ADD] **Attach File** toolbar button opens an inline row with a live-filter autocomplete dropdown above the input
+- [ADD] File list pre-fetched from Python on every data poll (`available_files` in `collect_dashboard_data`) — shows only allowed paths, no blocked files
+- [ADD] Multiple files: each confirmed file becomes a removable chip tag; up to 3 files read per message and injected as separate `[Tool Context — File: …]` blocks
+- [ADD] Auto-detect fallback: if no explicit attachment, the message text is scanned for filenames with known extensions and the file is read automatically
 
+#### Chat UX
+- [ADD] Optimistic message bubbles — user message appears immediately; removed if a confirmed user message arrives from the server
+- [ADD] Smart scroll — only auto-scrolls if user was within 120 px of the bottom; never interrupts reading older history
+- [ADD] Typing indicator — persists until the AI response arrives in history (not just on POST ACK)
+- [ADD] Lock + Cancel — send button and textarea disabled while waiting for response; Cancel button removes the optimistic bubble and unlocks input
+- [ADD] Client-side 15-second rate limit gate with countdown feedback
+- [ADD] Markdown rendering — fenced code blocks, headers, bold, italic, inline code, lists, HR — XSS-safe via `gaiEsc()`, no external dependencies
+- [ADD] Capabilities popup — animated glassmorphism modal from a toolbar button listing what the AI can and cannot do
 
-### `cogs/GeminiService.py` 
+#### Configuration & permissions
+- [ADD] Config drawer (owner-only): live model and system prompt override without restart; respects `GEMINI_MODEL` env var (default `gemini-2.5-flash-lite`)
+- [ADD] 4 dashboard permission flags: `view_gemini_chat`, `action_gemini_send`, `action_gemini_clear_history`, `action_gemini_config`
+- [ADD] Requires `pip install cryptography`
+
+---
+
+### `cogs/live_monitor.py` + `ReUseInfos/live_monitor_helper.py` — GeminiServiceHelper integration
+
+- [ADD] `'gemini'` added to `$validPackages` in `_generate_receive_php()` — without this `monitor_data_gemini.json` returned 404
+- [ADD] `GeminiServiceHelper.collect_dashboard_data(discord_id)` called inside `_collect_monitor_data()` and merged under key `"gemini"` in the polled JSON
+- [ADD] AI Assistant tab (tab 21) injected into generated `index.php` via `LiveMonitor._get_gemini_tab_html()` — HTML/CSS/JS fully embedded in `live_monitor_helper.py` for self-contained CGI-bin deployment; `GeminiServiceHelper.get_tab_html()` removed (dead code)
+- [ADD] `geminiInit(monitorData, userId)` wired into the dashboard's existing 2-second data-poll cycle
+- [ADD] `handle_command()` dispatch registered for `gemini_send_message`, `gemini_clear_history`, `gemini_update_config`
+
+---
+
+## [Update] — 2026-02-28 — v1.8.0.0 → v1.9.0.0
+
+---
+
+### `cogs/EventHooksCreater.py` — Full overhaul (5.5 → 9.0+)
+
+#### Missing template handlers implemented
+- [ADD] `leveling_system` — XP awarded per message with per-user cooldown, level calculation, level-up announcements to configured channel, role rewards at configured level thresholds; XP data persisted in memory and saved via the batch save task
+- [ADD] `scheduled_announcement` — recurring message/embed sent to a configured channel at a configurable interval (hours); implemented as a per-hook `asyncio.Task` started on registration and cancelled on unregister/delete/disable
+- [ADD] `ticket_system` — creates a private text channel per user in a configured category when they react with a configured emoji on a configured message; support role granted access automatically; channel named via template; reaction removed after ticket creation to keep the message clean
+- [ADD] `voice_activity_tracker` — logs join, leave, and mute/unmute events to a configured log channel with embed; each event type independently togglable
+- [ADD] `dynamic_voice_channels` — creates a temporary voice channel in a configured category when a user joins a designated trigger channel, moves the user into it, and deletes it automatically when it becomes empty; channel named via template; active temp channels tracked in memory
+
+#### Dead code wired in
+- [FIX] `_execute_actions` is now called by all new template handlers — the generic action pipeline (send_message, add_role, remove_role, timeout, send_dm, webhook, create_role, delay, trigger_hook) is no longer dead code
+- [FIX] `AdvancedConditionEngine.evaluate()` is now called at the top of every handler before executing — hooks with conditions configured (time_range, day_of_week, role_hierarchy, message_count, user_age, custom_variable) now actually respect them
 
 #### Security
-- [FIX] `file` action is now restricted to bot owner only — previously any Discord user could read `.env`, `config.json`, database files, and any other file in the bot's working directory
-- [FIX] `permission` action now accurately describes the real access model (`file` and `permission` = bot owner only; all other actions = everyone) instead of incorrectly stating all actions are public
+- [FIX] `eval()` in `_format_message` replaced with a safe AST-based math evaluator — only numeric constants and basic operators (+, -, *, /) are permitted; no code execution possible
 
-#### Fixes
-- [FIX] Per-user cooldown (15 s) and global max concurrency (3) are now enforced via a manual `_user_cooldowns` dict and `_active_requests` counter — `@commands.cooldown` / `@commands.max_concurrency` are silently ignored by discord.py for pure `@app_commands.command` handlers and have been removed; both limits now fire before `interaction.response.defer()` so the response is immediate and ephemeral
-- [FIX] AI responses that exceed Discord's 4096-character embed limit now show a visible truncation notice (`Response truncated — ask a more specific question`) instead of cutting off silently
-- [FIX] Context strings sent to Gemini are now capped at 8,000 characters — large plugin lists or database schemas no longer risk exceeding model token limits
-- [FIX] Import coupling removed — `PluginRegistry` and `FrameworkDiagnostics` are no longer imported at module level; GeminiService loads gracefully even if those cogs are disabled
+#### Reliability
+- [FIX] Listener accumulation fixed — `_registered_hook_ids: set` tracks which hooks have active listeners; `_register_hook` skips registration if the hook is already registered, preventing duplicate listeners from piling up on restart or re-register
+- [FIX] I/O on every execution removed — `_save_created_hooks()` is no longer called after every hook fires; execution_count and error_count are updated in memory and flushed by a new `_auto_save` background task (60-second interval, dirty flag); the analytics task already saves analytics every 5 minutes
+- [FIX] Channel and role ID validation at registration time — invalid IDs (non-integer, channel/role not found in guild) now return a clear error from `create_hook()` instead of failing silently at runtime
 
-#### Additions
-- [ADD] 60-second in-memory TTL cache for repeated identical queries on `diagnose`, `plugins`, `slash`, `hooks`, and `automations` actions — cache hits are noted in the embed footer
-- [ADD] Gemini model is now configurable via `GEMINI_MODEL` environment variable (default: `gemini-2.5-flash-lite`)
-
----
-
-### `cogs/backup_restore.py` — Restore expanded to cover all captured data
-
-Previously the backup captured forum channels, stage channels, emojis, stickers, and server settings but silently skipped all of them during restore. This update makes restore match what backup captures.
-
-#### Backup (capture) changes
-- [FIX] Emoji images are now downloaded and stored as base64 inside the backup JSON at capture time — CDN URLs alone are useless after an emoji is deleted
-- [FIX] Sticker images are now downloaded and stored as base64 inside the backup JSON at capture time (also adds the missing `url` field to sticker entries)
-- [FIX] Server icon and banner are now downloaded and stored as base64 (`icon_b64`, `banner_b64`) inside the guild info block — restoring an icon no longer depends on the CDN URL remaining valid
-- [ADD] Added `_download_image_b64()` async helper used by capture for all image downloads
-
-#### Restore changes
-- [ADD] Forum channels: restored via `guild.create_forum()`, skips duplicates by name
-- [ADD] Stage channels: restored via `guild.create_stage_channel()`, skips duplicates by name
-- [ADD] Emojis: restored from embedded base64 image data via `guild.create_custom_emoji()` — managed emojis are skipped
-- [ADD] Stickers: restored from embedded base64 image data via `guild.create_sticker()` — requires re-backup for entries captured before this update
-- [ADD] Server settings: restores name, verification level, default notifications, explicit content filter, AFK channel/timeout, premium progress bar via `guild.edit()`
-- [ADD] Server icon: restored from embedded base64 data via `guild.edit(icon=bytes)`
-
-#### Discord UI (RestoreSelectView)
-- [ADD] Three new toggle buttons: **Emojis**, **Stickers**, **Server Settings**
-- [CHG] **Bot Settings** moved to row 1 alongside the new buttons
-- [CHG] **Select All** now includes emojis, stickers, and server_settings in its selection set
-- [CHG] **Confirm Restore** moved to its own row (row 3) for visual clarity
+#### New Discord commands (Bot Owner / Administrator)
+- [ADD] `/hooks list [page]` — paginated list of all hooks in the current guild with template name, status (enabled/disabled), execution count, error count
+- [ADD] `/hooks info <hook_id>` — detailed embed showing all params, conditions, execution stats, and last execution time for a specific hook
+- [ADD] `/hooks delete <hook_id>` — delete a hook with confirmation; owner-only
+- [ADD] `/hooks toggle <hook_id>` — enable or disable a hook
+- [ADD] `/hooks create <template_id>` — shows required and optional parameters for the template and creates the hook with provided params via command options
 
 ---
 
-### `cogs/live_monitor.py` — Dashboard restore parity
+### `cogs/plugin_registry.py` — Upgrade (8.0 → 9.5+)
 
-- [ADD] `_execute_dashboard_restore()` updated with the same new restore blocks: forum channels, stage channels, emojis (base64), stickers (base64), server settings + icon (base64)
-- [ADD] PHP backup/restore UI: added **Forum Channels** and **Stage Channels** restore component checkboxes (Emojis, Stickers, Server Settings were already present in the UI but non-functional on the backend)
-- [CHG] Default restore components in `_process_backup_actions()` extended to include `emojis`, `stickers`, `server_settings`
+#### Auto-scan completeness
+- [ADD] `provides_hooks` and `listens_to_hooks` are now populated during auto-scan by reading `__provides_hooks__` and `__listens_to_hooks__` module-level attributes from extension modules
 
+#### Persistence
+- [FIX] Alert channel now persisted to `./data/plugin_registry_config.json` — survives restarts
+- [FIX] `enforce_dependencies` and `enforce_conflicts` states now persisted to the same config file — no longer reset to `True` on restart after being disabled via `/pr_enforce`
+
+#### Real enforcement
+- [FIX] Enforcement is no longer advisory only — when `enforce_dependencies=True` and a plugin has missing or incompatible dependencies, `register_plugin()` now refuses to register it and returns an error; same for conflict enforcement
+
+#### UX
+- [FIX] `/pr_list` now uses paginated embeds (10 plugins per page with Prev/Next buttons) — no longer hits Discord's 25-field embed limit with large plugin sets
+
+#### Resilience
+- [FIX] `extension_loaded` / `extension_unloaded` hook registration no longer depends on EventHooks being loaded — fallback uses direct `bot.add_listener()` on `on_ready` if EventHooks is absent
