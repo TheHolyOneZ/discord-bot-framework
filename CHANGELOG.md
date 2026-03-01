@@ -55,7 +55,7 @@ A dedicated AI assistant embedded directly inside the Live Monitor web dashboard
 
 ---
 
-### `cogs/EventHooksCreater.py` — Full overhaul (5.5 → 9.0+)
+### `cogs/EventHooksCreater.py` — Full overhaul 
 
 #### Missing template handlers implemented
 - [ADD] `leveling_system` — XP awarded per message with per-user cooldown, level calculation, level-up announcements to configured channel, role rewards at configured level thresholds; XP data persisted in memory and saved via the batch save task
@@ -85,7 +85,7 @@ A dedicated AI assistant embedded directly inside the Live Monitor web dashboard
 
 ---
 
-### `cogs/plugin_registry.py` — Upgrade (8.0 → 9.5+)
+### `cogs/plugin_registry.py` — Upgrade 
 
 #### Auto-scan completeness
 - [ADD] `provides_hooks` and `listens_to_hooks` are now populated during auto-scan by reading `__provides_hooks__` and `__listens_to_hooks__` module-level attributes from extension modules
