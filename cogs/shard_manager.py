@@ -428,7 +428,7 @@ class IPCClient:
             try:
                 hb = IPCMessage('heartbeat', {
                     'timestamp': time.time(),
-                    'guild_count': guild_count
+                    'guild_count': len(self.bot.guilds)
                 }, self.cluster_name)
                 await self.send(hb)
                 await asyncio.sleep(30)

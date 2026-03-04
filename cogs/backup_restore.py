@@ -184,7 +184,7 @@ class BackupSnapshot:
             components = {"roles", "channels", "categories", "emojis", "stickers", "server_settings", "bot_settings", "member_roles"}
 
         snap = {
-            "version": "2.1.0",
+            "version": "2.2.0",
             "captured_at": _utcnow().isoformat(),
             "guild": {
                 "id": guild.id,

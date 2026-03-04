@@ -48,12 +48,12 @@ class FrameworkDiagnostics(commands.Cog):
     
     async def _get_process(self):
         if self._process is None:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             self._process = await loop.run_in_executor(None, psutil.Process)
         return self._process
     
     async def _get_system_metrics(self) -> Dict[str, Any]:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         process = await self._get_process()
         
         def _collect_metrics():
@@ -334,7 +334,17 @@ class FrameworkDiagnostics(commands.Cog):
         }
         self._error_history.append(entry)
         self.health_metrics["last_error"] = entry
-    
+
+    @commands.Cog.listener()
+    async def on_app_command_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
+        entry = {
+            "command": interaction.command.name if interaction.command else "unknown",
+            "error": str(error),
+            "timestamp": datetime.now().isoformat()
+        }
+        self._error_history.append(entry)
+        self.health_metrics["last_error"] = entry
+
     @commands.hybrid_command(name="fw_diagnostics", help="Display framework diagnostics and health status (Bot Owner Only)")
     @commands.is_owner()
     async def fw_diagnostics_command(self, ctx):

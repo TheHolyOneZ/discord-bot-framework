@@ -277,8 +277,7 @@ class PluginRegistry(commands.Cog):
         metadata.dependencies = dependencies or {}
         metadata.conflicts_with = set(conflicts_with or [])
         
-        if name in self.bot.extension_load_times:
-            metadata.load_time = self.bot.extension_load_times[name]
+        metadata.load_time = getattr(self.bot, 'extension_load_times', {}).get(name, 0.0)
         
         if auto_scan:
             full_name = f"extensions.{name}"
@@ -317,6 +316,8 @@ class PluginRegistry(commands.Cog):
                     metadata.cogs.add(cog_name)
                     
                     for cmd in cog.get_commands():
+                        metadata.commands.add(cmd.name)
+                    for cmd in cog.get_app_commands():
                         metadata.commands.add(cmd.name)
             
             if hasattr(ext_module, '__version__'):

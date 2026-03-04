@@ -1114,32 +1114,6 @@ echo json_encode([
             logger.error(f"Live Monitor: Error syncing dashboard assets to server: {e}")
     
     @commands.Cog.listener()
-    async def on_command(self, ctx):
-        cmd_name = ctx.command.qualified_name if ctx.command else "unknown"
-        if cmd_name not in self._command_usage:
-            self._command_usage[cmd_name] = {
-                "count": 0,
-                "last_used": None,
-                "errors": 0,
-                "avg_time": 0,
-                "total_time": 0
-            }
-        self._command_usage[cmd_name]["count"] += 1
-        self._command_usage[cmd_name]["last_used"] = datetime.now().isoformat()
-    
-    @commands.Cog.listener()
-    async def on_command_error(self, ctx, error):
-        cmd_name = ctx.command.qualified_name if ctx.command else "unknown"
-        if cmd_name in self._command_usage:
-            self._command_usage[cmd_name]["errors"] += 1
-        
-        self._log_event("command_error", {
-            "command": cmd_name,
-            "error": str(error)[:200],
-            "user": str(ctx.author)
-        })
-    
-    @commands.Cog.listener()
     async def on_app_command_completion(self, interaction: discord.Interaction, command):
         cmd_name = command.qualified_name if hasattr(command, 'qualified_name') else str(command)
         if cmd_name not in self._command_usage:
@@ -1169,14 +1143,6 @@ echo json_encode([
             self.send_status_loop.cancel()
         
 
-        plugin_registry_path = Path("./data/plugin_registry.json")
-        if plugin_registry_path.exists():
-            try:
-                plugin_registry_path.unlink()
-                logger.info("Live Monitor: Deleted plugin_registry.json for clean restart")
-            except Exception as e:
-                logger.warning(f"Live Monitor: Could not delete plugin_registry.json: {e}")
-        
         logger.info("Live Monitor: Cog unloaded")
     
     async def _get_process(self):
@@ -1387,7 +1353,7 @@ echo json_encode([
                 }
                 fw_section = self.bot.config.get("framework", {}) or {}
                 framework_info = {
-                    "version": "1.9.0.0",
+                    "version": "1.9.1.0",
                     "recommended_python": fw_section.get("recommended_python", "3.12.7"),
                     "python_runtime": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
                     "docs_url": "https://zsync.eu/zdbf",

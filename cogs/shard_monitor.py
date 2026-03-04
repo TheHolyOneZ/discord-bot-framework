@@ -305,6 +305,7 @@ class ShardMonitor(commands.Cog):
         self.alert_channel_id: Optional[int] = None
         self.alert_threshold: int = int(os.getenv("SHARD_ALERT_THRESHOLD", 3))
         self.monitoring_enabled: bool = True
+        self._last_alert_time: dict = {}
         self.data_dir = Path("./data/shard_monitor")
         self.data_dir.mkdir(parents=True, exist_ok=True)
         
@@ -387,7 +388,10 @@ class ShardMonitor(commands.Cog):
                     unhealthy_shards.append((shard_id, reason))
             
             if unhealthy_shards and self.alert_channel_id:
-                await self._send_health_alert(unhealthy_shards)
+                now = time.time()
+                if now - self._last_alert_time.get("last", 0) > 300:
+                    self._last_alert_time["last"] = now
+                    await self._send_health_alert(unhealthy_shards)
                 
         except Exception as e:
             logger.error(f"Error during shard health check: {e}")

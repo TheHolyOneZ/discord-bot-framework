@@ -275,13 +275,12 @@ class GeminiService(commands.Cog):
             return await interaction.response.send_message(
                 f"⏱️ This command is on cooldown. Try again in **{remaining:.1f}s**.", ephemeral=True
             )
-        self._user_cooldowns[interaction.user.id] = now
-
         if self._active_requests >= self._MAX_CONCURRENT:
             return await interaction.response.send_message(
                 "⏱️ Too many requests in progress. Please try again shortly.", ephemeral=True
             )
         self._active_requests += 1
+        self._user_cooldowns[interaction.user.id] = now
 
         try:
             await interaction.response.defer(ephemeral=(action != "help"))

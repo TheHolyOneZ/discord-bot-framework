@@ -315,7 +315,7 @@ class GeminiServiceHelper(commands.Cog):
         except (ValueError, TypeError):
             requester_id = -1
 
-        if owner_id is not None and requester_id != owner_id:
+        if owner_id is None or requester_id != owner_id:
             logger.warning(
                 f"GeminiServiceHelper: non-owner {discord_id} attempted gemini_update_config."
             )

@@ -1717,7 +1717,7 @@ class EventHooksCreater(commands.Cog):
     async def hooks_templates(self, interaction: discord.Interaction):
         embed = discord.Embed(title="Available Hook Templates", color=0x5865F2)
         for t in self.templates:
-            implemented = "✅" if t["id"] not in ("leveling_system", "scheduled_announcement", "ticket_system", "voice_activity_tracker", "dynamic_voice_channels") or True else "⚠️"
+            implemented = "✅" if t["id"] not in ("leveling_system", "scheduled_announcement", "ticket_system", "voice_activity_tracker", "dynamic_voice_channels") else "⚠️"
             embed.add_field(
                 name=f"{implemented} {t['name']} (`{t['id']}`)",
                 value=f"{t['description']}\nEvent: `{t['event']}` | Category: {t['category']}",

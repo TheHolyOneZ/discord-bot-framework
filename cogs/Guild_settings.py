@@ -7,7 +7,7 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 import logging
-from typing import Optional
+from typing import Optional, Literal
 
 logger = logging.getLogger('discord')
 
@@ -40,7 +40,7 @@ class GuildSettings(commands.Cog):
     @app_commands.describe(
         action="Choose to enable or disable mention prefix"
     )
-    async def mention_prefix(self, ctx, action: str):
+    async def mention_prefix(self, ctx, action: Literal["enable", "disable", "status"]):
         """
         Enable or disable @mention prefix for commands in this server
         

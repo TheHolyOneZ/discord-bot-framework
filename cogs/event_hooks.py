@@ -198,6 +198,8 @@ class EventHooks(commands.Cog):
         return False
     
     def disable_hook(self, hook_id: str) -> bool:
+        if hook_id not in self.hooks:
+            return False
         self.disabled_hooks.add(hook_id)
         logger.info(f"Hook disabled: {hook_id}")
         return True
