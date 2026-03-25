@@ -70,33 +70,33 @@ class MetricsCollector:
 
 class PrefixCache:
     def __init__(self, ttl: int = 600):
-        self._cache: Dict[int, tuple[str, float]] = {}
+        self._cache: Dict[int, tuple[str, bool, float]] = {}
         self._ttl = ttl
         self._lock = asyncio.Lock()
-    
-    async def get(self, guild_id: int) -> Optional[str]:
+
+    async def get(self, guild_id: int) -> Optional[tuple]:
         async with self._lock:
             if guild_id in self._cache:
-                prefix, timestamp = self._cache[guild_id]
+                prefix, mention_enabled, timestamp = self._cache[guild_id]
                 if (time.time() - timestamp) < self._ttl:
-                    return prefix
+                    return (prefix, mention_enabled)
                 else:
                     del self._cache[guild_id]
             return None
-    
-    async def set(self, guild_id: int, prefix: str):
+
+    async def set(self, guild_id: int, prefix: str, mention_enabled: bool):
         async with self._lock:
-            self._cache[guild_id] = (prefix, time.time())
-    
+            self._cache[guild_id] = (prefix, mention_enabled, time.time())
+
     async def invalidate(self, guild_id: int):
         async with self._lock:
             if guild_id in self._cache:
                 del self._cache[guild_id]
-    
+
     async def cleanup_expired(self):
         async with self._lock:
             now = time.time()
-            expired = [gid for gid, (_, ts) in self._cache.items() if (now - ts) >= self._ttl]
+            expired = [gid for gid, (_, _, ts) in self._cache.items() if (now - ts) >= self._ttl]
             for gid in expired:
                 del self._cache[gid]
 
@@ -312,7 +312,7 @@ class BotFrameWork(commands.AutoShardedBot):
         await self.config.initialize()
         
         base_db_path = self.config.get("database.base_path", "./data")
-        self.db = SafeDatabaseManager(base_db_path, file_handler=global_file_handler)
+        self.db = SafeDatabaseManager(base_db_path)
         await self.db.connect()
         
         if self.config.get("framework.load_cogs", True):
@@ -336,7 +336,14 @@ class BotFrameWork(commands.AutoShardedBot):
             logger.info("Framework utility cog loaded: atomic_file_system")
         except Exception as e:
             logger.error(f"Failed to load atomic_file_system: {e}")
-    
+
+        try:
+            synced_count = await self.sync_commands()
+            logger.info(f"Initial sync complete: {synced_count} commands")
+        except Exception as e:
+            logger.error(f"Failed initial sync: {e}")
+            logger.debug(traceback.format_exc())
+
 
     async def load_all_extensions(self):
         loaded = 0
@@ -420,7 +427,7 @@ class BotFrameWork(commands.AutoShardedBot):
     @tasks.loop(hours=1)
     async def log_rotation_task(self):
         permanent_log = Path("./botlogs/permanent.log")
-        if await global_log_rotator.should_rotate(permanent_log):
+        if global_log_rotator.should_rotate(permanent_log):
             await global_log_rotator.rotate_log(permanent_log)
             logger.info("Rotated permanent log file")
         
@@ -433,9 +440,7 @@ class BotFrameWork(commands.AutoShardedBot):
     @tasks.loop(minutes=5)
     async def status_update_task(self):
         try:
-            with open("config.json", 'r', encoding='utf-8') as f:
-                import json
-                full_config = json.load(f)
+            full_config = self.config.data
             status_config = full_config.get("status", {})
 
             statuses = status_config.get("statuses", [])
@@ -500,18 +505,17 @@ class BotFrameWork(commands.AutoShardedBot):
             base_prefix = self.config.get("prefix", "!")
             allow_mention = self.config.get("allow_mention_prefix", True)
         else:
-            cached_prefix = await self.prefix_cache.get(message.guild.id)
-            if cached_prefix:
-                base_prefix = cached_prefix
+            cached = await self.prefix_cache.get(message.guild.id)
+            if cached:
+                base_prefix, allow_mention = cached
             else:
                 custom_prefix = await self.db.get_guild_prefix(message.guild.id)
                 base_prefix = custom_prefix if custom_prefix else self.config.get("prefix", "!")
-                await self.prefix_cache.set(message.guild.id, base_prefix)
-            
-            allow_mention = await self.db.get_guild_mention_prefix_enabled(message.guild.id)
-            if allow_mention is None:
-                allow_mention = self.config.get("allow_mention_prefix", True)
-        
+                allow_mention = await self.db.get_guild_mention_prefix_enabled(message.guild.id)
+                if allow_mention is None:
+                    allow_mention = self.config.get("allow_mention_prefix", True)
+                await self.prefix_cache.set(message.guild.id, base_prefix, allow_mention)
+
         if allow_mention:
             return commands.when_mentioned_or(base_prefix)(self, message)
         else:
@@ -664,13 +668,6 @@ async def on_ready():
     logger.info(f"Serving {len(bot.users)} users")
     logger.info(f"Registered commands: {len(bot.tree.get_commands())}")
     logger.info(f"Latency: {bot.latency*1000:.2f}ms")
-    
-    try:
-        synced_count = await bot.sync_commands()
-        logger.info(f"Initial sync complete: {synced_count} commands")
-    except Exception as e:
-        logger.error(f"Failed initial sync: {e}")
-        logger.debug(traceback.format_exc())
 
 @bot.event
 async def on_message(message: discord.Message):
@@ -784,7 +781,7 @@ async def on_command_error(ctx: commands.Context, error: Exception):
     await asyncio.sleep(delete_after)
     try:
         await msg.delete()
-    except:
+    except (discord.HTTPException, discord.NotFound):
         pass
 
 @bot.event
@@ -801,10 +798,6 @@ async def on_guild_remove(guild: discord.Guild):
 @bot.hybrid_command(name="cleanup", help="Clean up system cache and temporary files (Bot Owner Only)")
 @is_bot_owner()
 async def cleanup_command(ctx):
-    if ctx.interaction:
-        if not await check_app_command_permissions(ctx.interaction, "cleanup"):
-            return
-    
     embed = discord.Embed(
         title="🧹 System Cleanup",
         description="Cleaning up system files...",
@@ -842,7 +835,7 @@ async def cleanup_command(ctx):
         cache_stats = global_file_handler.get_cache_stats()
         embed.add_field(
             name="📊 Current Stats",
-            value=f"```File cache: {cache_stats['size']} entries\nFile locks: {cache_stats['locks']}\nDB connections: {len(bot.db._guild_connections)}\nPrefix cache: {len(bot.prefix_cache._cache)}```",
+            value=f"```File cache: {cache_stats['cache_size']} entries\nFile locks: {cache_stats['active_locks']}\nDB connections: {len(bot.db._guild_connections)}\nPrefix cache: {len(bot.prefix_cache._cache)}```",
             inline=False
         )
         
@@ -857,7 +850,7 @@ async def cleanup_command(ctx):
     
     try:
         await ctx.message.delete()
-    except:
+    except (discord.HTTPException, discord.NotFound):
         pass
 
 
@@ -880,7 +873,7 @@ async def help_command(ctx):
     
     prefix = await bot.get_prefix(ctx.message)
     if isinstance(prefix, list):
-        prefix = prefix[0]
+        prefix = prefix[-1]
     
     if ctx.guild:
         allow_mention = await bot.db.get_guild_mention_prefix_enabled(ctx.guild.id)
@@ -916,7 +909,7 @@ async def help_command(ctx):
     
     try:
         await ctx.message.delete()
-    except:
+    except (discord.HTTPException, discord.NotFound):
         pass
 
 @bot.hybrid_command(name="stats", help="Display bot statistics and metrics")
@@ -965,7 +958,7 @@ async def stats_command(ctx):
     
     try:
         await ctx.message.delete()
-    except:
+    except (discord.HTTPException, discord.NotFound):
         pass
 
 @bot.hybrid_command(name="shardinfo", help="Display shard information")
@@ -1038,15 +1031,12 @@ async def shardinfo_command(ctx):
     
     try:
         await ctx.message.delete()
-    except:
+    except (discord.HTTPException, discord.NotFound):
         pass
 
 @bot.hybrid_command(name="atomic_test_main", help="Test atomic file operations (from main.py)")
 @is_bot_owner()
 async def atomic_test_main_command(ctx):
-    if ctx.interaction:
-        if not await check_app_command_permissions(ctx.interaction, "atomic_test_main"):
-            return
     embed = discord.Embed(
         title="🧪 Atomic File Operations Test (Main)",
         description="Running tests...",
@@ -1094,7 +1084,7 @@ async def atomic_test_main_command(ctx):
         for i in range(10):
             try:
                 os.remove(f"./data/test_main_{i}.json")
-            except:
+            except OSError:
                 pass
         
         embed.title = "✅ Atomic File Operations Test Complete (Main)"
@@ -1117,16 +1107,12 @@ async def atomic_test_main_command(ctx):
     
     try:
         await ctx.message.delete()
-    except:
+    except (discord.HTTPException, discord.NotFound):
         pass
 
 @bot.hybrid_command(name="cachestats", help="Display cache statistics (Bot Owner Only)")
 @is_bot_owner()
 async def cachestats_command(ctx):
-    if ctx.interaction:
-        if not await check_app_command_permissions(ctx.interaction, "cachestats"):
-            return
-    
     file_stats = global_file_handler.get_cache_stats()
     
     prefix_cache_size = len(bot.prefix_cache._cache)
@@ -1140,7 +1126,7 @@ async def cachestats_command(ctx):
     
     embed.add_field(
         name="💾 File Cache",
-        value=f"```Size: {file_stats['size']}/{file_stats['max_size']}\nLocks: {file_stats['locks']}```",
+        value=f"```Size: {file_stats['cache_size']}/{file_stats['max_cache_size']}\nLocks: {file_stats['active_locks']}```",
         inline=True
     )
     
@@ -1168,15 +1154,12 @@ async def cachestats_command(ctx):
     
     try:
         await ctx.message.delete()
-    except:
+    except (discord.HTTPException, discord.NotFound):
         pass
 
 @bot.hybrid_command(name="sync", help="Force sync slash commands (Bot Owner Only)")
 @is_bot_owner()
 async def sync_command(ctx):
-    if ctx.interaction:
-        if not await check_app_command_permissions(ctx.interaction, "sync"):
-            return
     embed = discord.Embed(
         title="🔄 Syncing Commands...",
         description="```Please wait...```",
@@ -1213,65 +1196,60 @@ async def sync_command(ctx):
     
     try:
         await ctx.message.delete()
-    except:
+    except (discord.HTTPException, discord.NotFound):
         pass
 
-@bot.hybrid_command(name="reload", help="Reload a specific extension (Bot Owner Only)")
-@is_bot_owner()
-async def reload_command(ctx, *, extension: str):
-    if ctx.interaction:
-        if not await check_app_command_permissions(ctx.interaction, "reload"):
-            return
-
+def _resolve_extension_path(extension: str):
+    """Resolve extension name, handling spaces-to-underscores rename.
+    Returns (final_name, rename_message, error_embed)."""
     extension_name_with_space = extension.strip()
     extension_name_with_underscore = extension_name_with_space.replace(" ", "_")
-    
+
     extensions_path = Path("./extensions")
     path_with_space = extensions_path / f"{extension_name_with_space}.py"
     path_with_underscore = extensions_path / f"{extension_name_with_underscore}.py"
-    
-    final_ext_to_load = None
-    rename_message = None
 
     if path_with_space.exists():
         try:
             path_with_space.rename(path_with_underscore)
-            final_ext_to_load = extension_name_with_underscore
-
             rename_message = (
-                f"Found '{path_with_space.name}', renamed it to '{path_with_underscore.name}'. "
-                f"Use `!reload {extension_name_with_underscore}` or `!unload {extension_name_with_underscore}` for future operations."
+                f"Found '{path_with_space.name}', renamed to '{path_with_underscore.name}'. "
+                f"Use underscored name for future operations."
             )
             logger.info(f"Renamed extension: {path_with_space.name} -> {path_with_underscore.name}")
+            return extension_name_with_underscore, rename_message, None
         except Exception as e:
-            embed = discord.Embed(
+            error_embed = discord.Embed(
                 title="❌ File Rename Failed",
-                description=f"```Found {path_with_space.name}, but failed to rename it:\n{e}```",
-                color=0xff0000,
-                timestamp=discord.utils.utcnow()
+                description=f"```Found {path_with_space.name}, but failed to rename:\n{e}```",
+                color=0xff0000, timestamp=discord.utils.utcnow()
             )
-            await ctx.send(embed=embed)
             logger.error(f"Failed to rename {path_with_space.name}: {e}")
-            return
-
+            return None, None, error_embed
     elif path_with_underscore.exists():
-        final_ext_to_load = extension_name_with_underscore
-    
-    if not final_ext_to_load:
-        embed = discord.Embed(
-            title="❌ Extension Not Found",
-            description=f"```Could not find '{path_with_space.name}' or '{path_with_underscore.name}'```",
-            color=0xff0000,
-            timestamp=discord.utils.utcnow()
-        )
-        msg = await ctx.send(embed=embed)
-        await asyncio.sleep(5)
-        try:
-            await msg.delete()
-        except:
-            pass
+        return extension_name_with_underscore, None, None
+
+    error_embed = discord.Embed(
+        title="❌ Extension Not Found",
+        description=f"```Could not find '{path_with_space.name}' or '{path_with_underscore.name}'```",
+        color=0xff0000, timestamp=discord.utils.utcnow()
+    )
+    return None, None, error_embed
+
+@bot.hybrid_command(name="reload", help="Reload a specific extension (Bot Owner Only)")
+@is_bot_owner()
+async def reload_command(ctx, *, extension: str):
+    final_ext_to_load, rename_message, error_embed = _resolve_extension_path(extension)
+    if error_embed:
+        msg = await ctx.send(embed=error_embed)
+        if not final_ext_to_load:
+            await asyncio.sleep(5)
+            try:
+                await msg.delete()
+            except (discord.HTTPException, discord.NotFound):
+                pass
         return
-    
+
     try:
         start_time = time.time()
         await bot.reload_extension(f"extensions.{final_ext_to_load}")
@@ -1295,7 +1273,7 @@ async def reload_command(ctx, *, extension: str):
         
         try:
             await ctx.message.delete()
-        except:
+        except (discord.HTTPException, discord.NotFound):
             pass
     except Exception as e:
         embed = discord.Embed(
@@ -1309,65 +1287,23 @@ async def reload_command(ctx, *, extension: str):
         await asyncio.sleep(10)
         try:
             await msg.delete()
-        except:
+        except (discord.HTTPException, discord.NotFound):
             pass
 
 @bot.hybrid_command(name="load", help="Load a specific extension (Bot Owner Only)")
 @is_bot_owner()
 async def load_command(ctx, *, extension: str):
-    if ctx.interaction:
-        if not await check_app_command_permissions(ctx.interaction, "load"):
-            return
-
-    extension_name_with_space = extension.strip()
-    extension_name_with_underscore = extension_name_with_space.replace(" ", "_")
-    
-    extensions_path = Path("./extensions")
-    path_with_space = extensions_path / f"{extension_name_with_space}.py"
-    path_with_underscore = extensions_path / f"{extension_name_with_underscore}.py"
-    
-    final_ext_to_load = None
-    rename_message = None
-
-    if path_with_space.exists():
-        try:
-            path_with_space.rename(path_with_underscore)
-            final_ext_to_load = extension_name_with_underscore
-
-            rename_message = (
-                f"Found '{path_with_space.name}', renamed it to '{path_with_underscore.name}'. "
-                f"Use `!reload {extension_name_with_underscore}` or `!unload {extension_name_with_underscore}` for future operations."
-            )
-            logger.info(f"Renamed extension: {path_with_space.name} -> {path_with_underscore.name}")
-        except Exception as e:
-            embed = discord.Embed(
-                title="❌ File Rename Failed",
-                description=f"```Found {path_with_space.name}, but failed to rename it:\n{e}```",
-                color=0xff0000,
-                timestamp=discord.utils.utcnow()
-            )
-            await ctx.send(embed=embed)
-            logger.error(f"Failed to rename {path_with_space.name}: {e}")
-            return
-
-    elif path_with_underscore.exists():
-        final_ext_to_load = extension_name_with_underscore
-    
-    if not final_ext_to_load:
-        embed = discord.Embed(
-            title="❌ Extension Not Found",
-            description=f"```Could not find '{path_with_space.name}' or '{path_with_underscore.name}'```",
-            color=0xff0000,
-            timestamp=discord.utils.utcnow()
-        )
-        msg = await ctx.send(embed=embed)
-        await asyncio.sleep(5)
-        try:
-            await msg.delete()
-        except:
-            pass
+    final_ext_to_load, rename_message, error_embed = _resolve_extension_path(extension)
+    if error_embed:
+        msg = await ctx.send(embed=error_embed)
+        if not final_ext_to_load:
+            await asyncio.sleep(5)
+            try:
+                await msg.delete()
+            except (discord.HTTPException, discord.NotFound):
+                pass
         return
-    
+
     try:
         start_time = time.time()
         await bot.load_extension(f"extensions.{final_ext_to_load}")
@@ -1388,7 +1324,7 @@ async def load_command(ctx, *, extension: str):
         
         try:
             await ctx.message.delete()
-        except:
+        except (discord.HTTPException, discord.NotFound):
             pass
     except Exception as e:
         error_str = str(e)
@@ -1413,16 +1349,12 @@ async def load_command(ctx, *, extension: str):
         await asyncio.sleep(10)
         try:
             await msg.delete()
-        except:
+        except (discord.HTTPException, discord.NotFound):
             pass
 
 @bot.hybrid_command(name="unload", help="Unload a specific extension (Bot Owner Only)")
 @is_bot_owner()
 async def unload_command(ctx, *, extension: str):
-    if ctx.interaction:
-        if not await check_app_command_permissions(ctx.interaction, "unload"):
-            return
-    
     ext_name_underscore = f"extensions.{extension.strip().replace(' ', '_')}"
     ext_name_no_space = f"extensions.{extension.strip().replace(' ', '')}"
     
@@ -1444,7 +1376,7 @@ async def unload_command(ctx, *, extension: str):
         await asyncio.sleep(5)
         try:
             await msg.delete()
-        except:
+        except (discord.HTTPException, discord.NotFound):
             pass
         return
     
@@ -1469,7 +1401,7 @@ async def unload_command(ctx, *, extension: str):
         
         try:
             await ctx.message.delete()
-        except:
+        except (discord.HTTPException, discord.NotFound):
             pass
     except Exception as e:
         embed = discord.Embed(
@@ -1483,7 +1415,7 @@ async def unload_command(ctx, *, extension: str):
         await asyncio.sleep(10)
         try:
             await msg.delete()
-        except:
+        except (discord.HTTPException, discord.NotFound):
             pass
 
 @bot.hybrid_command(name="extensions", help="List all loaded extensions")
@@ -1543,7 +1475,7 @@ async def extensions_command(ctx):
     
     try:
         await ctx.message.delete()
-    except:
+    except (discord.HTTPException, discord.NotFound):
         pass
 
 @bot.hybrid_command(name="setprefix", help="Set a custom prefix for this server")
@@ -1565,7 +1497,7 @@ async def setprefix_command(ctx, prefix: str):
         await asyncio.sleep(5)
         try:
             await msg.delete()
-        except:
+        except (discord.HTTPException, discord.NotFound):
             pass
         return
     
@@ -1583,7 +1515,7 @@ async def setprefix_command(ctx, prefix: str):
     
     try:
         await ctx.message.delete()
-    except:
+    except (discord.HTTPException, discord.NotFound):
         pass
 
 @bot.hybrid_command(name="config", help="Configure command role permissions (Guild Owner or Bot Owner)")
@@ -1667,7 +1599,7 @@ async def config_command(ctx, command_name: str = None, role: discord.Role = Non
         await ctx.send(embed=embed)
         try:
             await ctx.message.delete()
-        except:
+        except (discord.HTTPException, discord.NotFound):
             pass
         return
     
@@ -1682,7 +1614,7 @@ async def config_command(ctx, command_name: str = None, role: discord.Role = Non
         await asyncio.sleep(5)
         try:
             await msg.delete()
-        except:
+        except (discord.HTTPException, discord.NotFound):
             pass
         return
     
@@ -1697,7 +1629,7 @@ async def config_command(ctx, command_name: str = None, role: discord.Role = Non
         await asyncio.sleep(5)
         try:
             await msg.delete()
-        except:
+        except (discord.HTTPException, discord.NotFound):
             pass
         return
     
@@ -1712,7 +1644,7 @@ async def config_command(ctx, command_name: str = None, role: discord.Role = Non
         await asyncio.sleep(5)
         try:
             await msg.delete()
-        except:
+        except (discord.HTTPException, discord.NotFound):
             pass
         return
     
@@ -1730,7 +1662,7 @@ async def config_command(ctx, command_name: str = None, role: discord.Role = Non
             await asyncio.sleep(5)
             try:
                 await msg.delete()
-            except:
+            except (discord.HTTPException, discord.NotFound):
                 pass
             return
         
@@ -1762,7 +1694,7 @@ async def config_command(ctx, command_name: str = None, role: discord.Role = Non
             await asyncio.sleep(5)
             try:
                 await msg.delete()
-            except:
+            except (discord.HTTPException, discord.NotFound):
                 pass
             return
         
@@ -1790,16 +1722,12 @@ async def config_command(ctx, command_name: str = None, role: discord.Role = Non
     await ctx.send(embed=embed)
     try:
         await ctx.message.delete()
-    except: 
+    except (discord.HTTPException, discord.NotFound):
         pass
 
 @bot.hybrid_command(name="dbstats", help="Display database connection statistics (Bot Owner Only)")
 @is_bot_owner()
 async def dbstats_command(ctx):
-    if ctx.interaction:
-        if not await check_app_command_permissions(ctx.interaction, "dbstats"):
-            return
-    
     embed = discord.Embed(
         title="🗄️ Database Statistics",
         description="**Connection pool and database health metrics**",
@@ -1860,17 +1788,13 @@ async def dbstats_command(ctx):
     
     try:
         await ctx.message.delete()
-    except:
+    except (discord.HTTPException, discord.NotFound):
         pass
 
 
 @bot.hybrid_command(name="integritycheck", help="Run full system integrity check (Bot Owner Only)")
 @is_bot_owner()
 async def integrity_check_command(ctx):
-    if ctx.interaction:
-        if not await check_app_command_permissions(ctx.interaction, "integritycheck"):
-            return
-    
     embed = discord.Embed(
         title="🔍 System Integrity Check",
         description="Running comprehensive integrity tests...",
@@ -1984,7 +1908,7 @@ async def integrity_check_command(ctx):
     
     try:
         await ctx.message.delete()
-    except:
+    except (discord.HTTPException, discord.NotFound):
         pass
 
 
@@ -2101,7 +2025,7 @@ async def framework_command(ctx):
     await ctx.send(embed=embed)
     try:
         await ctx.message.delete()
-    except:
+    except (discord.HTTPException, discord.NotFound):
         pass
 
 class HelpView(discord.ui.View):
@@ -2194,6 +2118,59 @@ class CategoryNextButton(discord.ui.Button):
         await interaction.response.edit_message(embed=embed, view=new_view)
 
 
+def _create_command_page_embed(prefix, category, cmds, page, per_page, total_pages, bot):
+    """Shared embed builder for help menu category pages."""
+    start = page * per_page
+    end = start + per_page
+
+    prefix_only = set()
+    if hasattr(bot, 'get_prefix_only_commands'):
+        prefix_only = bot.get_prefix_only_commands()
+
+    embed = discord.Embed(
+        title=f"📂 {category}",
+        description=f"```Total Commands: {len(cmds)} | Page {page + 1}/{total_pages}```\n",
+        color=0x5865f2,
+        timestamp=discord.utils.utcnow()
+    )
+
+    for cmd in cmds[start:end]:
+        cmd_help = cmd.help or "No description available"
+
+        is_hybrid = hasattr(cmd, 'app_command') and cmd.app_command is not None
+        is_prefix_only = cmd.name in prefix_only
+
+        if is_prefix_only:
+            indicator = "🔹 "
+            availability = "(Prefix only - Slash limit reached)"
+        elif is_hybrid:
+            indicator = "⚡ "
+            availability = "(Slash & Prefix)"
+        else:
+            indicator = "🔸 "
+            availability = "(Prefix only)"
+
+        embed.add_field(
+            name=f"{indicator}{prefix}{cmd.name} {availability}",
+            value=f"```{cmd_help}```",
+            inline=False
+        )
+
+    legend = (
+        "⚡ = Slash & Prefix | "
+        "🔸 = Prefix only | "
+        "🔹 = Prefix only (Slash limit)"
+    )
+    embed.add_field(
+        name="📚 Legend",
+        value=f"```{legend}```",
+        inline=False
+    )
+
+    embed.set_footer(text=f"Category: {category}")
+    return embed
+
+
 class CategorySelect(discord.ui.Select):
     def __init__(self, categories, prefix, category_page=0, categories_per_page=10):
         self.all_categories = categories
@@ -2244,63 +2221,11 @@ class CategorySelect(discord.ui.Select):
         per_page = 5
         total_pages = (len(cmds) - 1) // per_page + 1
         
-        embed = self.create_page_embed(selected, cmds, page, per_page, total_pages, interaction.client)
-        
+        embed = _create_command_page_embed(self.prefix, selected, cmds, page, per_page, total_pages, interaction.client)
+
         view = CategoryView(selected, cmds, page, per_page, total_pages, interaction.user, self.prefix)
         await interaction.response.edit_message(embed=embed, view=view)
         logger.info(f"{interaction.user} selected category '{selected}'")
-    
-    def create_page_embed(self, category, cmds, page, per_page, total_pages, bot):
-        start = page * per_page
-        end = start + per_page
-        
-        prefix_only = set()
-        if hasattr(bot, 'get_prefix_only_commands'):
-            prefix_only = bot.get_prefix_only_commands()
-        
-        embed = discord.Embed(
-            title=f"📂 {category}",
-            description=f"```Total Commands: {len(cmds)} | Page {page + 1}/{total_pages}```\n",
-            color=0x5865f2,
-            timestamp=discord.utils.utcnow()
-        )
-        
-        for cmd in cmds[start:end]:
-            cmd_help = cmd.help or "No description available"
-            
-            is_hybrid = hasattr(cmd, 'app_command') and cmd.app_command is not None
-            is_prefix_only = cmd.name in prefix_only
-            
-            if is_prefix_only:
-                indicator = "🔹 "
-                availability = "(Prefix only - Slash limit reached)"
-            elif is_hybrid:
-                indicator = "⚡ "
-                availability = "(Slash & Prefix)"
-            else:
-                indicator = "🔸 "
-                availability = "(Prefix only)"
-            
-            embed.add_field(
-                name=f"{indicator}{self.prefix}{cmd.name} {availability}",
-                value=f"```{cmd_help}```",
-                inline=False
-            )
-        
-        legend = (
-            "⚡ = Slash & Prefix | "
-            "🔸 = Prefix only | "
-            "🔹 = Prefix only (Slash limit)"
-        )
-        embed.add_field(
-            name="📚 Legend",
-            value=f"```{legend}```",
-            inline=False
-        )
-        
-        embed.set_footer(text=f"Category: {category}")
-        
-        return embed
 
 
 
@@ -2339,126 +2264,23 @@ class PrevButton(discord.ui.Button):
         view = self.view
         if view.page > 0:
             view.page -= 1
-        
-        embed = self.create_page_embed(view.category, view.cmds, view.page, view.per_page, view.total_pages, interaction.client)
+
+        embed = _create_command_page_embed(self.prefix, view.category, view.cmds, view.page, view.per_page, view.total_pages, interaction.client)
         await interaction.response.edit_message(embed=embed, view=view)
-    
-    def create_page_embed(self, category, cmds, page, per_page, total_pages, bot):
-        start = page * per_page
-        end = start + per_page
-        
-        prefix_only = set()
-        if hasattr(bot, 'get_prefix_only_commands'):
-            prefix_only = bot.get_prefix_only_commands()
-        
-        embed = discord.Embed(
-            title=f"📂 {category}",
-            description=f"```Total Commands: {len(cmds)} | Page {page + 1}/{total_pages}```\n",
-            color=0x5865f2,
-            timestamp=discord.utils.utcnow()
-        )
-        
-        for cmd in cmds[start:end]:
-            cmd_help = cmd.help or "No description available"
-            
-            is_hybrid = hasattr(cmd, 'app_command') and cmd.app_command is not None
-            is_prefix_only = cmd.name in prefix_only
-            
-            if is_prefix_only:
-                indicator = "🔹 "
-                availability = "(Prefix only - Slash limit reached)"
-            elif is_hybrid:
-                indicator = "⚡ "
-                availability = "(Slash & Prefix)"
-            else:
-                indicator = "🔸 "
-                availability = "(Prefix only)"
-            
-            embed.add_field(
-                name=f"{indicator}{self.prefix}{cmd.name} {availability}",
-                value=f"```{cmd_help}```",
-                inline=False
-            )
-        
-        legend = (
-            "⚡ = Slash & Prefix | "
-            "🔸 = Prefix only | "
-            "🔹 = Prefix only (Slash limit)"
-        )
-        embed.add_field(
-            name="📚 Legend",
-            value=f"```{legend}```",
-            inline=False
-        )
-        
-        embed.set_footer(text=f"Category: {category}")
-        
-        return embed
 
 class NextButton(discord.ui.Button):
     def __init__(self, prefix):
         super().__init__(style=discord.ButtonStyle.gray, label="Next ▶", row=1)
         self.prefix = prefix
-    
+
     async def callback(self, interaction: discord.Interaction):
         view = self.view
         if view.page < view.total_pages - 1:
             view.page += 1
-        
-        embed = self.create_page_embed(view.category, view.cmds, view.page, view.per_page, view.total_pages, interaction.client)
+
+        embed = _create_command_page_embed(self.prefix, view.category, view.cmds, view.page, view.per_page, view.total_pages, interaction.client)
         await interaction.response.edit_message(embed=embed, view=view)
-    
-    def create_page_embed(self, category, cmds, page, per_page, total_pages, bot):
-        start = page * per_page
-        end = start + per_page
-        
-        prefix_only = set()
-        if hasattr(bot, 'get_prefix_only_commands'):
-            prefix_only = bot.get_prefix_only_commands()
-        
-        embed = discord.Embed(
-            title=f"📂 {category}",
-            description=f"```Total Commands: {len(cmds)} | Page {page + 1}/{total_pages}```\n",
-            color=0x5865f2,
-            timestamp=discord.utils.utcnow()
-        )
-        
-        for cmd in cmds[start:end]:
-            cmd_help = cmd.help or "No description available"
-            
-            is_hybrid = hasattr(cmd, 'app_command') and cmd.app_command is not None
-            is_prefix_only = cmd.name in prefix_only
-            
-            if is_prefix_only:
-                indicator = "🔹 "
-                availability = "(Prefix only - Slash limit reached)"
-            elif is_hybrid:
-                indicator = "⚡ "
-                availability = "(Slash & Prefix)"
-            else:
-                indicator = "🔸 "
-                availability = "(Prefix only)"
-            
-            embed.add_field(
-                name=f"{indicator}{self.prefix}{cmd.name} {availability}",
-                value=f"```{cmd_help}```",
-                inline=False
-            )
-        
-        legend = (
-            "⚡ = Slash & Prefix | "
-            "🔸 = Prefix only | "
-            "🔹 = Prefix only (Slash limit)"
-        )
-        embed.add_field(
-            name="📚 Legend",
-            value=f"```{legend}```",
-            inline=False
-        )
-        
-        embed.set_footer(text=f"Category: {category}")
-        
-        return embed
+
 class BackButton(discord.ui.Button):
     def __init__(self, prefix):
         super().__init__(style=discord.ButtonStyle.blurple, label="🏠 Back to Main", row=1)

@@ -13,7 +13,6 @@ import shutil
 from pathlib import Path
 from typing import Any, Dict, Optional, List, Tuple
 from datetime import datetime, timedelta
-import hashlib
 from collections import OrderedDict
 import logging
 import time
@@ -62,6 +61,7 @@ class AtomicFileHandler:
                 self._cleanup_locks()
         
         lock, _ = self._locks[filepath]
+        self._locks[filepath] = (lock, time.time())
         return lock
     
     def _cleanup_locks(self):
@@ -88,7 +88,7 @@ class AtomicFileHandler:
     
     def _get_cache_key(self, filepath: str) -> str:
         """Generate cache key from filepath"""
-        return hashlib.md5(filepath.encode()).hexdigest()
+        return filepath
     
     def _is_cache_valid(self, filepath: str) -> bool:
         """Check if cached data is still valid"""
@@ -280,27 +280,26 @@ class AtomicFileHandler:
                     )
                     
                     try:
+                        os.close(temp_fd)
+
                         async with aiofiles.open(temp_path, 'w', encoding='utf-8') as f:
                             await f.write(content)
-                        
-                        os.close(temp_fd)
-                        
+
                         if os.name == 'nt':
                             if os.path.exists(filepath):
                                 os.remove(filepath)
-                        
+
                         shutil.move(temp_path, filepath)
-                        
+
                         if invalidate_cache_after:
                             self.invalidate_cache(filepath)
                         else:
                             self._set_cache(filepath, content)
-                        
+
                         self.metrics["writes"] += 1
                         return True
-                        
+
                     except Exception as e:
-                        os.close(temp_fd)
                         if os.path.exists(temp_path):
                             os.remove(temp_path)
                         raise e
@@ -628,9 +627,8 @@ class SafeConfig:
 class SafeDatabaseManager:
     """Thread-safe database manager with WAL mode and connection pooling"""
     
-    def __init__(self, base_path: str = "./data", file_handler: Optional[AtomicFileHandler] = None):
+    def __init__(self, base_path: str = "./data"):
         self.base_path = Path(base_path)
-        self.file_handler = file_handler or AtomicFileHandler()
         self._guild_connections: Dict[int, Any] = {}
         self._connection_locks: Dict[int, asyncio.Lock] = {}
         self._global_lock = asyncio.Lock()
@@ -870,16 +868,16 @@ class SafeLogRotator:
         self._rotation_lock = asyncio.Lock()
         logger.info(f"SafeLogRotator: Initialized with max_size={max_size}, backup_count={backup_count}")
     
-    async def should_rotate(self, log_file: Path) -> bool:
+    def should_rotate(self, log_file: Path) -> bool:
         """Check if log file should be rotated"""
         if not log_file.exists():
             return False
         return log_file.stat().st_size >= self.max_size
-    
+
     async def rotate_log(self, log_file: Path):
         """Rotate log file with backup management"""
         async with self._rotation_lock:
-            if not await self.should_rotate(log_file):
+            if not self.should_rotate(log_file):
                 return
             
             for i in range(self.backup_count - 1, 0, -1):
@@ -924,9 +922,7 @@ class SafeLogRotator:
 global_file_handler = AtomicFileHandler(cache_ttl=300, max_cache_size=1000)
 global_log_rotator = SafeLogRotator()
 
-"""
 async def setup(bot):
     # Setup function for loading the cog
     await bot.add_cog(AtomicFileSystemCog(bot, global_file_handler))
     logger.info("Atomic File System cog loaded successfully")
-"""
