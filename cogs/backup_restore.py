@@ -57,7 +57,7 @@ import traceback
 import aiohttp
 import base64
 
-logger = logging.getLogger('discord')
+logger = logging.getLogger('discord.cogs.backup_restore')
 
 BOT_OWNER_ID = int(os.getenv("BOT_OWNER_ID", 0))
 MAX_BACKUPS_PER_GUILD = int(os.getenv("BACKUP_MAX_PER_GUILD", 25))
@@ -150,15 +150,22 @@ def _tch(entry):
     return sum(entry.get(k, 0) for k in ("text_channels_count", "voice_channels_count", "forum_channels_count", "stage_channels_count"))
 
 
-async def _download_image_b64(url: str, timeout: int = 15) -> Optional[str]:
+async def _download_image_b64(url: str, timeout: int = 15, session: Optional[aiohttp.ClientSession] = None) -> Optional[str]:
     """Download an image from a URL and return it as a base64 string. Returns None on failure."""
     try:
-        async with aiohttp.ClientSession() as session:
+        if session:
             async with session.get(url, timeout=aiohttp.ClientTimeout(total=timeout)) as resp:
                 if resp.status != 200:
                     return None
                 data = await resp.read()
                 return base64.b64encode(data).decode("utf-8")
+        else:
+            async with aiohttp.ClientSession() as s:
+                async with s.get(url, timeout=aiohttp.ClientTimeout(total=timeout)) as resp:
+                    if resp.status != 200:
+                        return None
+                    data = await resp.read()
+                    return base64.b64encode(data).decode("utf-8")
     except Exception:
         return None
 
@@ -183,6 +190,14 @@ class BackupSnapshot:
         if components is None:
             components = {"roles", "channels", "categories", "emojis", "stickers", "server_settings", "bot_settings", "member_roles"}
 
+        _http = aiohttp.ClientSession()
+        try:
+            return await BackupSnapshot._capture_inner(guild, bot, components, _http)
+        finally:
+            await _http.close()
+
+    @staticmethod
+    async def _capture_inner(guild: discord.Guild, bot, components, _http: aiohttp.ClientSession):
         snap = {
             "version": "2.2.0",
             "captured_at": _utcnow().isoformat(),
@@ -191,8 +206,8 @@ class BackupSnapshot:
                 "name": guild.name,
                 "icon_url": str(guild.icon.url) if guild.icon else None,
                 "banner_url": str(guild.banner.url) if guild.banner else None,
-                "icon_b64": await _download_image_b64(str(guild.icon.url)) if guild.icon else None,
-                "banner_b64": await _download_image_b64(str(guild.banner.url)) if guild.banner else None,
+                "icon_b64": await _download_image_b64(str(guild.icon.url), session=_http) if guild.icon else None,
+                "banner_b64": await _download_image_b64(str(guild.banner.url), session=_http) if guild.banner else None,
                 "member_count": guild.member_count,
                 "owner_id": guild.owner_id,
                 "created_at": guild.created_at.isoformat(),
@@ -288,7 +303,7 @@ class BackupSnapshot:
             for e in guild.emojis:
                 image_b64 = None
                 if not e.managed:
-                    image_b64 = await _download_image_b64(str(e.url))
+                    image_b64 = await _download_image_b64(str(e.url), session=_http)
                 snap["emojis"].append({
                     "id": e.id, "name": e.name, "animated": e.animated,
                     "url": str(e.url), "managed": e.managed,
@@ -298,7 +313,7 @@ class BackupSnapshot:
         if "stickers" in components:
             for s in getattr(guild, "stickers", None) or []:
                 sticker_url = str(s.url) if hasattr(s, 'url') else None
-                image_b64 = await _download_image_b64(sticker_url) if sticker_url else None
+                image_b64 = await _download_image_b64(sticker_url, session=_http) if sticker_url else None
                 snap["stickers"].append({
                     "id": s.id, "name": s.name,
                     "description": getattr(s, "description", None),
@@ -1544,6 +1559,14 @@ class BackupRestore(commands.Cog):
                             await guild.edit(icon=icon_bytes, reason=f"Backup restore icon: {entry['id']}")
                         except Exception as e:
                             res["errors"].append(f"Icon restore: {str(e)[:60]}")
+                    # Banner restore
+                    banner_b64 = gi.get("banner_b64")
+                    if banner_b64:
+                        try:
+                            banner_bytes = base64.b64decode(banner_b64)
+                            await guild.edit(banner=banner_bytes, reason=f"Backup restore banner: {entry['id']}")
+                        except Exception as e:
+                            res["errors"].append(f"Banner restore: {str(e)[:60]}")
                 except discord.Forbidden:
                     res["failed"] += 1; res["errors"].append("Server settings: Missing permissions (need Manage Guild)")
                 except Exception as e:

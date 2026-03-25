@@ -51,17 +51,23 @@ from collections import defaultdict, deque
 import json
 from pathlib import Path
 
-logger = logging.getLogger('discord')
+logger = logging.getLogger('discord.cogs.shard_monitor')
 
 BOT_OWNER_ID = int(os.getenv("BOT_OWNER_ID", 0))
 
 
 def is_bot_owner():
-    """Check if user is the bot owner (BOT_OWNER_ID from .env)"""
+    """Check if user is the bot owner — BOT_OWNER_ID env var, with application_info() fallback."""
     async def predicate(ctx):
-        if ctx.author.id != BOT_OWNER_ID:
-            raise commands.CheckFailure("This command is restricted to the bot owner only.")
-        return True
+        if BOT_OWNER_ID and ctx.author.id == BOT_OWNER_ID:
+            return True
+        try:
+            app_info = await ctx.bot.application_info()
+            if ctx.author.id == app_info.owner.id:
+                return True
+        except Exception:
+            pass
+        raise commands.CheckFailure("This command is restricted to the bot owner only.")
     return commands.check(predicate)
 
 
@@ -182,17 +188,17 @@ class ShardMetrics:
         total_events = sum(self.event_counts.values())
         return (total_events / elapsed) * 60
     
-    def is_healthy(self) -> Tuple[bool, str]:
+    def is_healthy(self, threshold: int = 3) -> Tuple[bool, str]:
         """Check if shard is healthy"""
         avg_latency = self.get_avg_latency()
         if avg_latency > 1.0:
             return False, f"High latency: {avg_latency*1000:.0f}ms"
-        
+
         time_since_event = time.time() - self.last_event_time
         if time_since_event > 300:
             return False, f"No activity for {time_since_event/60:.1f} minutes"
-        
-        if self.consecutive_failures >= 3:
+
+        if self.consecutive_failures >= threshold:
             return False, f"{self.consecutive_failures} consecutive failures"
         
         if self._disconnect_start:
@@ -331,15 +337,17 @@ class ShardMonitor(commands.Cog):
         except Exception as e:
             logger.error(f"Error loading shard alert config: {e}")
     
-    def _save_alert_config(self):
+    async def _save_alert_config(self):
         """Save alert channel configuration to disk"""
         config_path = self.data_dir / "alert_config.json"
+        data = {
+            'alert_channel_id': self.alert_channel_id,
+            'alert_threshold': self.alert_threshold
+        }
         try:
-            with open(config_path, 'w') as f:
-                json.dump({
-                    'alert_channel_id': self.alert_channel_id,
-                    'alert_threshold': self.alert_threshold
-                }, f, indent=2)
+            await asyncio.to_thread(
+                lambda: config_path.write_text(json.dumps(data, indent=2))
+            )
         except Exception as e:
             logger.error(f"Error saving shard alert config: {e}")
     
@@ -383,7 +391,7 @@ class ShardMonitor(commands.Cog):
             unhealthy_shards = []
             
             for shard_id, metrics in self.metrics.items():
-                is_healthy, reason = metrics.is_healthy()
+                is_healthy, reason = metrics.is_healthy(self.alert_threshold)
                 if not is_healthy:
                     unhealthy_shards.append((shard_id, reason))
             
@@ -404,14 +412,11 @@ class ShardMonitor(commands.Cog):
     async def save_metrics(self):
         """Save metrics to disk for persistence"""
         try:
-            metrics_data = {}
-            for shard_id, metrics in self.metrics.items():
-                metrics_data[str(shard_id)] = metrics.to_dict()
-            
+            metrics_data = {str(sid): m.to_dict() for sid, m in self.metrics.items()}
             filepath = self.data_dir / "shard_metrics.json"
-            with open(filepath, 'w') as f:
-                json.dump(metrics_data, f, indent=2)
-                
+            await asyncio.to_thread(
+                lambda: filepath.write_text(json.dumps(metrics_data, indent=2))
+            )
         except Exception as e:
             logger.error(f"Error saving shard metrics: {e}")
     
@@ -534,7 +539,7 @@ class ShardMonitor(commands.Cog):
         for sid in sorted(self.metrics.keys()):
             m = self.metrics[sid]
             status = m.get_health_status()
-            is_h, reason = m.is_healthy()
+            is_h, reason = m.is_healthy(self.alert_threshold)
             info = f"Shard {sid}: {reason}"
             
             if status == "🟢":
@@ -903,7 +908,7 @@ class ShardMonitor(commands.Cog):
         
         if channel:
             self.alert_channel_id = channel.id
-            self._save_alert_config()
+            await self._save_alert_config()
             
             embed = discord.Embed(
                 title="✅ Shard Alerts Configured",
@@ -917,7 +922,7 @@ class ShardMonitor(commands.Cog):
             logger.info(f"[ShardMonitor] Alert channel set to #{channel.name} ({channel.id}), threshold: {self.alert_threshold}")
         else:
             self.alert_channel_id = None
-            self._save_alert_config()
+            await self._save_alert_config()
             
             embed = discord.Embed(
                 title="⚠️ Shard Alerts Disabled",

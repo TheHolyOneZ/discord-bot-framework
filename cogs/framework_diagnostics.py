@@ -14,7 +14,7 @@ import time
 import json
 import os
 
-logger = logging.getLogger('discord')
+logger = logging.getLogger('discord.cogs.framework_diagnostics')
 
 
 class FrameworkDiagnostics(commands.Cog):
@@ -34,6 +34,7 @@ class FrameworkDiagnostics(commands.Cog):
         self._metrics_snapshots = deque(maxlen=12)  
         self._health_history = deque(maxlen=48)
         self._error_history = deque(maxlen=20)
+        self._last_write_alert_time: float = 0.0
 
         self.diagnostics_file.parent.mkdir(parents=True, exist_ok=True)
 
@@ -99,7 +100,7 @@ class FrameworkDiagnostics(commands.Cog):
 
     async def _check_event_loop_lag(self) -> float:
         current = time.monotonic()
-        expected_interval = 1.0
+        expected_interval = 5.0
         if hasattr(self, '_last_lag_check'):
             actual_interval = current - self._last_lag_check
             lag = max(0, actual_interval - expected_interval)
@@ -149,7 +150,7 @@ class FrameworkDiagnostics(commands.Cog):
                     "username": str(self.bot.user),
                     "user_id": self.bot.user.id,
                     "discriminator": self.bot.user.discriminator,
-                    "owner_id": self.bot.bot_owner_id,
+                    "owner_id": getattr(self.bot, 'bot_owner_id', 'N/A'),
                     "latency_ms": round(self.bot.latency * 1000, 2)
                 },
                 
@@ -164,7 +165,7 @@ class FrameworkDiagnostics(commands.Cog):
                     "total_loaded": len([e for e in self.bot.extensions.keys() if e.startswith("extensions.")]),
                     "user_extensions": [e for e in self.bot.extensions.keys() if e.startswith("extensions.")],
                     "framework_cogs": [e for e in self.bot.extensions.keys() if e.startswith("cogs.")],
-                    "load_times": dict(self.bot.extension_load_times)
+                    "load_times": dict(getattr(self.bot, 'extension_load_times', {}))
                 },
                 
                 "cogs": {
@@ -193,14 +194,14 @@ class FrameworkDiagnostics(commands.Cog):
                 },
                 
                 "config": {
-                    "prefix": self.bot.config.get("prefix", "!"),
-                    "auto_reload": self.bot.config.get("auto_reload", False),
-                    "extensions_auto_load": self.bot.config.get("extensions.auto_load", True)
+                    "prefix": getattr(self.bot, 'config', {}).get("prefix", "!"),
+                    "auto_reload": getattr(self.bot, 'config', {}).get("auto_reload", False),
+                    "extensions_auto_load": getattr(self.bot, 'config', {}).get("extensions.auto_load", True)
                 },
-                
+
                 "database": {
-                    "connected": self.bot.db.conn is not None,
-                    "path": str(self.bot.db.base_path)
+                    "connected": getattr(getattr(self.bot, 'db', None), 'conn', None) is not None,
+                    "path": str(getattr(getattr(self.bot, 'db', None), 'base_path', 'N/A'))
                 },
                 
                 "health": {
@@ -222,7 +223,10 @@ class FrameworkDiagnostics(commands.Cog):
             except Exception as e:
                 self.health_metrics["consecutive_write_failures"] += 1
                 logger.error(f"Failed to queue diagnostics write: {e}")
-                await self._send_alert(f"⚠️ Framework diagnostics write failed ({self.health_metrics['consecutive_write_failures']} consecutive): {e}")
+                now = time.time()
+                if now - self._last_write_alert_time > 300:
+                    self._last_write_alert_time = now
+                    await self._send_alert(f"⚠️ Framework diagnostics write failed ({self.health_metrics['consecutive_write_failures']} consecutive): {e}")
             
             return diagnostics
         
@@ -231,7 +235,7 @@ class FrameworkDiagnostics(commands.Cog):
             await self._send_alert(f"❌ Critical: Framework diagnostics generation failed: {e}")
             return None
     
-    @tasks.loop(seconds=1)
+    @tasks.loop(seconds=5)
     async def loop_lag_monitor(self):
         lag = await self._check_event_loop_lag()
         self._lag_samples.append(lag)
@@ -303,7 +307,7 @@ class FrameworkDiagnostics(commands.Cog):
         
         try:
             channel = self.bot.get_channel(self.alert_channel_id)
-            if channel:
+            if channel and isinstance(channel, discord.TextChannel):
                 embed = discord.Embed(
                     title="🔧 Framework Diagnostics Alert",
                     description=message,
@@ -311,6 +315,8 @@ class FrameworkDiagnostics(commands.Cog):
                     timestamp=discord.utils.utcnow()
                 )
                 await channel.send(embed=embed)
+            elif channel:
+                logger.warning(f"Framework alert channel {self.alert_channel_id} is not a TextChannel: {message}")
             else:
                 logger.warning(f"Framework alert channel {self.alert_channel_id} not found: {message}")
         except Exception as e:

@@ -17,7 +17,7 @@ import aiofiles
 import random
 import secrets
 
-logger = logging.getLogger("discord")
+logger = logging.getLogger('discord.cogs.EventHooksCreater')
 
 class AdvancedConditionEngine:
     @staticmethod
@@ -106,6 +106,7 @@ class EventHooksCreater(commands.Cog):
         self._scheduled_tasks = {}
         self._registered_hook_ids: set = set()
         self._dirty: bool = False
+        self._http_session: aiohttp.ClientSession = None
         self._xp_data: Dict[str, Dict[str, int]] = {}  # key: "guild_id:user_id" -> {"xp": int, "level": int}
         self._temp_voice_channels: Dict[int, str] = {}  # temp_channel_id -> hook_id
 
@@ -116,11 +117,16 @@ class EventHooksCreater(commands.Cog):
 
         logger.info(f"EventHooksCreater: Initialized with {len(self.created_hooks)} created hooks")
 
-    def cog_unload(self):
+    async def cog_load(self):
+        self._http_session = aiohttp.ClientSession()
+
+    async def cog_unload(self):
         self.analytics_task.cancel()
         self.auto_save_task.cancel()
         for hook in self.created_hooks:
             self._unregister_hook(hook)
+        if self._http_session and not self._http_session.closed:
+            await self._http_session.close()
 
     def _load_analytics(self) -> Dict:
         if self.analytics_file.exists():
@@ -142,6 +148,10 @@ class EventHooksCreater(commands.Cog):
     @tasks.loop(minutes=5)
     async def analytics_task(self):
         await self._save_analytics()
+        # Prune _user_message_counts — keep top 5000 users by count to prevent unbounded growth
+        if len(self._user_message_counts) > 5000:
+            top = sorted(self._user_message_counts.items(), key=lambda x: x[1], reverse=True)[:5000]
+            self._user_message_counts = defaultdict(int, top)
 
     @tasks.loop(seconds=60)
     async def auto_save_task(self):
@@ -183,13 +193,22 @@ class EventHooksCreater(commands.Cog):
         if hook_id not in self._cooldowns:
             self._cooldowns[hook_id] = {}
 
+        now = datetime.now()
+        cutoff = cooldown_seconds * 2
+
+        # Evict stale entries to prevent unbounded growth
+        self._cooldowns[hook_id] = {
+            uid: ts for uid, ts in self._cooldowns[hook_id].items()
+            if (now - ts).total_seconds() < cutoff
+        }
+
         last_use = self._cooldowns[hook_id].get(user_id)
         if last_use:
-            elapsed = (datetime.now() - last_use).total_seconds()
+            elapsed = (now - last_use).total_seconds()
             if elapsed < cooldown_seconds:
                 return False
 
-        self._cooldowns[hook_id][user_id] = datetime.now()
+        self._cooldowns[hook_id][user_id] = now
         return True
 
     def _format_message(self, template: str, **kwargs) -> str:
@@ -265,9 +284,18 @@ class EventHooksCreater(commands.Cog):
         return embed
 
     async def _execute_webhook(self, webhook_url: str, payload: Dict):
+        _ALLOWED = (
+            "https://discord.com/api/webhooks/",
+            "https://discordapp.com/api/webhooks/",
+            "https://ptb.discord.com/api/webhooks/",
+            "https://canary.discord.com/api/webhooks/",
+        )
+        if not webhook_url.startswith(_ALLOWED):
+            logger.error(f"[WEBHOOK_BRIDGE] Blocked SSRF — URL not a Discord webhook: {webhook_url[:80]}")
+            return False
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(webhook_url, json=payload, timeout=10) as resp:
+            session = self._http_session or aiohttp.ClientSession()
+            async with session.post(webhook_url, json=payload, timeout=10) as resp:
                     status = resp.status
                     if status in [200, 204]:
                         logger.info(f"[WEBHOOK_BRIDGE] Webhook sent successfully (status: {status})")

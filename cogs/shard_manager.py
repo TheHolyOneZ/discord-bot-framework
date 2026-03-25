@@ -50,10 +50,10 @@ import hashlib
 import struct
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Callable
-from collections import defaultdict
+from collections import defaultdict, deque
 from pathlib import Path
 
-logger = logging.getLogger('discord')
+logger = logging.getLogger('discord.cogs.shard_manager')
 
 BOT_OWNER_ID = int(os.getenv("BOT_OWNER_ID", 0))
 
@@ -124,7 +124,7 @@ class IPCServer:
         self._server: Optional[asyncio.AbstractServer] = None
         self._handlers: Dict[str, List[Callable]] = defaultdict(list)
         self._running = False
-        self._seen_nonces: set = set()
+        self._seen_nonces: deque = deque(maxlen=10000)
         self._max_nonces = 10000
     
     def on(self, op: str, handler: Callable):
@@ -216,9 +216,7 @@ class IPCServer:
                 
                 if msg.nonce in self._seen_nonces:
                     continue
-                self._seen_nonces.add(msg.nonce)
-                if len(self._seen_nonces) > self._max_nonces:
-                    self._seen_nonces = set(list(self._seen_nonces)[self._max_nonces // 2:])
+                self._seen_nonces.append(msg.nonce)
                 
                 if msg.op == 'heartbeat':
                     if client_name in self.client_info:
@@ -601,18 +599,21 @@ class ShardManager(commands.Cog):
     @tasks.loop(minutes=1)
     async def sync_stats(self):
         """Periodically broadcast stats to all clusters"""
-        stats = self._get_local_stats()
-        msg = IPCMessage('stats_broadcast', stats, self.cluster_name)
-        
-        if self.ipc_server:
-            await self.ipc_server.broadcast(msg)
-        elif self.ipc_client:
-            await self.ipc_client.send(msg)
-        
-        self.cluster_stats[self.cluster_name] = {
-            **stats,
-            'last_update': time.time()
-        }
+        try:
+            stats = self._get_local_stats()
+            msg = IPCMessage('stats_broadcast', stats, self.cluster_name)
+
+            if self.ipc_server:
+                await self.ipc_server.broadcast(msg)
+            elif self.ipc_client:
+                await self.ipc_client.send(msg)
+
+            self.cluster_stats[self.cluster_name] = {
+                **stats,
+                'last_update': time.time()
+            }
+        except Exception as e:
+            logger.error(f"[ShardManager] sync_stats error: {e}")
     
     @sync_stats.before_loop
     async def before_sync_stats(self):
@@ -834,7 +835,8 @@ async def setup(bot):
     
     secret = os.getenv("SHARD_IPC_SECRET", "change_me_please")
     if secret == "change_me_please":
-        logger.warning("[ShardManager] Using default IPC secret! Set SHARD_IPC_SECRET in .env for security!")
+        logger.critical("[ShardManager] SHARD_IPC_SECRET is set to the default 'change_me_please' — IPC will NOT start. Set a real secret in .env.")
+        return
     
     await bot.add_cog(ShardManager(bot))
     logger.info("ShardManager cog setup complete")

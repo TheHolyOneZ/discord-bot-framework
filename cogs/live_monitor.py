@@ -209,8 +209,8 @@ class LiveMonitor(commands.Cog):
             try:
                 with open(self.config_file, 'r') as f:
                     return json.load(f)
-            except:
-                pass
+            except Exception as e:
+                logger.error(f"LiveMonitor: Failed to parse config file '{self.config_file}', using defaults: {e}")
 
         return {
             "enabled": False,
@@ -1353,7 +1353,7 @@ echo json_encode([
                 }
                 fw_section = self.bot.config.get("framework", {}) or {}
                 framework_info = {
-                    "version": "1.9.1.0",
+                    "version": "1.9.2.0",
                     "recommended_python": fw_section.get("recommended_python", "3.12.7"),
                     "python_runtime": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
                     "docs_url": "https://zsync.eu/zdbf",
@@ -28900,7 +28900,7 @@ ErrorDocument 404 "Not Found"
     function gaiMarkdown(raw) {
         if (!raw) return '';
         const result = [];
-        const codeRe = /```([\w]*)\\n?([\s\S]*?)```/g;
+        const codeRe = /```([\\w]*)\\n?([\\s\\S]*?)```/g;
         let last = 0, m;
         while ((m = codeRe.exec(raw)) !== null) {
             if (m.index > last) result.push(gaiMdText(raw.slice(last, m.index)));
@@ -28928,10 +28928,10 @@ ErrorDocument 404 "Not Found"
                 if (inOl) { out.push('</ol>'); inOl = false; }
                 if (!inUl) { out.push('<ul class="gai-ul">'); inUl = true; }
                 out.push('<li>' + gaiMdInline(line.slice(2)) + '</li>');
-            } else if (/^\d+\. /.test(line)) {
+            } else if (/^\\d+\\. /.test(line)) {
                 if (inUl) { out.push('</ul>'); inUl = false; }
                 if (!inOl) { out.push('<ol class="gai-ol">'); inOl = true; }
-                out.push('<li>' + gaiMdInline(line.replace(/^\d+\. /, '')) + '</li>');
+                out.push('<li>' + gaiMdInline(line.replace(/^\\d+\\. /, '')) + '</li>');
             } else if (/^---+$/.test(line.trim())) {
                 closeList(); out.push('<hr class="gai-hr">');
             } else if (line.trim() === '') {
@@ -28947,10 +28947,10 @@ ErrorDocument 404 "Not Found"
     function gaiMdInline(text) {
         text = gaiEsc(text);
         text = text.replace(/`([^`]+)`/g, '<code class="gai-inline-code">$1</code>');
-        text = text.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
-        text = text.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+        text = text.replace(/\\*\\*\\*(.+?)\\*\\*\\*/g, '<strong><em>$1</em></strong>');
+        text = text.replace(/\\*\\*(.+?)\\*\\*/g, '<strong>$1</strong>');
         text = text.replace(/__(.+?)__/g, '<strong>$1</strong>');
-        text = text.replace(/\*(.+?)\*/g, '<em>$1</em>');
+        text = text.replace(/\\*(.+?)\\*/g, '<em>$1</em>');
         return text;
     }
 
@@ -29376,7 +29376,7 @@ foreach ($rii as $file) {
     $relative = substr($path, strlen($root) + 1);
 
     // Skip existing backup archives to avoid recursion
-    if (preg_match('/\\.zip$/i', $relative)) {
+    if (preg_match('/\\\\.zip$/i', $relative)) {
         continue;
     }
 

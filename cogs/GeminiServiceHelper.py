@@ -39,7 +39,7 @@
 """
 # GeminiServiceHelper version: 1.9.0.0
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 import os
 import json
 import time
@@ -112,6 +112,7 @@ class GeminiServiceHelper(commands.Cog):
         self._sessions_file = Path("./data/gemini_dashboard_sessions.json")
         self._sessions_file.parent.mkdir(parents=True, exist_ok=True)
         self._load_sessions()
+        self._dirty: bool = False
 
         api_key = os.getenv("GEMINI_API_KEY", "")
         if api_key:
@@ -141,9 +142,27 @@ class GeminiServiceHelper(commands.Cog):
                 ensure_ascii=False,
                 indent=2,
             )
-            self._sessions_file.write_text(payload, encoding="utf-8")
+            await asyncio.to_thread(lambda: self._sessions_file.write_text(payload, encoding="utf-8"))
+            self._dirty = False
         except Exception as e:
             logger.error(f"GeminiServiceHelper: failed to save sessions — {e}")
+
+    @tasks.loop(seconds=60)
+    async def _auto_save_task(self):
+        if self._dirty:
+            await self._save_sessions()
+
+    @_auto_save_task.before_loop
+    async def _before_auto_save(self):
+        await self.bot.wait_until_ready()
+
+    async def cog_load(self):
+        self._auto_save_task.start()
+
+    async def cog_unload(self):
+        self._auto_save_task.cancel()
+        if self._dirty:
+            await self._save_sessions()
 
     def _get_or_create_key(self, discord_id: str) -> str:
         if discord_id not in self._aes_keys:
@@ -293,12 +312,14 @@ class GeminiServiceHelper(commands.Cog):
         if len(session) > max_h:
             self._sessions[discord_id] = session[-max_h:]
 
+        self._dirty = True
         await self._save_sessions()
         logger.info(f"GeminiServiceHelper: responded to {discord_id} ({len(response_text)} chars).")
 
     async def _cmd_clear_history(self, discord_id: str) -> None:
         if discord_id in self._sessions:
             del self._sessions[discord_id]
+            self._dirty = True
             await self._save_sessions()
             logger.info(f"GeminiServiceHelper: cleared history for {discord_id}.")
 
@@ -550,7 +571,6 @@ class GeminiServiceHelper(commands.Cog):
                     info = self._tool_extension_info(cog_name)
                     if info:
                         parts.append(info)
-                    break
 
         readme_kw = {"how", "setup", "install", "config", "feature", "docs", "readme", "explain",
                      "command", "what is", "enable", "disable", "permission", "backup", "restore",

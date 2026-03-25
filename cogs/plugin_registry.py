@@ -14,7 +14,7 @@ import asyncio
 import re
 import json
 
-logger = logging.getLogger('discord')
+logger = logging.getLogger('discord.cogs.plugin_registry')
 
 
 class PluginMetadata:
@@ -99,6 +99,11 @@ class PluginListView(discord.ui.View):
 
         return embed
 
+    async def on_timeout(self):
+        self._cog = None
+        for child in self.children:
+            child.disabled = True
+
     @discord.ui.button(label="◀ Prev", style=discord.ButtonStyle.secondary)
     async def prev_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.page = max(0, self.page - 1)
@@ -123,6 +128,7 @@ class PluginRegistry(commands.Cog):
         self.enforce_dependencies = True
         self.enforce_conflicts = True
         self.alert_channel_id = None
+        self._save_failure_count: int = 0
 
         self.registry_file.parent.mkdir(parents=True, exist_ok=True)
 
@@ -386,8 +392,9 @@ class PluginRegistry(commands.Cog):
                 continue
             
             if required_version and required_version != ">=0.0.0":
-                operator = ">=" if ">=" in required_version else "=="
-                version_str = required_version.replace(">=", "").replace("==", "").strip()
+                op_match = re.match(r'([><=!]+)', required_version)
+                operator = op_match.group(1) if op_match else "=="
+                version_str = re.sub(r'^[><=!]+', '', required_version).strip()
                 
                 if not self._compare_versions(dep_metadata.version, version_str, operator):
                     version_mismatches.append(
@@ -437,8 +444,15 @@ class PluginRegistry(commands.Cog):
                 registry_data
             )
             logger.debug(f"Plugin registry saved: {self.registry_file}")
+            self._save_failure_count = 0
         except Exception as e:
             logger.error(f"Failed to save registry: {e}")
+            self._save_failure_count += 1
+            if self._save_failure_count >= 3:
+                await self._send_alert(
+                    f"🚨 Plugin Registry: Registry save has failed {self._save_failure_count} consecutive times "
+                    f"— disk state may be stale. Last error: {e}"
+                )
     
     async def _save_config(self):
         """Persist alert_channel_id, enforce_dependencies, and enforce_conflicts to disk."""

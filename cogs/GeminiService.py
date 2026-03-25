@@ -39,12 +39,11 @@
 """
 # GeminiService version: 1.8.0.0
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 from discord import app_commands
 import os
 from pathlib import Path
 import google.generativeai as genai
-from dotenv import load_dotenv
 from atomic_file_system import AtomicFileHandler, SafeDatabaseManager
 import aiosqlite
 import aiofiles
@@ -54,8 +53,6 @@ import tempfile
 import glob as glob_lib
 import asyncio
 import time
-
-load_dotenv()
 
 async def ask_zdbf_autocomplete(interaction: discord.Interaction, current: str):
     
@@ -250,10 +247,34 @@ class GeminiService(commands.Cog):
         self._ai_cache: Dict[str, tuple] = {}
         self._CACHE_TTL = 60
         self._user_cooldowns: Dict[int, float] = {}
-        self._active_requests: int = 0
         self._COOLDOWN_SECONDS = 15
         self._MAX_CONCURRENT = 3
-        
+        self._request_semaphore: asyncio.Semaphore = asyncio.Semaphore(self._MAX_CONCURRENT)
+
+    async def cog_load(self):
+        if not os.getenv("GEMINI_API_KEY"):
+            print("[GeminiService] CRITICAL: GEMINI_API_KEY is not set — /ask_zdbf will fail on every invocation")
+        self._cleanup_cache_task.start()
+
+    async def cog_unload(self):
+        self._cleanup_cache_task.cancel()
+        self._user_cooldowns.clear()
+        self._ai_cache.clear()
+
+    @tasks.loop(minutes=5)
+    async def _cleanup_cache_task(self):
+        now = time.time()
+        stale_users = [uid for uid, ts in list(self._user_cooldowns.items()) if now - ts > self._COOLDOWN_SECONDS * 2]
+        for uid in stale_users:
+            del self._user_cooldowns[uid]
+        stale_keys = [k for k, (_, ts) in list(self._ai_cache.items()) if now - ts > self._CACHE_TTL]
+        for k in stale_keys:
+            del self._ai_cache[k]
+
+    @_cleanup_cache_task.before_loop
+    async def _before_cleanup(self):
+        await self.bot.wait_until_ready()
+
     @app_commands.command(name="ask_zdbf", description="Ask the ZDBF AI assistant about various bot aspects.")
     @app_commands.describe(
         action="The action to perform (help, framework, plugins, etc.)",
@@ -275,20 +296,20 @@ class GeminiService(commands.Cog):
             return await interaction.response.send_message(
                 f"⏱️ This command is on cooldown. Try again in **{remaining:.1f}s**.", ephemeral=True
             )
-        if self._active_requests >= self._MAX_CONCURRENT:
+        if self._request_semaphore.locked():
             return await interaction.response.send_message(
                 "⏱️ Too many requests in progress. Please try again shortly.", ephemeral=True
             )
-        self._active_requests += 1
+        await self._request_semaphore.acquire()
         self._user_cooldowns[interaction.user.id] = now
 
         try:
             await interaction.response.defer(ephemeral=(action != "help"))
         except discord.errors.NotFound:
-            self._active_requests -= 1
+            self._request_semaphore.release()
             return
         except discord.errors.HTTPException:
-            self._active_requests -= 1
+            self._request_semaphore.release()
             return
 
         try:
@@ -341,6 +362,27 @@ class GeminiService(commands.Cog):
             context = ""
             final_query = query or "Please provide an overview of this component."
 
+            # Early cache check — skip all expensive framework calls on a hit
+            _CACHEABLE = {"diagnose", "plugins", "slash", "hooks", "automations"}
+            _QUERY_DEFAULTS = {
+                "diagnose": "Summarize the health and performance of the bot based on the diagnostic report.",
+                "plugins": "Provide a summary of all installed plugins, including their status and dependencies.",
+                "slash": "Summarize the current slash command limit status, including any converted or blocked commands.",
+                "hooks": "Provide an overview of the internal event hooks system, highlighting the number of registered hooks and recent activity.",
+                "automations": "Summarize the user-created automations, including total counts, executions, and error rates.",
+            }
+            if action in _CACHEABLE:
+                _early_query = query or _QUERY_DEFAULTS.get(action, "")
+                _cache_key = f"{action}:{_early_query}"
+                _cached = self._ai_cache.get(_cache_key)
+                if _cached is not None:
+                    _cached_text, _cached_ts = _cached
+                    if time.time() - _cached_ts < self._CACHE_TTL:
+                        embed.title = f"ZDBF Assistant | Action: `{action}`"
+                        embed.description = _cached_text
+                        embed.set_footer(text="Served from cache (< 60s old)")
+                        await interaction.followup.send(embed=embed, ephemeral=True)
+                        return
 
             if action == "framework":
 
@@ -533,23 +575,11 @@ class GeminiService(commands.Cog):
 
             prompt = f"{strict_prompt}\n\n== CONTEXT ==\n{context}\n\n== QUERY ==\n{final_query}"
 
-            _CACHEABLE = {"diagnose", "plugins", "slash", "hooks", "automations"}
-            cache_hit = False
-            if action in _CACHEABLE:
-                cache_key = f"{action}:{final_query}"
-                cached = self._ai_cache.get(cache_key)
-                if cached is not None:
-                    cached_text, cached_ts = cached
-                    if time.time() - cached_ts < self._CACHE_TTL:
-                        response_text = cached_text
-                        cache_hit = True
-
             try:
-                if not cache_hit:
-                    response = await self.model.generate_content_async(prompt)
-                    response_text = response.text
-                    if action in _CACHEABLE:
-                        self._ai_cache[f"{action}:{final_query}"] = (response_text, time.time())
+                response = await self.model.generate_content_async(prompt)
+                response_text = response.text
+                if action in _CACHEABLE:
+                    self._ai_cache[f"{action}:{final_query}"] = (response_text, time.time())
 
                 TRUNCATION_NOTE = "\n\n*(Response truncated — ask a more specific question for complete output)*"
                 if len(response_text) > 4096:
@@ -558,9 +588,6 @@ class GeminiService(commands.Cog):
 
                 embed.title = f"ZDBF Assistant | Action: `{action}`"
                 embed.description = response_text
-                if cache_hit:
-                    embed.set_footer(text="Served from cache (< 60s old)")
-
                 await interaction.followup.send(embed=embed, ephemeral=True)
 
             except Exception as e:
@@ -577,7 +604,7 @@ class GeminiService(commands.Cog):
 
                 print(f"Fatal error in ask_zdbf command: {e}")
         finally:
-            self._active_requests -= 1
+            self._request_semaphore.release()
 
 async def setup(bot):
     await bot.add_cog(GeminiService(bot))

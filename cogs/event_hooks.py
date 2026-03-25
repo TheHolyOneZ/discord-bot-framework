@@ -12,8 +12,10 @@ import asyncio
 from datetime import datetime, timedelta
 import traceback
 import time
+import json
+from pathlib import Path
 
-logger = logging.getLogger('discord')
+logger = logging.getLogger('discord.cogs.event_hooks')
 
 
 class CircuitBreaker:
@@ -74,10 +76,14 @@ class EventHooks(commands.Cog):
         self._worker_task: Optional[asyncio.Task] = None
         self._worker_restart_count = 0
         self._max_worker_restarts = 10
+        self._worker_stable_since: float = time.monotonic()
         self.circuit_breaker = CircuitBreaker(failure_threshold=5, timeout=60)
         self.hook_timeout = 10.0
         self.alert_channel_id = None
         self.disabled_hooks: set = set()
+        self._config_file = Path("./data/event_hooks_config.json")
+        self._config_file.parent.mkdir(parents=True, exist_ok=True)
+        self._load_config()
         
         self.metrics = {
             "total_emissions": 0,
@@ -96,15 +102,36 @@ class EventHooks(commands.Cog):
         bot.enable_hook = self.enable_hook
         
         logger.info("Event Hooks: System initialized")
-    
+
+    def _load_config(self):
+        if not self._config_file.exists():
+            return
+        try:
+            cfg = json.loads(self._config_file.read_text(encoding="utf-8"))
+            self.alert_channel_id = cfg.get("alert_channel_id")
+            logger.info(f"Event Hooks: loaded config (alert_channel={self.alert_channel_id})")
+        except Exception as e:
+            logger.warning(f"Event Hooks: failed to load config — {e}")
+
+    def _save_config(self):
+        try:
+            cfg = {"alert_channel_id": self.alert_channel_id}
+            self._config_file.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+        except Exception as e:
+            logger.error(f"Event Hooks: failed to save config — {e}")
+
     async def cog_load(self):
         await self._start_worker()
         logger.info("Event Hooks: Worker task started")
     
-    def cog_unload(self):
+    async def cog_unload(self):
         if self._worker_task:
             self._worker_task.cancel()
-        
+            try:
+                await self._worker_task
+            except asyncio.CancelledError:
+                pass
+
         if hasattr(self.bot, 'register_hook'):
             delattr(self.bot, 'register_hook')
         if hasattr(self.bot, 'unregister_hook'):
@@ -125,7 +152,8 @@ class EventHooks(commands.Cog):
     async def _start_worker(self):
         if self._worker_task and not self._worker_task.done():
             return
-        
+
+        self._worker_stable_since = time.monotonic()
         self._worker_task = asyncio.create_task(self._process_hook_queue())
         
         def worker_done_callback(task):
@@ -138,12 +166,17 @@ class EventHooks(commands.Cog):
         self._worker_task.add_done_callback(worker_done_callback)
     
     async def _restart_worker(self):
+        # If the worker ran stably for >1 hour before this crash, reset the restart budget
+        if time.monotonic() - self._worker_stable_since > 3600:
+            logger.info(f"Event Hooks: Worker ran stably for >1h before crash — restart budget reset ({self._worker_restart_count} → 0)")
+            self._worker_restart_count = 0
+
         if self._worker_restart_count >= self._max_worker_restarts:
             error_msg = f"Hook worker exceeded max restarts ({self._max_worker_restarts}), not restarting"
             logger.critical(error_msg)
             await self._send_alert(f"🚨 Event Hooks: {error_msg}")
             return
-        
+
         self._worker_restart_count += 1
         self.metrics["worker_restarts"] += 1
         
@@ -162,7 +195,7 @@ class EventHooks(commands.Cog):
         if event_name not in self.hooks:
             self.hooks[event_name] = []
         
-        hook_id = f"{event_name}:{callback.__name__}"
+        hook_id = f"{event_name}:{callback.__module__}.{callback.__qualname__}"
         
         self.hooks[event_name].append({
             "callback": callback,
@@ -198,11 +231,13 @@ class EventHooks(commands.Cog):
         return False
     
     def disable_hook(self, hook_id: str) -> bool:
-        if hook_id not in self.hooks:
-            return False
-        self.disabled_hooks.add(hook_id)
-        logger.info(f"Hook disabled: {hook_id}")
-        return True
+        for callbacks in self.hooks.values():
+            for h in callbacks:
+                if h["hook_id"] == hook_id:
+                    self.disabled_hooks.add(hook_id)
+                    logger.info(f"Hook disabled: {hook_id}")
+                    return True
+        return False
     
     def enable_hook(self, hook_id: str) -> bool:
         if hook_id in self.disabled_hooks:
@@ -231,12 +266,12 @@ class EventHooks(commands.Cog):
                 timeout=5.0
             )
         except asyncio.TimeoutError:
-            logger.warning(f"Hook queue full (backpressure applied), event delayed: {event_name}")
+            logger.warning(f"Hook queue full, dropping event: {event_name}")
             try:
-                await self._hook_queue.put(hook_data)
+                self._hook_queue.put_nowait(hook_data)
             except asyncio.QueueFull:
                 self.metrics["queue_full_count"] += 1
-                logger.error(f"Hook queue full after backpressure, dropping event: {event_name}")
+                logger.error(f"Hook queue full, dropped event: {event_name}")
                 await self._send_alert(f"⚠️ Event Hooks: Queue full, dropped event '{event_name}'")
                 return 0
         except asyncio.QueueFull:
@@ -367,8 +402,8 @@ class EventHooks(commands.Cog):
         
         event_history = [h for h in self.hook_history if h["event"] == event_name]
         if len(event_history) > self.max_history_per_event:
-            events_to_remove = event_history[:-self.max_history_per_event]
-            self.hook_history = [h for h in self.hook_history if h not in events_to_remove]
+            to_remove = {id(h) for h in event_history[:-self.max_history_per_event]}
+            self.hook_history = [h for h in self.hook_history if id(h) not in to_remove]
     
     @commands.Cog.listener()
     async def on_ready(self):
@@ -526,6 +561,7 @@ class EventHooks(commands.Cog):
             channel = ctx.channel
         
         self.alert_channel_id = channel.id
+        self._save_config()
         await ctx.send(f"✅ Event Hooks alert channel set to {channel.mention}", ephemeral=True)
     
     @commands.hybrid_command(name="eh_reset_circuit", help="Reset circuit breaker for a hook (Bot Owner Only)")

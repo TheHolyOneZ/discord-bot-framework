@@ -191,6 +191,7 @@ from discord.ext import commands
 from discord import app_commands
 import discord
 import logging
+import logging.handlers
 import inspect
 import traceback
 import asyncio
@@ -290,7 +291,10 @@ class SlashLimiter(commands.Cog):
             self._debug_logger.setLevel(logging.DEBUG)
             self._debug_logger.handlers.clear()
             
-            self._debug_file_handler = logging.FileHandler(self.debug_log_path, mode="a", encoding="utf-8")
+            self._debug_file_handler = logging.handlers.RotatingFileHandler(
+                self.debug_log_path, mode="a", encoding="utf-8",
+                maxBytes=5 * 1024 * 1024, backupCount=2
+            )
             self._debug_file_handler.setLevel(logging.DEBUG)
             formatter = logging.Formatter("[%(asctime)s] [%(levelname)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
             self._debug_file_handler.setFormatter(formatter)
@@ -852,7 +856,8 @@ class SlashLimiter(commands.Cog):
     async def _on_extension_unloaded_hook(self, bot, extension_name, **kwargs):
         pass
     
-    @commands.hybrid_command(name="slashlimit", help="Check slash command usage and limits")
+    @commands.hybrid_command(name="slashlimit", help="Check slash command usage and limits (Bot Owner Only)")
+    @commands.is_owner()
     @commands.cooldown(1, 10, commands.BucketType.user)
     async def slash_limit_command(self, ctx):
         status = await self.check_slash_command_limit()

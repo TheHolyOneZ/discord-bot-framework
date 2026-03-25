@@ -9,7 +9,7 @@ from discord import app_commands
 import logging
 from typing import Optional, Literal
 
-logger = logging.getLogger('discord')
+logger = logging.getLogger('discord.cogs.Guild_settings')
 
 
 class GuildSettings(commands.Cog):
@@ -50,29 +50,14 @@ class GuildSettings(commands.Cog):
             !mentionprefix status  - Check current setting
         """
         action = action.lower()
-        
-        if action not in ['enable', 'disable', 'status']:
-            embed = discord.Embed(
-                title="❌ Invalid Action",
-                description="Please use: `enable`, `disable`, or `status`",
-                color=0xff0000
-            )
-            embed.add_field(
-                name="📖 Usage Examples",
-                value=(
-                    "```\n"
-                    f"{ctx.prefix}mentionprefix enable\n"
-                    f"{ctx.prefix}mentionprefix disable\n"
-                    f"{ctx.prefix}mentionprefix status\n"
-                    "```"
-                ),
-                inline=False
-            )
-            await ctx.send(embed=embed)
-            return
-        
+
         # Get current setting
-        current_setting = await self.bot.db.get_guild_mention_prefix_enabled(ctx.guild.id)
+        try:
+            current_setting = await self.bot.db.get_guild_mention_prefix_enabled(ctx.guild.id)
+        except Exception as e:
+            logger.error(f"GuildSettings: DB error in mention_prefix: {e}")
+            await ctx.send("❌ Could not read guild settings — please try again.", ephemeral=True)
+            return
         if current_setting is None:
             # No guild setting, using global default
             global_default = self.bot.config.get("allow_mention_prefix", True)
@@ -135,7 +120,12 @@ class GuildSettings(commands.Cog):
                 return
             
             # Enable mention prefix
-            await self.bot.db.set_guild_mention_prefix_enabled(ctx.guild.id, True)
+            try:
+                await self.bot.db.set_guild_mention_prefix_enabled(ctx.guild.id, True)
+            except Exception as e:
+                logger.error(f"GuildSettings: DB error enabling mention prefix: {e}")
+                await ctx.send("❌ Could not update guild settings — please try again.", ephemeral=True)
+                return
             
             embed = discord.Embed(
                 title="✅ Mention Prefix Enabled",
@@ -168,7 +158,12 @@ class GuildSettings(commands.Cog):
                 return
             
             # Disable mention prefix
-            await self.bot.db.set_guild_mention_prefix_enabled(ctx.guild.id, False)
+            try:
+                await self.bot.db.set_guild_mention_prefix_enabled(ctx.guild.id, False)
+            except Exception as e:
+                logger.error(f"GuildSettings: DB error disabling mention prefix: {e}")
+                await ctx.send("❌ Could not update guild settings — please try again.", ephemeral=True)
+                return
             
             embed = discord.Embed(
                 title="⚠️ Mention Prefix Disabled",
@@ -206,7 +201,12 @@ class GuildSettings(commands.Cog):
         )
         
         # Get custom prefix
-        custom_prefix = await self.bot.db.get_guild_prefix(ctx.guild.id)
+        try:
+            custom_prefix = await self.bot.db.get_guild_prefix(ctx.guild.id)
+        except Exception as e:
+            logger.error(f"GuildSettings: DB error in server_settings: {e}")
+            await ctx.send("❌ Could not read guild settings — please try again.", ephemeral=True)
+            return
         if custom_prefix:
             prefix_text = f"Custom: `{custom_prefix}`"
         else:
@@ -220,7 +220,11 @@ class GuildSettings(commands.Cog):
         )
         
         # Get mention prefix setting
-        mention_enabled = await self.bot.db.get_guild_mention_prefix_enabled(ctx.guild.id)
+        try:
+            mention_enabled = await self.bot.db.get_guild_mention_prefix_enabled(ctx.guild.id)
+        except Exception as e:
+            logger.error(f"GuildSettings: DB error fetching mention prefix in server_settings: {e}")
+            mention_enabled = None
         if mention_enabled is None:
             # Using global default
             global_default = self.bot.config.get("allow_mention_prefix", True)
