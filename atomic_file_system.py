@@ -580,7 +580,10 @@ class SafeConfig:
                 "enable_event_hooks": True,
                 "enable_plugin_registry": True,
                 "enable_framework_diagnostics": True,
-                "enable_slash_command_limiter": True
+                "enable_slash_command_limiter": True,
+                "enable_db_migrations": True,
+                "enable_task_scheduler": True,
+                "enable_config_validator": True
             }
         }
         

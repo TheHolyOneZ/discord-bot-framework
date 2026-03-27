@@ -100,7 +100,7 @@ class PrefixCache:
             for gid in expired:
                 del self._cache[gid]
 
-BOT_OWNER_ONLY_COMMANDS = ["reload", "load", "unload", "sync", "atomictest", "cachestats", "shardinfo", "dbstats", "integritycheck", "cleanup", "shardmonitor", "sharddetails", "shardhealth", "shardalerts", "shardreset", "clusters", "ipcstatus", "broadcastmsg"]
+BOT_OWNER_ONLY_COMMANDS = ["reload", "load", "unload", "sync", "atomictest", "cachestats", "shardinfo", "dbstats", "integritycheck", "cleanup", "shardmonitor", "sharddetails", "shardhealth", "shardalerts", "shardreset", "clusters", "ipcstatus", "broadcastmsg", "fw_migrations", "fw_migrate", "fw_config_validate", "fw_config_schema"]
 
 
 def is_bot_owner():
@@ -219,7 +219,7 @@ class BotFrameWork(commands.AutoShardedBot):
             logger.info("Created cogs directory for framework modules")
             return
         
-        load_order = ["event_hooks", "plugin_registry", "framework_diagnostics", "shard_monitor", "shard_manager"]
+        load_order = ["event_hooks", "plugin_registry", "framework_diagnostics", "shard_monitor", "shard_manager", "db_migrations", "task_scheduler", "config_validator"]
         
         for cog_name in load_order:
             cog_file = cogs_path / f"{cog_name}.py"

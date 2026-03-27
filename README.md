@@ -22,7 +22,12 @@
 </p>
 
 <p align="center">
-  **✨ NEW (v1.9.0.0): AI Assistant dashboard tab + EventHooksCreater overhaul + Plugin Registry upgrade**
+  **✨ NEW (v1.9.3.0): Database Migrations + Persistent Task Scheduler + Config Schema Validation**
+  <br>Three new framework cogs: <strong>Database Migrations</strong> — versioned sequential schema migrations with auto-run on startup, tracking table, and extension API. <strong>Task Scheduler</strong> — persistent cron-based scheduling (message/hook/log) that survives restarts, with programmatic API for extensions. <strong>Config Validator</strong> — validates config.json against a defined schema on every boot, with extension-registrable schemas.
+</p>
+
+<p align="center">
+  **✨ PREVIOUS (v1.9.0.0): AI Assistant dashboard tab + EventHooksCreater overhaul + Plugin Registry upgrade**
   <br>Brand-new <strong>GeminiServiceHelper</strong> cog adds an AES-256-CBC encrypted AI chat tab directly inside the Live Monitor dashboard — no slash commands required. EventHooksCreater fully implemented (leveling, tickets, voice channels, scheduled announcements, dynamic voice) with new `/hooks` slash commands. Plugin Registry now enforces dependencies for real, persists config across restarts, and paginates plugin lists.
 </p>
 
@@ -91,6 +96,9 @@ No PHP hosting required • Instant setup • All features included
   - [📊 Shard Monitor Commands](#-shard-monitor-commands)
   - [🌐 Shard Manager Commands](#-shard-manager-commands)
   - [💾 Backup & Restore Commands](#-backup--restore-commands)
+  - [🗄️ Database Migration Commands](#️-database-migration-commands)
+  - [⏰ Task Scheduler Commands](#-task-scheduler-commands)
+  - [📋 Config Validator Commands](#-config-validator-commands)
   - [🔧 Owner-Only Commands](#-owner-only-commands)
 - [🛒 Extension Marketplace](#-extension-marketplace)
 - [🔧 Creating Extensions](#-creating-extensions)
@@ -100,6 +108,9 @@ No PHP hosting required • Instant setup • All features included
 - [📊 Shard Monitor System](#-shard-monitor-system)
 - [🌐 Shard Manager System](#-shard-manager-system)
 - [💾 Backup & Restore System](#-backup--restore-system)
+- [🗄️ Database Migration System](#️-database-migration-system)
+- [⏰ Task Scheduler System](#-task-scheduler-system)
+- [📋 Config Validator System](#-config-validator-system)
 - [🛠 Troubleshooting](#-troubleshooting)
 - [📈 Performance Tips](#-performance-tips)
 - [📜 License](#-license)
@@ -640,6 +651,44 @@ Actions:
   - Audit logging for all sensitive operations
   - HTTPS recommended for production
   
+**Database Migration System** (`cogs/db_migrations.py`) — *NEW v1.9.3.0*
+- Versioned, sequential database schema migrations
+- Migration files in `./migrations/` as numbered Python files (`001_name.py`, `002_name.py`, ...)
+- Each file defines `async def up(db)` and a `description` string
+- **Auto-runs pending migrations on startup** — stops on first failure (sequential guarantee)
+- Tracking table `_schema_migrations` in main DB records applied/failed state
+- Failed migrations recorded with `success = 0` so `/fw_migrate` can retry after a fix
+- **Extension API:**
+  - `is_migration_applied(number)` — check if a migration has been applied
+  - `applied_migrations` / `failed_migrations` — read-only status properties
+- Ships with `migrations/001_add_scheduled_tasks.py` (creates table for Task Scheduler)
+- Commands: `/fw_migrations` (status), `/fw_migrate` (re-run pending)
+
+**Persistent Task Scheduler** (`cogs/task_scheduler.py`) — *NEW v1.9.3.0*
+- Cron-based scheduling that **persists to database** and survives bot restarts
+- Standard 5-field cron: `minute hour day month weekday`
+  - `"*/5 * * * *"` — every 5 minutes
+  - `"0 9 * * 1"` — every Monday at 9:00 AM
+  - `"0 0 * * *"` — daily at midnight
+- **Three task types:**
+  - `message` — send a message (with optional embed) to a target channel
+  - `hook` — emit a framework event hook via `bot.emit_hook()`
+  - `log` — write a log entry at a configurable level
+- `max_runs` support: auto-disables task after N executions
+- Scheduler tick every 30 seconds with same-minute deduplication
+- **Extension API:** `create_task_programmatic()` for other cogs/extensions
+- Commands: `/schedule create`, `/schedule list`, `/schedule delete`, `/schedule toggle`, `/schedule info`
+- Permission: bot owner or guild owner can create; creators can manage their own tasks
+
+**Config Schema Validator** (`cogs/config_validator.py`) — *NEW v1.9.3.0*
+- Validates `config.json` against a defined schema on every boot
+- Checks: types, required keys, numeric min/max, string length, enum choices, nested objects
+- Unknown keys produce **warnings** (not errors) — extension custom keys are allowed
+- Keys starting with `_comment` are silently skipped
+- **Extension API:** `register_extension_schema(name, schema)` / `unregister_extension_schema(name)`
+  - Extensions register their own config keys so they're validated instead of flagged "Unknown"
+- Commands: `/fw_config_validate` (run on-demand), `/fw_config_schema` (show full schema reference)
+
 ### 🛒 Integrated Extension Marketplace
 
 **Direct Extension Installation**
@@ -1024,6 +1073,9 @@ discord-bot-framework/
 │   ├── backup_restore.py        # Backup & Restore system
 │   ├── GeminiService.py         # AI assistant — slash commands (/ask_zdbf)
 │   ├── GeminiServiceHelper.py   # AI assistant — Live Monitor dashboard chat (NEW v1.9.0.0)
+│   ├── db_migrations.py         # Database migration system (NEW v1.9.3.0)
+│   ├── task_scheduler.py        # Persistent cron-based task scheduler (NEW v1.9.3.0)
+│   ├── config_validator.py      # Config schema validation (NEW v1.9.3.0)
 │   ├── SHARD_MONITOR_DOCS.md   # Shard Monitor documentation
 │   └── SHARD_MANAGER_DOCS.md   # Shard Manager documentation
 │
@@ -1087,6 +1139,9 @@ discord-bot-framework/
 │   ├── owner_db.php             # Database admin panel
 │   ├── backup_dashboard.php     # Bot backup interface
 │   └── assets/                  # Copied branding assets
+│
+├── migrations/                  # Database migration scripts (NEW v1.9.3.0)
+│   └── 001_add_scheduled_tasks.py  # Creates scheduled_tasks table
 │
 ├── config.json                  # Bot configuration (auto-generated)
 ├── .env                         # Environment variables (YOU CREATE THIS)
@@ -1337,6 +1392,30 @@ The Live Monitor dashboard includes a dedicated **AI Assistant** tab (tab 21) wi
 | Server Settings | Verification level, notification level, content filter, AFK timeout/channel, system channel, locale, boost bar |
 | **Member Roles** | **Per-member role assignments for all non-bot members (requires Members Intent)** |
 | Bot Settings | Custom prefix, mention prefix enabled/disabled |
+
+### 🗄️ Database Migration Commands
+
+| Command | Description | Access |
+|---------|-------------|--------|
+| `/fw_migrations` | Show migration status (applied, pending, failed) | Bot Owner |
+| `/fw_migrate` | Re-run pending migrations after fixing a failure | Bot Owner |
+
+### ⏰ Task Scheduler Commands
+
+| Command | Description | Access |
+|---------|-------------|--------|
+| `/schedule create` | Create a new scheduled task with cron expression | Bot/Guild Owner |
+| `/schedule list` | List scheduled tasks for this guild | Everyone |
+| `/schedule delete <id>` | Delete a scheduled task | Creator/Bot Owner |
+| `/schedule toggle <id>` | Enable/disable a scheduled task | Creator/Bot Owner |
+| `/schedule info <id>` | Show task details (cron, runs, next run) | Everyone |
+
+### 📋 Config Validator Commands
+
+| Command | Description | Access |
+|---------|-------------|--------|
+| `/fw_config_validate` | Validate config.json against the schema | Bot Owner |
+| `/fw_config_schema` | Show the full expected config schema reference | Bot Owner |
 
 ### 🔧 Owner-Only Commands
 
@@ -1776,6 +1855,168 @@ class DatabaseExtension(commands.Cog):
 async def setup(bot):
     await bot.add_cog(DatabaseExtension(bot))
 ```
+
+### Using Database Migrations in Extensions
+
+Extensions can add their own tables to `main.db` via the migration system. Create a migration file in `./migrations/`:
+
+**`migrations/002_add_user_preferences.py`:**
+```python
+"""
+Migration 002: Add user_preferences table for my extension
+"""
+description = "Create user_preferences table"
+
+async def up(db):
+    await db.conn.execute("""
+        CREATE TABLE IF NOT EXISTS user_preferences (
+            user_id INTEGER NOT NULL,
+            guild_id INTEGER NOT NULL,
+            theme TEXT DEFAULT 'default',
+            language TEXT DEFAULT 'en',
+            notifications INTEGER DEFAULT 1,
+            PRIMARY KEY (user_id, guild_id)
+        )
+    """)
+    await db.conn.commit()
+```
+
+**Then use it in your extension:**
+```python
+class MyExtension(commands.Cog):
+    def __init__(self, bot):
+        self.bot = bot
+
+    async def cog_load(self):
+        # Check that our migration was applied before using the table
+        migrations = self.bot.get_cog("Database Migrations")
+        if migrations and not migrations.is_migration_applied(2):
+            logger.warning("MyExtension: Migration 002 not applied — run /fw_migrate")
+
+    @commands.hybrid_command(name="settheme")
+    async def set_theme(self, ctx, theme: str):
+        conn = self.bot.db.conn  # main.db connection
+        await conn.execute(
+            "INSERT OR REPLACE INTO user_preferences (user_id, guild_id, theme) VALUES (?, ?, ?)",
+            (ctx.author.id, ctx.guild.id, theme)
+        )
+        await conn.commit()
+        await ctx.send(f"Theme set to {theme}")
+
+async def setup(bot):
+    await bot.add_cog(MyExtension(bot))
+```
+
+### Using the Task Scheduler from Extensions
+
+Extensions can create persistent scheduled tasks programmatically:
+
+```python
+class ReminderExtension(commands.Cog):
+    def __init__(self, bot):
+        self.bot = bot
+
+    async def cog_load(self):
+        scheduler = self.bot.get_cog("Task Scheduler")
+        if scheduler:
+            # Create a daily cleanup task (runs at midnight)
+            await scheduler.create_task_programmatic(
+                task_name="daily_cleanup",
+                cron_expression="0 0 * * *",
+                task_type="hook",
+                payload={"hook_name": "daily_cleanup", "data": {"source": "reminder_ext"}},
+            )
+
+    @commands.hybrid_command(name="remind")
+    async def remind(self, ctx, channel: discord.TextChannel, cron: str, *, message: str):
+        """Create a recurring reminder: !remind #general '0 9 * * 1' Weekly standup!"""
+        scheduler = self.bot.get_cog("Task Scheduler")
+        if not scheduler:
+            await ctx.send("Task Scheduler not available.")
+            return
+
+        task_id = await scheduler.create_task_programmatic(
+            task_name=f"reminder_{ctx.author.id}",
+            cron_expression=cron,
+            task_type="message",
+            guild_id=ctx.guild.id,
+            channel_id=channel.id,
+            creator_id=ctx.author.id,
+            payload={"content": message},
+        )
+        if task_id:
+            await ctx.send(f"Reminder created (ID: `{task_id}`)")
+        else:
+            await ctx.send("Failed to create reminder — check cron syntax.")
+
+async def setup(bot):
+    await bot.add_cog(ReminderExtension(bot))
+```
+
+### Registering Extension Config Schema
+
+Extensions can register their config keys so the validator recognizes them:
+
+```python
+class WeatherExtension(commands.Cog):
+    def __init__(self, bot):
+        self.bot = bot
+
+    async def cog_load(self):
+        validator = self.bot.get_cog("Config Validator")
+        if validator:
+            validator.register_extension_schema("weather", {
+                "weather": {
+                    "type": dict,
+                    "required": False,
+                    "default": {},
+                    "description": "Weather extension settings",
+                    "children": {
+                        "api_key": {
+                            "type": str,
+                            "required": True,
+                            "description": "OpenWeatherMap API key",
+                        },
+                        "default_city": {
+                            "type": str,
+                            "required": False,
+                            "default": "London",
+                            "description": "Default city for weather lookups",
+                        },
+                        "update_interval": {
+                            "type": int,
+                            "required": False,
+                            "default": 300,
+                            "description": "Weather cache refresh interval in seconds",
+                            "min": 60,
+                            "max": 3600,
+                        },
+                    },
+                },
+            })
+
+    def cog_unload(self):
+        validator = self.bot.get_cog("Config Validator")
+        if validator:
+            validator.unregister_extension_schema("weather")
+
+async def setup(bot):
+    await bot.add_cog(WeatherExtension(bot))
+```
+
+After registering, add your keys to `config.json`:
+```json
+{
+    "prefix": "!",
+    "weather": {
+        "api_key": "your-api-key-here",
+        "default_city": "Berlin",
+        "update_interval": 600
+    }
+}
+```
+
+Running `/fw_config_validate` will now validate your `weather` keys instead of flagging them as "Unknown".
 
 ### Integration with Atomic File System
 
@@ -2585,6 +2826,11 @@ View Database Stats:
 ### 📊 Framework Cogs System
 #### Overview
 **Framework cogs are internal system components that provide core functionality. They're located in ./cogs directory and are automatically loaded on startup (if enabled in config).**
+
+**15 framework cogs** are loaded in this order:
+`event_hooks` → `plugin_registry` → `framework_diagnostics` → `shard_monitor` → `shard_manager` → `db_migrations` → `task_scheduler` → `config_validator` → `GeminiService` → `GeminiServiceHelper` → `slash_command_limiter` → `live_monitor` → `backup_restore` → `dependency_fixer` → `guild_settings`
+
+Each cog can be enabled/disabled individually in `config.json` under the `framework` block.
 
 
 #### Event Hooks System
@@ -4082,6 +4328,255 @@ The restore engine is non-destructive and selective. It compares the backup snap
 7. Run `/backuppin <id>` to protect important backups
 8. Run `/backupverify <id>` to confirm integrity
 9. Run `/backupdiff <id_a> <id_b>` to compare two backups
+
+---
+
+## 🗄️ Database Migration System
+
+### Overview
+
+The Database Migration System (`cogs/db_migrations.py`) provides versioned, sequential database schema migrations for the framework. It tracks applied migrations in the main database, auto-runs pending migrations on startup, and exposes slash commands for status inspection.
+
+**All commands are restricted to the Bot Owner (`BOT_OWNER_ID` from `.env`).**
+
+### Enabling / Disabling
+
+```json
+{
+    "framework": {
+        "enable_db_migrations": true
+    }
+}
+```
+
+### How Migrations Work
+
+Migration files live in `./migrations/` as numbered Python files:
+```
+migrations/
+├── 001_add_scheduled_tasks.py
+├── 002_add_user_preferences.py
+└── 003_add_analytics_table.py
+```
+
+Each migration file must define:
+```python
+description = "Human-readable description of what this migration does"
+
+async def up(db):
+    """Apply this migration. db is a SafeDatabaseManager instance."""
+    await db.conn.execute("""
+        CREATE TABLE IF NOT EXISTS my_table (
+            id INTEGER PRIMARY KEY,
+            name TEXT NOT NULL
+        )
+    """)
+    await db.conn.commit()
+```
+
+### Migration Lifecycle
+
+1. **Startup**: Cog scans `./migrations/` for numbered `.py` files
+2. **Tracking**: Checks `_schema_migrations` table for already-applied migrations
+3. **Execution**: Runs pending migrations in numerical order
+4. **Stop-on-failure**: If any migration fails, subsequent migrations are skipped
+5. **Recording**: Each attempt (success or failure) is recorded in `_schema_migrations`
+6. **Retry**: Fix the issue, then run `/fw_migrate` to retry failed + remaining migrations
+
+### Commands
+
+| Command | Description |
+|---------|-------------|
+| `/fw_migrations` | Show all migration status — applied, pending, and failed |
+| `/fw_migrate` | Re-run pending migrations (useful after fixing a failure) |
+
+### Extension API
+
+Extensions can check migration status to verify their required tables exist:
+
+```python
+migrations = bot.get_cog("Database Migrations")
+
+# Check if a specific migration was applied
+if migrations and migrations.is_migration_applied(2):
+    # Table from migration 002 exists, safe to query
+
+# Read-only properties
+applied = migrations.applied_migrations   # List of applied migration dicts
+failed = migrations.failed_migrations     # List of failed migration dicts
+```
+
+### Creating a New Migration
+
+1. Create a new file: `./migrations/NNN_description.py` (e.g., `002_add_analytics.py`)
+2. Define `description` and `async def up(db):`
+3. Restart the bot or run `/fw_migrate` — the migration runs automatically
+4. Verify with `/fw_migrations`
+
+> **Important:** Migration numbers must be unique. Use sequential numbering (001, 002, 003...). Gaps are allowed but not recommended.
+
+---
+
+## ⏰ Task Scheduler System
+
+### Overview
+
+The Task Scheduler (`cogs/task_scheduler.py`) provides persistent cron-based scheduling that survives bot restarts. Tasks are stored in the `scheduled_tasks` database table (created by migration 001) and checked every 30 seconds.
+
+**Task creation requires Bot Owner or Guild Owner permissions.**
+
+### Enabling / Disabling
+
+```json
+{
+    "framework": {
+        "enable_task_scheduler": true
+    }
+}
+```
+
+### Cron Syntax
+
+Standard 5-field cron expressions:
+
+```
+┌───────────── minute (0-59)
+│ ┌───────────── hour (0-23)
+│ │ ┌───────────── day of month (1-31)
+│ │ │ ┌───────────── month (1-12)
+│ │ │ │ ┌───────────── day of week (0-6, 0=Monday)
+│ │ │ │ │
+* * * * *
+```
+
+| Expression | Description |
+|------------|-------------|
+| `* * * * *` | Every minute |
+| `*/5 * * * *` | Every 5 minutes |
+| `0 9 * * *` | Daily at 9:00 AM |
+| `0 9 * * 0` | Every Monday at 9:00 AM |
+| `0 0 1 * *` | First day of every month at midnight |
+| `0,30 * * * *` | Every half hour (minute 0 and 30) |
+| `0 9-17 * * 1-5` | Hourly during business hours, weekdays |
+
+### Task Types
+
+| Type | What it does |
+|------|-------------|
+| `message` | Sends a message (with optional embed) to a target channel |
+| `hook` | Emits a framework event hook via `bot.emit_hook()` |
+| `log` | Writes a log entry at a configurable level |
+
+### Commands
+
+| Command | Description | Access |
+|---------|-------------|--------|
+| `/schedule create` | Create a new scheduled task | Bot/Guild Owner |
+| `/schedule list` | List all tasks for this guild | Everyone |
+| `/schedule delete <id>` | Delete a task | Creator/Bot Owner |
+| `/schedule toggle <id>` | Enable or disable a task | Creator/Bot Owner |
+| `/schedule info <id>` | Show task details, next run time, run count | Everyone |
+
+### Extension API
+
+Extensions can create tasks programmatically:
+
+```python
+scheduler = bot.get_cog("Task Scheduler")
+if scheduler:
+    task_id = await scheduler.create_task_programmatic(
+        task_name="my_daily_task",
+        cron_expression="0 0 * * *",     # daily at midnight
+        task_type="hook",                  # emit a hook
+        guild_id=ctx.guild.id,
+        creator_id=ctx.author.id,
+        payload={"hook_name": "daily_cleanup", "data": {"source": "my_ext"}},
+        max_runs=30,                       # auto-disable after 30 runs (None = unlimited)
+    )
+```
+
+Returns `task_id` (UUID string) on success, `None` if cron is invalid.
+
+### How the Tick Loop Works
+
+1. Every **30 seconds**, the scheduler checks all enabled tasks
+2. For each task, it evaluates `CronParser.matches(cron, now)`
+3. Same-minute deduplication prevents double-firing
+4. After execution, `run_count` increments; if `run_count >= max_runs`, the task is auto-disabled
+5. All state is persisted to the database immediately
+
+---
+
+## 📋 Config Validator System
+
+### Overview
+
+The Config Validator (`cogs/config_validator.py`) validates your `config.json` against a comprehensive schema on every boot. It catches type errors, missing required keys, out-of-range values, and invalid choices before they cause runtime failures.
+
+**All commands are restricted to the Bot Owner (`BOT_OWNER_ID` from `.env`).**
+
+### Enabling / Disabling
+
+```json
+{
+    "framework": {
+        "enable_config_validator": true
+    }
+}
+```
+
+### What Gets Validated
+
+- **Type checking**: Ensures each key is the correct type (string, int, bool, dict, list)
+- **Required keys**: Reports errors for missing required keys
+- **Numeric bounds**: `min` / `max` constraints on integers and floats
+- **String choices**: Enum validation (e.g., `log_level` must be one of DEBUG/INFO/WARNING/ERROR/CRITICAL)
+- **Nested objects**: Recursively validates child keys inside dict-type config blocks
+- **Unknown keys**: Flagged as **warnings** (not errors) so custom extension keys are allowed
+- **Comment keys**: Keys starting with `_comment` are silently skipped
+
+### Commands
+
+| Command | Description |
+|---------|-------------|
+| `/fw_config_validate` | Run validation on-demand and show results |
+| `/fw_config_schema` | Display the full expected config schema reference |
+
+### Validation Results
+
+Results are categorized into three levels:
+- **Errors**: Must be fixed — type mismatches, missing required keys, out-of-range values
+- **Warnings**: Should review — unknown keys not in the schema
+- **Info**: Informational — successful checks, optional key defaults
+
+### Extension API
+
+Extensions can register their own config schemas so their keys are validated instead of flagged as "Unknown":
+
+```python
+# In cog_load():
+validator = bot.get_cog("Config Validator")
+if validator:
+    validator.register_extension_schema("my_ext", {
+        "my_ext_settings": {
+            "type": dict,
+            "required": False,
+            "default": {},
+            "description": "My extension config block",
+            "children": {
+                "api_key": {"type": str, "required": True, "description": "API key"},
+                "timeout": {"type": int, "required": False, "default": 30, "min": 5, "max": 300},
+            },
+        },
+    })
+
+# In cog_unload():
+validator = bot.get_cog("Config Validator")
+if validator:
+    validator.unregister_extension_schema("my_ext")
+```
+
+After registering, add your keys to `config.json` and they'll be validated on the next boot or `/fw_config_validate` run.
 
 ---
 
