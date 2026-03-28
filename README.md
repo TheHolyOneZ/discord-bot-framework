@@ -2,19 +2,16 @@
   <img src="assets/banner.png" alt="Zoryx Discord Bot Framework Banner" />
 </p>
 
-<h1 align="center">🤖 Zoryx Discord Bot Framework</h1>
+<h1 align="center">Zoryx Discord Bot Framework</h1>
 
 <p align="center">
-  <strong>Advanced • Modular • Production-Ready</strong>
+  <strong>Advanced &nbsp;·&nbsp; Modular &nbsp;·&nbsp; Production-Ready</strong>
 </p>
 
 <p align="center">
-  <a href="https://www.python.org/downloads/">
-    <img src="https://img.shields.io/badge/python-3.12+-blue.svg" />
-  </a>
-  <a href="https://github.com/Rapptz/discord.py">
-    <img src="https://img.shields.io/badge/discord.py-2.0+-blue.svg" />
-  </a>
+  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.12+-blue.svg" alt="Python 3.12+" /></a>
+  &nbsp;
+  <a href="https://github.com/Rapptz/discord.py"><img src="https://img.shields.io/badge/discord.py-2.0+-blue.svg" alt="discord.py 2.0+" /></a>
 </p>
 
 <p align="center">
@@ -22,45 +19,39 @@
 </p>
 
 <p align="center">
-  **✨ NEW (v1.9.3.0): Database Migrations + Persistent Task Scheduler + Config Schema Validation**
-  <br>Three new framework cogs: <strong>Database Migrations</strong> — versioned sequential schema migrations with auto-run on startup, tracking table, and extension API. <strong>Task Scheduler</strong> — persistent cron-based scheduling (message/hook/log) that survives restarts, with programmatic API for extensions. <strong>Config Validator</strong> — validates config.json against a defined schema on every boot, with extension-registrable schemas.
+  <a href="https://zsystem.net/zdbf/docs/">📚 Docs</a> &nbsp;·&nbsp;
+  <a href="https://zsync.eu/zdbf/">🌐 Website</a> &nbsp;·&nbsp;
+  <a href="https://zsync.eu/zdbf/feedback">💬 Feedback</a> &nbsp;·&nbsp;
+  <a href="https://github.com/TheHolyOneZ/discord-bot-framework">⭐ GitHub</a>
 </p>
-
-<p align="center">
-  **✨ PREVIOUS (v1.9.0.0): AI Assistant dashboard tab + EventHooksCreater overhaul + Plugin Registry upgrade**
-  <br>Brand-new <strong>GeminiServiceHelper</strong> cog adds an AES-256-CBC encrypted AI chat tab directly inside the Live Monitor dashboard — no slash commands required. EventHooksCreater fully implemented (leveling, tickets, voice channels, scheduled announcements, dynamic voice) with new `/hooks` slash commands. Plugin Registry now enforces dependencies for real, persists config across restarts, and paginates plugin lists.
-</p>
-
-<p align="center">
-  **✨ PREVIOUS (v1.8.0.0): Framework Diagnostics & GeminiService overhaul + Backup completeness**
-  <br>Framework Diagnostics gains persistent alert channel, rolling error-rate, rolling lag average, `/fw_history`, `/fw_errors`. GeminiService gets real rate-limiting, TTL cache, owner-only file security. Backup/Restore now fully restores forum channels, stage channels, emojis, stickers, and server settings with base64 image capture.
-</p>
-
-<p align="center">
-  **✨ PREVIOUS (v1.7.2.0): Bot Status Rotator**
-  <br>Fully configurable bot status rotation with multiple statuses, custom intervals, and dynamic variables, all manageable from the web dashboard.
-</p>
-
-<p align="center">
-  **🎯 PREVIOUS: @Mention Prefix & Per-Guild Configuration (v1.6.1.0)**
-  <br>Users can now invoke commands using @BotName, and server admins can configure bot behavior per-guild with the new Guild Settings cog!
-</p>
-
-<p align="center">
-  🌐 <a href="https://zsync.eu/zdbf/">Website</a>
-</p>
-<div align="center">
-
-## 🆕 NEW: Free Dashboard Hosting for ZDBF!
-
-**🚀 ZORYX DashHost** - Host your Zoryx Discord Bot Framework dashboard for FREE  
-No PHP hosting required • Instant setup • All features included
-
-🔗 [Get Started](https://zsync.eu/zframedash/) • 📺 [Watch Tutorial](https://www.youtube.com/watch?v=TfSIV4mc_fo)
 
 ---
 
-</div>
+> [!TIP]
+> **🚀 ZORYX DashHost** — Host your ZDBF dashboard completely **free**. No PHP required, instant setup, all features included.
+> [Get Started](https://zsync.eu/zframedash/) &nbsp;·&nbsp; [Watch Tutorial](https://www.youtube.com/watch?v=TfSIV4mc_fo)
+
+> [!NOTE]
+> **✨ v1.9.3.0** — Database Migrations + Persistent Task Scheduler + Config Schema Validation
+>
+> Three new framework cogs: **Database Migrations** — versioned sequential schema migrations with auto-run on startup, tracking table, and extension API. **Task Scheduler** — persistent cron-based scheduling (message/hook/log) that survives restarts, with programmatic API for extensions. **Config Validator** — validates `config.json` against a defined schema on every boot, with extension-registrable schemas.
+
+> **✨ v1.9.0.0** — AI Assistant dashboard tab + EventHooksCreater overhaul + Plugin Registry upgrade
+>
+> New **GeminiServiceHelper** cog adds an AES-256-CBC encrypted AI chat tab inside the Live Monitor dashboard. EventHooksCreater fully implemented (leveling, tickets, voice, scheduled announcements, dynamic voice) with new `/hooks` commands. Plugin Registry now enforces dependencies, persists config, and paginates plugin lists.
+
+> **✨ v1.8.0.0** — Framework Diagnostics & GeminiService overhaul + Backup completeness
+>
+> Framework Diagnostics gains persistent alert channel, rolling error-rate, rolling lag average, `/fw_history`, `/fw_errors`. GeminiService gets real rate-limiting, TTL cache, owner-only file security. Backup/Restore now fully restores forum channels, stage channels, emojis, stickers, and server settings with base64 image capture.
+
+> **✨ v1.7.2.0** — Bot Status Rotator
+>
+> Fully configurable bot status rotation with multiple statuses, custom intervals, and dynamic variables, all manageable from the web dashboard.
+
+> **🎯 v1.6.1.0** — @Mention Prefix & Per-Guild Configuration
+>
+> Users can now invoke commands using `@BotName`, and server admins can configure bot behavior per-guild with the new Guild Settings cog.
+
 ---
 
 ## 📑 Table of Contents
