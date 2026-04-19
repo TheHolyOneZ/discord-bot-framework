@@ -1391,7 +1391,7 @@ CMAKE_ARGS="-DGGML_CUDA=on" pip install llama-cpp-python --no-cache-dir
 | `Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf` | ~4.9 GB | ⭐⭐⭐⭐⭐ | If you have 8+ GB VRAM |
 | `Llama-3.2-1B-Instruct-Q8_0.gguf` | ~1.3 GB | ⭐⭐⭐ | Low-resource hosts |
 
-Download from [huggingface.co/bartowski](https://huggingface.co/bartowski) — search the model name above.
+Download from https://huggingface.co/hugging-quants/Llama-3.2-3B-Instruct-Q8_0-GGUF/tree/main — search the model name above.
 
 **3. Load the cog** (add to your cog load list or use the plugin registry):
 ```
