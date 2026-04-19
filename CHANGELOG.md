@@ -1,3 +1,79 @@
+## [Feature] — 2026-04-19 — v1.9.4.1 ✨ NEW
+
+### `cogs/ZExtensionAI.py` — Conversational Reply Engine
+
+**Upgrade to the ZExtensionAI cog.** All changes are backward-compatible — existing `!zai` / `/zai` commands and initial responses are unchanged. New behavior activates when a user replies to a bot ZAI message.
+
+**Intent classification:**
+- `_classify_reply_intent(text)` — distinguishes `"INSTALL"` (install/download/get/add/load), `"QUESTION"` (what/how/does/commands/tell me/etc. or `?`), and `"UNKNOWN"` (ignored silently).
+- `_QUESTION_RE` regex covers 30+ question-signal words; no more "always assume install intent."
+- `_INTEREST_RE` — separate lighter regex used to decide whether to show install buttons on follow-up answers (want/try/need/get/use/setup).
+
+**Context-aware follow-up answers (`_handle_followup_question`):**
+- `_fetch_ref_embed_text()` — fetches the bot's own previous embed (via `message.reference.resolved` or `channel.fetch_message`), strips portal/tip fields, injects the description + field values as `"Your previous response"` into the LLM prompt. The model now knows exactly what it said.
+- `_build_followup_prompt(question, extensions, history, previous_response)` — new `previous_response` parameter injected between extension data and conversation history.
+- `_fallback_followup(question, extensions)` — keyword-aware fallback (commands / version / author / status / setup) used when no LLM is available.
+
+**Smart extension scoping:**
+- `_pick_followup_extensions(text, extensions)` — resolves explicit name matches → ordinal words → anaphora ("it", "that one", "this") → all extensions. Returns a narrowed list.
+- On follow-up, tries current focused set first; if no match found, tries `all_extensions` (full original search results) so ordinal references still work mid-conversation.
+- Install path (`_handle_install_reply`) uses the same `_pick_followup_extensions` instead of the old `_pick_extension` (which always defaulted to index 0 — the root cause of wrong-extension installs).
+
+**Conversation history chaining:**
+- `_reply_store` entries now include `"history": []` (seeded by `_do_ask`).
+- After each follow-up answer, the new reply message ID is also stored in `_reply_store` with `"extensions": focused` (the narrowed set from this turn), `"all_extensions"` (original full set), and `"history"` capped at 8 entries (4 turns).
+- Conversations chain indefinitely — every reply is reply-able.
+
+**Conditional install buttons:**
+- `_ZAIResponseView` gains `show_install: bool = True` parameter.
+- Follow-up answers pass `show_install = bool(_INTEREST_RE.search(message.content))` — install buttons appear only when the user's message contains download intent words, not on pure questions.
+
+**User-facing awareness:**
+- Every AI response (initial `_do_ask` + every follow-up) now includes a `💬 Keep chatting` embed field with example prompts so users always know they can reply.
+
+**Bug fixes included:**
+- Wrong extension installed when replying "install that one" mid-conversation — caused by stale full result list in chain store defaulting to `extensions[0]`. Fixed by storing `focused` in chain and using `_pick_followup_extensions` in install path.
+
+---
+
+## [Feature] — 2026-04-19 — v1.9.4.0
+
+### `cogs/ZExtensionAI.py` — Local RAG-based Extension AI Assistant
+
+**Brand-new cog.** A fully local, offline-capable AI assistant that answers questions about extensions from the Zygnal Extension Portal. No cloud API key required — runs entirely on your own hardware using a downloaded `.gguf` model.
+
+**Architecture — Retrieval-Augmented Generation (RAG):**
+- On startup, fetches all extensions from the portal API and caches them to `data/zai_extension_cache.json`.
+- If `sentence-transformers` is installed, builds a local semantic embedding index (using `all-MiniLM-L6-v2`) for intelligent similarity search. Falls back to keyword search automatically if not available.
+- If a `.gguf` model is present in `models/` and `llama-cpp-python` is installed, loads the model in-process via `llama-cpp-python`. Supports CPU, AMD ROCm (`DGGML_HIPBLAS`), and NVIDIA CUDA builds.
+- Extension cache auto-refreshes every hour via a background task — new extensions added to the portal are picked up automatically with no restart required.
+
+**Commands (all hybrid — work as both slash commands and `!` prefix / `@bot` mention):**
+- `!zai <question>` / `/zai <question>` — Ask the AI anything about extensions (fallback, same as `ask`).
+- `!zai ask <question>` / `/zai ask` — Get an AI-generated recommendation or answer sourced from portal extension data.
+- `!zai find <keyword>` / `/zai find` — Search extensions by name, category, or keyword. Returns up to 6 results with descriptions and extracted commands.
+- `!zai list` / `/zai list` — Show all extensions grouped by status with a preview list.
+- `!zai status` / `/zai status` — Display engine status: extensions loaded, search mode, model loaded/name, last refresh time.
+- `!zai refresh` / `/zai refresh` — Force-refresh the extension cache from the portal API. **Bot Owner only.**
+
+**Prompt engineering:**
+- Top-K matched extensions (default 5) are injected into a structured Llama-3 instruct prompt.
+- Extension details (markdown) are stripped and trimmed to 900 chars per extension.
+- Slash commands found in extension details are extracted and highlighted so the LLM cites them exactly.
+- Temperature set to 0.25 for consistent, factual answers with minimal hallucination.
+
+**Graceful degradation:** Every component is independently optional. The cog loads and functions correctly with none, some, or all optional dependencies installed:
+- No `sentence-transformers` → keyword search.
+- No `.gguf` model or `llama-cpp-python` → keyword-based fallback answer (still useful).
+- No `aiohttp` (already in base requirements) → loads from cache file.
+
+**New files:**
+- `cogs/ZExtensionAI.py` — the cog.
+- `data/zai_extension_cache.json` — auto-created on first run.
+- `models/` — directory for `.gguf` model files (auto-created, gitignored).
+
+---
+
 ## [Fix] — 2026-03-07 -> 2026-03-25                v1.9.1.0 → v1.9.2.0
 
 41 confirmed bug fixes across 13 cogs

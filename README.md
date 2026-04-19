@@ -2,16 +2,19 @@
   <img src="assets/banner.png" alt="Zoryx Discord Bot Framework Banner" />
 </p>
 
-<h1 align="center">Zoryx Discord Bot Framework</h1>
+<h1 align="center">🤖 Zoryx Discord Bot Framework</h1>
 
 <p align="center">
-  <strong>Advanced &nbsp;·&nbsp; Modular &nbsp;·&nbsp; Production-Ready</strong>
+  <strong>Advanced • Modular • Production-Ready</strong>
 </p>
 
 <p align="center">
-  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.12+-blue.svg" alt="Python 3.12+" /></a>
-  &nbsp;
-  <a href="https://github.com/Rapptz/discord.py"><img src="https://img.shields.io/badge/discord.py-2.0+-blue.svg" alt="discord.py 2.0+" /></a>
+  <a href="https://www.python.org/downloads/">
+    <img src="https://img.shields.io/badge/python-3.12+-blue.svg" />
+  </a>
+  <a href="https://github.com/Rapptz/discord.py">
+    <img src="https://img.shields.io/badge/discord.py-2.0+-blue.svg" />
+  </a>
 </p>
 
 <p align="center">
@@ -19,39 +22,50 @@
 </p>
 
 <p align="center">
-  <a href="https://zsystem.net/zdbf/docs/">📚 Docs</a> &nbsp;·&nbsp;
-  <a href="https://zsync.eu/zdbf/">🌐 Website</a> &nbsp;·&nbsp;
-  <a href="https://zsync.eu/zdbf/feedback">💬 Feedback</a> &nbsp;·&nbsp;
-  <a href="https://github.com/TheHolyOneZ/discord-bot-framework">⭐ GitHub</a>
+  <strong>✨ NEW (v1.9.4.1): ZExtensionAI — Conversational Local AI for Your Extension Portal</strong>
+  <br><strong>ZExtensionAI</strong> turns your bot into a fully offline, local AI assistant for the Zygnal Extension Portal. No API key, no cloud — runs entirely on your own hardware with a <code>.gguf</code> model. <strong>v1.9.4.1</strong> makes it fully conversational: <strong>reply to any AI response to keep chatting.</strong> Ask follow-up questions, drill into a specific extension, say "install it" to download — the AI resolves "it" / "the second one" / extension names to the right target, reads its own previous embed as context, tracks up to 4 turns of history, classifies intent (question vs install) to show the right UI, and chains replies so the conversation never ends. Powered by <code>llama-cpp-python</code> (CPU / AMD ROCm / NVIDIA CUDA) + <code>sentence-transformers</code> for semantic search. Graceful degradation — works without a model. Commands: <code>!zai</code> / <code>/zai</code>.
 </p>
+
+<p align="center">
+  <strong>✨ PREVIOUS (v1.9.3.0): Database Migrations + Persistent Task Scheduler + Config Schema Validation</strong>
+  <br>Three new framework cogs: <strong>Database Migrations</strong> — versioned sequential schema migrations with auto-run on startup, tracking table, and extension API. <strong>Task Scheduler</strong> — persistent cron-based scheduling (message/hook/log) that survives restarts, with programmatic API for extensions. <strong>Config Validator</strong> — validates config.json against a defined schema on every boot, with extension-registrable schemas.
+</p>
+
+<p align="center">
+  **✨ PREVIOUS (v1.9.0.0): AI Assistant dashboard tab + EventHooksCreater overhaul + Plugin Registry upgrade**
+  <br>Brand-new <strong>GeminiServiceHelper</strong> cog adds an AES-256-CBC encrypted AI chat tab directly inside the Live Monitor dashboard — no slash commands required. EventHooksCreater fully implemented (leveling, tickets, voice channels, scheduled announcements, dynamic voice) with new `/hooks` slash commands. Plugin Registry now enforces dependencies for real, persists config across restarts, and paginates plugin lists.
+</p>
+
+<p align="center">
+  **✨ PREVIOUS (v1.8.0.0): Framework Diagnostics & GeminiService overhaul + Backup completeness**
+  <br>Framework Diagnostics gains persistent alert channel, rolling error-rate, rolling lag average, `/fw_history`, `/fw_errors`. GeminiService gets real rate-limiting, TTL cache, owner-only file security. Backup/Restore now fully restores forum channels, stage channels, emojis, stickers, and server settings with base64 image capture.
+</p>
+
+<p align="center">
+  **✨ PREVIOUS (v1.7.2.0): Bot Status Rotator**
+  <br>Fully configurable bot status rotation with multiple statuses, custom intervals, and dynamic variables, all manageable from the web dashboard.
+</p>
+
+<p align="center">
+  **🎯 PREVIOUS: @Mention Prefix & Per-Guild Configuration (v1.6.1.0)**
+  <br>Users can now invoke commands using @BotName, and server admins can configure bot behavior per-guild with the new Guild Settings cog!
+</p>
+
+<p align="center">
+  🌐 <a href="https://zsync.eu/zdbf/">Website</a>
+</p>
+<div align="center">
+
+## 🆕 NEW: Free Dashboard Hosting for ZDBF!
+
+**🚀 ZORYX DashHost** - Host your Zoryx Discord Bot Framework dashboard for FREE  
+No PHP hosting required • Instant setup • All features included
+
+🔗 [Get Started](https://zsync.eu/zframedash/) • 📺 [Watch Tutorial](https://www.youtube.com/watch?v=TfSIV4mc_fo)
 
 ---
 
-> [!TIP]
-> **🚀 ZORYX DashHost** — Host your ZDBF dashboard completely **free**. No PHP required, instant setup, all features included.
-> [Get Started](https://zsync.eu/zframedash/) &nbsp;·&nbsp; [Watch Tutorial](https://www.youtube.com/watch?v=TfSIV4mc_fo)
-
-> [!NOTE]
-> **✨ v1.9.3.0** — Database Migrations + Persistent Task Scheduler + Config Schema Validation
->
-> Three new framework cogs: **Database Migrations** — versioned sequential schema migrations with auto-run on startup, tracking table, and extension API. **Task Scheduler** — persistent cron-based scheduling (message/hook/log) that survives restarts, with programmatic API for extensions. **Config Validator** — validates `config.json` against a defined schema on every boot, with extension-registrable schemas.
-
-> **✨ v1.9.0.0** — AI Assistant dashboard tab + EventHooksCreater overhaul + Plugin Registry upgrade
->
-> New **GeminiServiceHelper** cog adds an AES-256-CBC encrypted AI chat tab inside the Live Monitor dashboard. EventHooksCreater fully implemented (leveling, tickets, voice, scheduled announcements, dynamic voice) with new `/hooks` commands. Plugin Registry now enforces dependencies, persists config, and paginates plugin lists.
-
-> **✨ v1.8.0.0** — Framework Diagnostics & GeminiService overhaul + Backup completeness
->
-> Framework Diagnostics gains persistent alert channel, rolling error-rate, rolling lag average, `/fw_history`, `/fw_errors`. GeminiService gets real rate-limiting, TTL cache, owner-only file security. Backup/Restore now fully restores forum channels, stage channels, emojis, stickers, and server settings with base64 image capture.
-
-> **✨ v1.7.2.0** — Bot Status Rotator
->
-> Fully configurable bot status rotation with multiple statuses, custom intervals, and dynamic variables, all manageable from the web dashboard.
-
-> **🎯 v1.6.1.0** — @Mention Prefix & Per-Guild Configuration
->
-> Users can now invoke commands using `@BotName`, and server admins can configure bot behavior per-guild with the new Guild Settings cog.
-
+</div>
 ---
 
 ## 📑 Table of Contents
@@ -84,6 +98,7 @@
   - [🪝 Event Hooks Commands](#-event-hooks-commands)
   - [📡 Live Monitor Commands](#-live-monitor-commands)
   - [🤖 AI Assistant Commands](#-ai-assistant-commands)
+  - [🧠 ZExtensionAI Commands](#-zextensionai-commands--v1940-)
   - [📊 Shard Monitor Commands](#-shard-monitor-commands)
   - [🌐 Shard Manager Commands](#-shard-manager-commands)
   - [💾 Backup & Restore Commands](#-backup--restore-commands)
@@ -1063,7 +1078,8 @@ discord-bot-framework/
 │   ├── shard_manager.py         # Multi-process IPC shard management
 │   ├── backup_restore.py        # Backup & Restore system
 │   ├── GeminiService.py         # AI assistant — slash commands (/ask_zdbf)
-│   ├── GeminiServiceHelper.py   # AI assistant — Live Monitor dashboard chat (NEW v1.9.0.0)
+│   ├── GeminiServiceHelper.py   # AI assistant — Live Monitor dashboard chat (v1.9.0.0)
+│   ├── ZExtensionAI.py          # Local RAG extension AI — /zai commands (NEW v1.9.4.0)
 │   ├── db_migrations.py         # Database migration system (NEW v1.9.3.0)
 │   ├── task_scheduler.py        # Persistent cron-based task scheduler (NEW v1.9.3.0)
 │   ├── config_validator.py      # Config schema validation (NEW v1.9.3.0)
@@ -1273,7 +1289,7 @@ discord-bot-framework/
 - **`readme`**: Ask a question about the bot's `README.md` file.
 - **`permission`**: (Owner Only) Manage permissions for the AI assistant.
 
-**Dashboard AI chat (`cogs/GeminiServiceHelper.py`) — v1.9.0.0 ✨ NEW:**
+**Dashboard AI chat (`cogs/GeminiServiceHelper.py`) — v1.9.0.0:**
 
 The Live Monitor dashboard includes a dedicated **AI Assistant** tab (tab 21) with a fully encrypted chat interface — no slash commands required.
 
@@ -1285,6 +1301,109 @@ The Live Monitor dashboard includes a dedicated **AI Assistant** tab (tab 21) wi
 | Markdown | Fenced code blocks, headers, bold, italic, inline code — no external deps |
 | Permissions | `view_gemini_chat` · `action_gemini_send` · `action_gemini_clear_history` · `action_gemini_config` |
 | Config | Owner can change Gemini model and system prompt live from the config drawer |
+
+---
+
+### 🧠 ZExtensionAI Commands — v1.9.4.1 ✨ NEW
+
+**Local RAG-based conversational AI (`cogs/ZExtensionAI.py`)** — no API key required, runs fully offline.
+
+> Requires a `.gguf` model placed in the `models/` folder. See [ZExtensionAI Setup](#zextensionai-setup) below.
+
+| Command | Description | Cooldown | Hybrid |
+|---------|-------------|----------|--------|
+| `!zai <question>` / `/zai <question>` | Ask the AI anything about Zygnal extensions (shorthand for `ask`) | 15s | ✅ |
+| `!zai ask <question>` / `/zai ask` | AI-powered answer sourced live from the portal extension database | 15s | ✅ |
+| `!zai find <keyword>` / `/zai find` | Search extensions by name, category, or keyword — up to 6 results with commands | — | ✅ |
+| `!zai list` / `/zai list` | Show all portal extensions grouped by status | — | ✅ |
+| `!zai status` / `/zai status` | Display AI engine status: model loaded, search mode, cache age | — | ✅ |
+| `!zai refresh` / `/zai refresh` | Force-refresh extension cache from portal API *(Owner only)* | — | ✅ |
+
+#### 💬 Conversational Replies (v1.9.4.1)
+
+Every AI response includes a **💬 Keep chatting** field. You can **reply directly to any bot message** to continue the conversation — no need to type `!zai` again.
+
+| What you say in a reply | What happens |
+|-------------------------|--------------|
+| *"what commands does it have?"* | AI answers with command list for the focused extension |
+| *"tell me more about the second one"* | Narrows context to that specific extension and answers |
+| *"how do I set it up?"* | Answers from the extension's setup details |
+| *"yo what does this one do?"* | General description of the current extension |
+| *"install it"* / *"download the first one"* | Bot owner: triggers install flow immediately |
+| *"install ZShield"* | Installs the named extension, skipping ambiguity |
+
+**How it works:**
+- **Intent classification** — distinguishes question replies from install intent; ignores unrelated messages silently
+- **Context-aware** — reads the bot's own previous embed so it knows exactly what it said before
+- **Smart scoping** — resolves "it", "that one", "the first one", "the second one", and explicit extension names to the right target
+- **Conversation history** — last 4 turns (8 messages) injected into every follow-up prompt so the AI remembers what was discussed
+- **Chained replies** — each AI answer is also reply-able, so conversations continue indefinitely
+- **Install buttons** — shown only when your message contains interest words (`want`, `try`, `need`, `install`, etc.), not on pure questions
+- **Owner-only installs** — install intent replies are gated to the bot owner; questions are open to everyone
+
+**Example session flow:**
+```
+You:  !zai ask what should I use for anti-nuke?
+Bot:  [embed with ZShield, ZBotGate, Global Ban System]
+      💬 Reply to this message — "what does this one do?", "install it", etc.
+
+You:  [reply] what does the second one do?
+Bot:  [follow-up embed about ZBotGate specifically]
+      💬 Reply to this message — ask anything or say install [name] to download.
+
+You:  [reply] what commands does it have?
+Bot:  [follow-up with ZBotGate's commands extracted from details]
+
+You:  [reply] can you install that one for me?
+Bot:  [downloads ZBotGate, loads it, shows result embed]
+```
+
+**Example queries:**
+- `!zai ask what extension should I use for moderation?`
+- `!zai ask what is the command to set up anti-nuke in ZShield?`
+- `!zai find wiki`
+- `!zai find logging`
+
+#### ZExtensionAI Setup
+
+**1. Install dependencies:**
+```bash
+# Semantic search (recommended):
+pip install sentence-transformers
+
+# Local LLM — choose ONE based on your hardware:
+
+# CPU only:
+pip install llama-cpp-python
+
+# AMD GPU (ROCm — EndeavourOS / Arch, RX 6000/7000 series):
+CMAKE_ARGS="-DGGML_HIPBLAS=on" pip install llama-cpp-python --no-cache-dir
+
+# NVIDIA GPU (CUDA):
+CMAKE_ARGS="-DGGML_CUDA=on" pip install llama-cpp-python --no-cache-dir
+```
+
+**2. Download a model** and place it in your bot's `models/` folder:
+
+| Model | Size | Quality | Use When |
+|-------|------|---------|----------|
+| `Llama-3.2-3B-Instruct-Q8_0.gguf` | ~3.4 GB | ⭐⭐⭐⭐ | Default recommendation |
+| `Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf` | ~4.9 GB | ⭐⭐⭐⭐⭐ | If you have 8+ GB VRAM |
+| `Llama-3.2-1B-Instruct-Q8_0.gguf` | ~1.3 GB | ⭐⭐⭐ | Low-resource hosts |
+
+Download from [huggingface.co/bartowski](https://huggingface.co/bartowski) — search the model name above.
+
+**3. Load the cog** (add to your cog load list or use the plugin registry):
+```
+models/
+└── Llama-3.2-3B-Instruct-Q8_0.gguf   ← place your model here
+cogs/
+└── ZExtensionAI.py                    ← already in cogs/
+```
+
+The bot will load the model on startup, fetch all 100+ extensions from the portal, and be ready to answer questions. No API keys, no external services, no internet needed after the first cache build.
+
+---
 
 ### 📊 Shard Monitor Commands
 
@@ -2819,7 +2938,7 @@ View Database Stats:
 **Framework cogs are internal system components that provide core functionality. They're located in ./cogs directory and are automatically loaded on startup (if enabled in config).**
 
 **15 framework cogs** are loaded in this order:
-`event_hooks` → `plugin_registry` → `framework_diagnostics` → `shard_monitor` → `shard_manager` → `db_migrations` → `task_scheduler` → `config_validator` → `GeminiService` → `GeminiServiceHelper` → `slash_command_limiter` → `live_monitor` → `backup_restore` → `dependency_fixer` → `guild_settings`
+`event_hooks` → `plugin_registry` → `framework_diagnostics` → `shard_monitor` → `shard_manager` → `db_migrations` → `task_scheduler` → `config_validator` → `GeminiService` → `GeminiServiceHelper` → `ZExtensionAI` → `slash_command_limiter` → `live_monitor` → `backup_restore` → `dependency_fixer` → `guild_settings`
 
 Each cog can be enabled/disabled individually in `config.json` under the `framework` block.
 
