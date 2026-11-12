@@ -1,20 +1,32 @@
+
+---
+
 > [!IMPORTANT]
 > **This repository is archived. ZDBF V2 is the new home of the framework:**
 > **https://github.com/TheHolyOneZ/ZDBF-V2**
 >
-> V2 is a full rewrite. It's an installable package for Python 3.12 to 3.14 with a single SQLite
-> database, a Components V2 interface and 15 grouped slash commands, so the old slash limiter is
-> no longer needed. Automations, the scheduler, backup and restore and the marketplace are all
-> rebuilt and more reliable.
+> ZDBF V2 is a complete rewrite and a major step forward:
+> - **Modern Python Support** – Installable package supporting Python 3.12–3.14.
+> - **Simplified Architecture** – Single SQLite database and a completely redesigned internal structure.
+> - **Improved Discord UI** – Components V2 interface and 15 grouped slash commands. The old slash command limiter is no longer needed.
+> - **Built-in Automations** – Redesigned automation engine and scheduler.
+> - **Backup & Restore** – More reliable backup, restoration and data management.
+> - **ZSync Marketplace** – Integrated extension marketplace with installation and management.
+> - **Better Performance & Reliability** – Improved error handling, maintainability and overall stability.
 >
-> **Upgrading from V1:** run `tools/migrate_v1.py` from V2. It imports your config, data, automations and
-> marketplace key. See [docs/MIGRATING.md](https://github.com/TheHolyOneZ/ZDBF-V2/blob/main/docs/MIGRATING.md).
+> **Upgrading from V1:**
+> Run `tools/migrate_v1.py` from the V2 repository to migrate your existing configuration, data, automations and marketplace key.
+> See the [Migration Guide](https://github.com/TheHolyOneZ/ZDBF-V2/blob/main/docs/MIGRATING.md).
 >
-> **Marketplace:** it is now the **ZSync Marketplace** (https://zsync.eu/extension/). Your old ZygnalID
-> becomes your **ZSync ZDBF Key** automatically, and activated keys keep working. New keys are activated at
-> https://zsync.eu/extension/activate.php.
+> **Marketplace Migration:**
+> The old marketplace has been replaced by the **[ZSync Marketplace](https://zsync.eu/extension/)**.
+> - Your existing ZygnalID automatically becomes your **ZSync ZDBF Key**.
+> - Previously activated keys remain valid.
+> - New keys can be activated at https://zsync.eu/extension/activate.php.
 >
-> This V1 code stays available as-is but won't get updates or fixes.
+> **ZDBF V1 is permanently archived.** This repository will remain publicly available as-is, but will no longer receive updates, maintenance or bug fixes.
+>
+> All future development takes place in **ZDBF V2**.
 
 
 
